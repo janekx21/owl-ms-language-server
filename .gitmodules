@@ -1,0 +1,3 @@
+[submodule "tree-sitter-owl-ms"]
+	path = tree-sitter-owl-ms
+	url = https://github.com/janekx21/tree-sitter-owl-ms.git
