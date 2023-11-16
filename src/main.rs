@@ -148,33 +148,35 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        println!("{:?}", params.text_document_position_params);
-        Ok(Some(Hover {
-            contents: HoverContents::Scalar(MarkedString::String("Hello World".to_string())),
-            range: None,
-        }))
+        Ok(
+            if let Some(document) = self
+                .document_map
+                .get(&params.text_document_position_params.text_document.uri)
+            {
+                let position = params.text_document_position_params.position;
+                let byte_offset = document.rope.char_to_byte(
+                    document.rope.line_to_char(position.line as usize)
+                        + (position.character as usize),
+                );
+
+                let mut cursor = document.tree.root_node().walk();
+                for _ in 0..20 {
+                    cursor.goto_first_child_for_byte(byte_offset);
+                }
+                let node = cursor.node();
+                Some(Hover {
+                    contents: HoverContents::Scalar(MarkedString::String(node.kind().to_string())),
+                    range: None,
+                })
+            } else {
+                None
+            },
+        )
     }
 
     async fn shutdown(&self) -> Result<()> {
         Ok(())
     }
-}
-
-fn position_to_byte_offset(position: Position, text: &String) -> usize {
-    let mut line = 0;
-    let mut character = 0;
-    for (index, char) in text.char_indices() {
-        if char == '\n' {
-            line += 1;
-            character = 0;
-        } else {
-            character += 1;
-        }
-        if line == position.line && character == position.character {
-            return index;
-        }
-    }
-    panic!("Position out of bounds")
 }
 
 fn position_to_point(position: Position) -> Point {
