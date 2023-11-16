@@ -1,0 +1,86 @@
+Prefix: : <http://ex.com/owl/families#>
+Prefix: g: <http://ex.com/owl2/families#>
+
+Ontology: <http://example.com/owl/families> <http://example.com/owl/families-v1>
+  Import: <http://ex.com/owl2/families.owl>
+  Annotations: creator John, 
+               Annotations: rdfs:comment "Creation Year"
+                 creationYear 2008, 
+               mainClass Person
+
+  Class: peter
+    Annotations: foo bar
+
+  ObjectProperty: hasWife
+    Annotations: creator God
+    Characteristics: Functional, InverseFunctional, Reflexive, Irreflexive, Asymmetric, Transitive
+
+    Domain: Annotations: rdfs:comment "General domain",
+                         creator John
+              Person, 
+            Annotations: rdfs:comment "More specific domain"
+              Man
+    Range: Person, Woman
+    SubPropertyOf: hasSpouse, loves
+    EquivalentTo: isMarriedTo ,...
+    DisjointWith: hates ,...
+    InverseOf: hasSpouse, inverse hasSpouse
+    SubPropertyChain: Annotations: creator God hasChild o hasParent o...
+
+  DataProperty: hasAge
+    Annotations: creator God
+    Characteristics: Functional
+    Domain: Person ,...
+    Range: integer ,...
+    SubPropertyOf: hasVerifiedAge ,...
+    EquivalentTo: hasAgeInYears ,...
+    DisjointWith: hasSSN ,...
+
+  AnnotationProperty: creator
+    Annotations: creator God
+    Domain: Person ,...
+    Range: integer ,...
+    SubPropertyOf: initialCreator ,...
+
+  Datatype: NegInt
+    Annotations: creator God
+    EquivalentTo: integer[< 0]  
+
+  Class: Person
+    Annotations: rdfs:foobar yay
+    SubClassOf: owl:Thing that hasFirstName exactly 1 and hasFirstName only string[minLength 1]  ,...
+    SubClassOf: hasAge exactly 1 and hasAge only not NegInt,...
+    SubClassOf: hasGender exactly 1 and hasGender only {female , male} ,...
+    SubClassOf: hasSSN max 1, hasSSN min 1
+    SubClassOf: not hates Self, ...
+    EquivalentTo: g:People ,...
+    DisjointWith: g:Rock , g:Mineral ,...
+    DisjointUnionOf: Annotations: creator God Child, Adult
+    HasKey: Annotations: creator God hasSSN
+
+  Individual: John
+    Annotations: foo bar
+    Types: Person , hasFirstName value "John" or hasFirstName value "Jack"^^xsd:string
+    Facts: hasWife Mary, not hasChild Susan, hasAge 33, hasChild _:child1
+    SameAs: Jack ,...
+    DifferentFrom: Susan ,OtherHuman
+
+  Class: Julia
+    SubClassOf:
+      Person
+    DisjointWith:
+      John, OtherPerson
+    
+  Individual: _:child1
+    Annotations: creator God
+    Types: Person ,...
+    Facts: hasChild Susan ,...
+
+  DisjointClasses: Annotations: creator God g:Rock, g:Scissor, g:Paper
+  EquivalentProperties: Annotations: creator God hates, loathes, despises
+  DisjointProperties: Annotations: creator God hates, loves, indifferent
+  EquivalentProperties: Annotations: creator God favoriteNumber, g:favouriteNumber, g:favouriteInteger
+  DisjointProperties: Annotations: creator God favoriteInteger, favouriteReal
+  SameIndividual: Annotations: creator God John, Jack, Joe, Jim
+  DifferentIndividuals: Annotations: creator God John, Susan, Mary, Jill
+

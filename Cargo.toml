@@ -6,7 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+dashmap = "5.5.3"
+ropey = "1.6.1"
+tokio = {version = "1.34.0", features = ["macros", "rt-multi-thread", "io-util", "io-std"]}
+tower-lsp = "0.20.0"
 tree-sitter = "0.20.10"
+
 [build-dependencies]
 cc = "1.0"
 
