@@ -1,10 +1,6 @@
 use dashmap::DashMap;
 use ropey::Rope;
-use std::cell::Cell;
-use std::collections::HashMap;
-use std::fmt::Pointer;
-use std::ops::Index;
-use std::sync::{Arc, Mutex};
+use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -14,18 +10,16 @@ extern "C" {
     fn tree_sitter_owl_ms() -> Language;
 }
 
-// #[derive(Debug)]
 struct Backend {
     client: Client,
-    parser: Mutex<Parser>,
-    document_map: DashMap<Url, Document>,
+    parser: Mutex<Parser>, // stateful because of resume behavior after fail, timeout or cancellation
+    document_map: DashMap<Url, Document>, // async hash map
 }
 
 struct Document {
     tree: Tree,
     rope: Rope,
-    // version
-    // uri
+    // TODO version
 }
 
 #[tower_lsp::async_trait]
@@ -55,7 +49,8 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let mut parser_guard = self.parser.lock().unwrap();
+        let mut parser_guard = self.parser.lock().await;
+        parser_guard.reset();
         if let Some(tree) = parser_guard.parse(params.text_document.text.to_owned(), None) {
             self.document_map.insert(
                 params.text_document.uri,
@@ -71,15 +66,6 @@ impl LanguageServer for Backend {
         if let Some(mut document) = self.document_map.get_mut(&params.text_document.uri) {
             for change in params.content_changes {
                 if let Some(range) = change.range {
-                    // let (chunk, chunk_byte_idx, chunk_char_idx, chunk_line_idx) =
-                    // let tuple = document.rope.chunk_at_line_break(range.start.line as usize);
-                    self.client
-                        .log_message(
-                            MessageType::INFO,
-                            format!("lines is {}", document.rope.len_lines()),
-                        )
-                        .await;
-
                     let start_char = document
                         .rope
                         .try_line_to_char(range.start.line as usize)
@@ -92,16 +78,14 @@ impl LanguageServer for Backend {
                         .expect("line_idx out of bounds")
                         + (range.end.character as usize); // exclusive
 
-                    self.client
-                        .log_message(MessageType::INFO, format!("{start_char}..{old_end_char}"))
-                        .await;
-
-                    // must come before the document is changed!
+                    // must come before the rope is changed!
                     let old_end_byte = document.rope.char_to_byte(old_end_char);
 
+                    // rope replace
                     document.rope.remove(start_char..old_end_char);
                     document.rope.insert(start_char, &change.text);
 
+                    // this must come after the rope was changed!
                     let start_byte = document.rope.char_to_byte(start_char);
                     let new_end_byte = start_byte + change.text.len();
                     let new_end_line = document.rope.byte_to_line(new_end_byte);
@@ -121,30 +105,18 @@ impl LanguageServer for Backend {
                     };
                     document.tree.edit(&edit);
 
+                    let mut parser_guard = self.parser.lock().await;
+                    parser_guard.reset();
+                    if let Some(tree) =
+                        parser_guard.parse(document.rope.to_string(), Some(&document.tree))
                     {
-                        let mut parser_guard = self.parser.lock().unwrap(); // TODO remove unwrap
-                        if let Some(tree) =
-                            parser_guard.parse(document.rope.to_string(), Some(&document.tree))
-                        {
-                            document.tree = tree;
-                        };
-                    }
-
-                    self.client
-                        .log_message(
-                            MessageType::INFO,
-                            format!("tree is {}", document.tree.root_node().to_sexp()),
-                        )
-                        .await;
+                        document.tree = tree;
+                    };
                 } else {
                     todo!("full replace");
                 }
             }
         }
-        // if let Some(tree) = parser_guard.parse(params.text_document.text, None) {
-        //     println!("{}", tree.root_node().to_sexp());
-        //     trees_guard.insert(params.text_document.uri, tree);
-        // }
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -161,7 +133,7 @@ impl LanguageServer for Backend {
 
                 let mut cursor = document.tree.root_node().walk();
                 for _ in 0..20 {
-                    cursor.goto_first_child_for_byte(byte_offset);
+                    cursor.goto_first_child_for_byte(byte_offset); // brute force the recursive decent
                 }
                 let node = cursor.node();
                 Some(Hover {
@@ -202,6 +174,7 @@ async fn main() {
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
+
 #[test]
 fn test_parser() {
     let language = unsafe { tree_sitter_owl_ms() };
