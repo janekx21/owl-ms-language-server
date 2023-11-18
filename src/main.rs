@@ -1,8 +1,7 @@
-use std::collections::HashMap;
-use std::fmt::Debug;
-
 use dashmap::DashMap;
+use once_cell::sync::Lazy;
 use ropey::Rope;
+
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -12,6 +11,10 @@ use tree_sitter::{InputEdit, Language, Parser, Point, Query, QueryCursor, QueryM
 extern "C" {
     fn tree_sitter_owl_ms() -> Language;
 }
+
+static LANGUAGE: Lazy<Language> = Lazy::new(|| unsafe { tree_sitter_owl_ms() });
+
+type Iri = String;
 
 struct Backend {
     client: Client,
@@ -24,6 +27,7 @@ struct Document {
     tree: Tree,
     rope: Rope,
     // TODO version
+    class_iri_label_map: DashMap<Iri, String>,
 }
 
 #[tower_lsp::async_trait]
@@ -73,11 +77,14 @@ impl LanguageServer for Backend {
         let mut parser_guard = self.parser.lock().await;
         parser_guard.reset();
         if let Some(tree) = parser_guard.parse(params.text_document.text.to_owned(), None) {
+            let rope = Rope::from(params.text_document.text);
+            let class_iri_label_map = generate_class_iri_label_map(&tree, &rope);
             self.document_map.insert(
                 params.text_document.uri,
                 Document {
                     tree,
-                    rope: Rope::from(params.text_document.text),
+                    rope,
+                    class_iri_label_map,
                 },
             );
         }
@@ -131,6 +138,8 @@ impl LanguageServer for Backend {
                     if let Some(tree) =
                         parser_guard.parse(document.rope.to_string(), Some(&document.tree))
                     {
+                        document.class_iri_label_map =
+                            generate_class_iri_label_map(&tree, &document.rope);
                         document.tree = tree;
                     };
                 } else {
@@ -168,44 +177,15 @@ impl LanguageServer for Backend {
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
-        let language = unsafe { tree_sitter_owl_ms() };
         if let Some(document) = self.document_map.get(&params.text_document.uri) {
-            let iri_label_map = {
-                let class_frame_source = "
-                            (class_frame (class_iri (full_iri)@iri)\
-                                (annotation\
-                                    (annotation_property_iri (abbreviated_iri)@abbriviated-iri)\
-                                    [\
-                                        (string_literal_no_language)\
-                                        (string_literal_with_language)\
-                                        (typed_literal)\
-                                    ]@literal))";
-                // TODO do i need typed_literal?
-
-                let class_frame_query = Query::new(language, class_frame_source).unwrap();
-                let root = document.tree.root_node();
-                let mut query_cursor = QueryCursor::new();
-                let s = document.rope.to_string();
-                let bytes: &[u8] = s.as_bytes();
-                let matches = query_cursor.matches(&class_frame_query, root, bytes);
-                matches
-                    .filter(|m| {
-                        m.captures[1].node.utf8_text(bytes).expect("valid utf-8") == "rdfs:label"
-                    })
-                    .map(|m| {
-                        (
-                            m.captures[0].node.utf8_text(bytes).unwrap().to_owned(),
-                            m.captures[2].node.utf8_text(bytes).unwrap().to_owned(),
-                        )
-                    })
-                    .collect::<HashMap<String, String>>()
-            };
-
+            let iri_label_map = &document.class_iri_label_map;
             let inline_values = {
-                let language = unsafe { tree_sitter_owl_ms() };
-                let full_iri_query = Query::new(language, "(class_iri (full_iri)@iri)").unwrap();
+                let full_iri_query = Query::new(*LANGUAGE, "(class_iri (full_iri)@iri)").unwrap();
                 let root = document.tree.root_node();
                 let mut query_cursor = QueryCursor::new();
+                query_cursor.set_point_range(
+                    position_to_point(params.range.start)..position_to_point(params.range.end),
+                );
                 let s = document.rope.to_string();
                 let bytes: &[u8] = s.as_bytes();
                 let matches = query_cursor.matches(&full_iri_query, root, bytes);
@@ -254,57 +234,88 @@ impl LanguageServer for Backend {
     }
 
     async fn inline_value(&self, params: InlineValueParams) -> Result<Option<Vec<InlineValue>>> {
-        if let Some(document) = self.document_map.get(&params.text_document.uri) {
-            let inline_values = {
-                let language = unsafe { tree_sitter_owl_ms() };
-                let full_iri_query = Query::new(language, "(full_iri)").unwrap();
-                let root = document.tree.root_node();
-                let mut query_cursor = QueryCursor::new();
-                let s = document.rope.to_string();
-                let bytes: &[u8] = s.as_bytes();
-                let matches = query_cursor.matches(&full_iri_query, root, bytes);
-                matches
-                    .flat_map(|match_| match_.captures.iter())
-                    .map(|capture| {
-                        let node = capture.node;
-                        let start = node.start_position();
-                        let end = node.end_position();
-                        InlineValue::Text(InlineValueText {
-                            range: Range {
-                                start: point_to_positon(start),
-                                end: point_to_positon(end),
-                            },
-                            text: format!("INLINE kind: {} index: {}", node.kind(), capture.index),
-                        })
-                    })
-                    .collect::<Vec<InlineValue>>()
-            };
+        // TODO test inline value
+        // if let Some(document) = self.document_map.get(&params.text_document.uri) {
+        //     let inline_values = {
+        //         let language = unsafe { tree_sitter_owl_ms() };
+        //         let full_iri_query = Query::new(language, "(full_iri)").unwrap();
+        //         let root = document.tree.root_node();
+        //         let mut query_cursor = QueryCursor::new();
+        //         let s = document.rope.to_string();
+        //         let bytes: &[u8] = s.as_bytes();
+        //         let matches = query_cursor.matches(&full_iri_query, root, bytes);
+        //         matches
+        //             .flat_map(|match_| match_.captures.iter())
+        //             .map(|capture| {
+        //                 let node = capture.node;
+        //                 let start = node.start_position();
+        //                 let end = node.end_position();
+        //                 InlineValue::Text(InlineValueText {
+        //                     range: Range {
+        //                         start: point_to_positon(start),
+        //                         end: point_to_positon(end),
+        //                     },
+        //                     text: format!("INLINE kind: {} index: {}", node.kind(), capture.index),
+        //                 })
+        //             })
+        //             .collect::<Vec<InlineValue>>()
+        //     };
 
-            self.client
-                .log_message(MessageType::INFO, format!("{inline_values:?}"))
-                .await;
+        //     self.client
+        //         .log_message(MessageType::INFO, format!("{inline_values:?}"))
+        //         .await;
 
-            self.client
-                .show_message(MessageType::INFO, format!("{inline_values:?}"))
-                .await;
-            // for match_ in  {
-            //     for ele in match_.captures.iter() {
-            //         ele.node;
-            //     }
-            // }
+        //     self.client
+        //         .show_message(MessageType::INFO, format!("{inline_values:?}"))
+        //         .await;
+        //     // for match_ in  {
+        //     //     for ele in match_.captures.iter() {
+        //     //         ele.node;
+        //     //     }
+        //     // }
 
-            // TODO query for some full_iri
-            // TODO query for the rdfs:label of that iris frame
-            // TODO append the inline value
-            Ok(Some(inline_values))
-        } else {
-            Ok(None)
-        }
+        //     // TODO query for some full_iri
+        //     // TODO query for the rdfs:label of that iris frame
+        //     // TODO append the inline value
+        //     Ok(Some(inline_values))
+        // } else {
+        //     Ok(None)
+        // }
+        Ok(None)
     }
 
     async fn shutdown(&self) -> Result<()> {
         Ok(())
     }
+}
+
+fn generate_class_iri_label_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, String> {
+    // the typed literal is for the string type
+    let class_frame_source = "
+                            (class_frame (class_iri (full_iri)@iri)\
+                                (annotation\
+                                    (annotation_property_iri (abbreviated_iri)@abbriviated-iri)\
+                                    [\
+                                        (string_literal_no_language)\
+                                        (string_literal_with_language)\
+                                        (typed_literal)\
+                                    ]@literal))";
+
+    let class_frame_query = Query::new(*LANGUAGE, class_frame_source).unwrap();
+    let root = tree.root_node();
+    let mut query_cursor = QueryCursor::new();
+    let string = rope.to_string();
+    let bytes: &[u8] = string.as_bytes();
+    let matches = query_cursor.matches(&class_frame_query, root, bytes);
+    matches
+        .filter(|m| m.captures[1].node.utf8_text(bytes).expect("valid utf-8") == "rdfs:label")
+        .map(|m| {
+            (
+                m.captures[0].node.utf8_text(bytes).unwrap().to_owned(),
+                m.captures[2].node.utf8_text(bytes).unwrap().to_owned(),
+            )
+        })
+        .collect::<DashMap<Iri, String>>()
 }
 
 fn position_to_point(position: Position) -> Point {
@@ -326,9 +337,8 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let language = unsafe { tree_sitter_owl_ms() };
     let mut parser = Parser::new();
-    parser.set_language(language).unwrap();
+    parser.set_language(*LANGUAGE).unwrap();
 
     let (service, socket) = LspService::new(|client| Backend {
         client,
@@ -341,9 +351,8 @@ async fn main() {
 
 #[test]
 fn test_parser() {
-    let language = unsafe { tree_sitter_owl_ms() };
     let mut parser = Parser::new();
-    parser.set_language(language).unwrap();
+    parser.set_language(*LANGUAGE).unwrap();
 
     let source_code = "Ontology: Foobar";
     let tree = parser.parse(source_code, None).unwrap();

@@ -1,0 +1,15 @@
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+Ontology: <http://openenergy-platform.org/ontology/oeo/>
+	Class: <http://openenergy-platform.org/ontology/oeo/OEO_00000148>
+		Annotations: 
+			rdfs:label "emission factor"
+
+Class: <http://openenergy-platform.org/ontology/oeo/OEO_00000147>
+    Annotations: 
+        rdfs:label "emission"
+    
+    SubClassOf: 
+        <http://purl.obolibrary.org/obo/BFO_0000015>,
+        <http://openenergy-platform.org/ontology/oeo/OEO_00000500> some <http://openenergy-platform.org/ontology/oeo/OEO_00000148>
+    
