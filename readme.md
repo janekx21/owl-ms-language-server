@@ -49,3 +49,50 @@ Merge this setting into your `coc-settings.json` (open with `:CocConfig`).
 }
 ```
 See [the example config for testing](https://github.com/oxalica/nil/blob/main/dev/vim-coc.nix).
+
+## Roadmap
+
+### Done
+
+- diagnostic (only syntax)
+
+### Simple
+
+- hover (shows info from text under the cursor)
+- inlay_hint
+
+### Planned
+
+- goto_definition
+- document_symbol
+- code_action (all kinds of quick actions)
+- rename
+- references (shows all referenced locations)
+
+### Not planned
+
+- goto_declaration
+- goto_type_definition
+- goto_implementation
+- incoming_calls
+- outgoing_calls
+- supertypes
+- subtypes
+- document_highlight (highlights text that corresponds to text under the cursor)
+- document_link (all links in a document)
+- document_link_resolve (how to resolve a link)
+- code_lens
+- folding_range
+- selection_range
+- semantic_tokens
+- inline_value
+- moniker
+- completion
+- workspace_diagnostic
+- signature_help
+- document_color
+- color_presentation
+- formatting
+- on_type_formatting
+- linked_editing_range (ranges that have the same content)
+- symbol (project-wide symbol search)
