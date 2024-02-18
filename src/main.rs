@@ -1,18 +1,28 @@
+#![feature(async_closure, iter_intersperse)]
 use dashmap::DashMap;
+use log::info;
 use once_cell::sync::Lazy;
 use ropey::Rope;
-
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+use tokio::task;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-use tree_sitter::{InputEdit, Language, Parser, Point, Query, QueryCursor, QueryMatch, Tree};
+use tree_sitter::{InputEdit, Language, Parser, Point, Query, QueryCursor, Tree};
+use tree_sitter_owl_ms::language;
 
-extern "C" {
-    fn tree_sitter_owl_ms() -> Language;
-}
+static LANGUAGE: Lazy<Language> = Lazy::new(language);
+static NODE_TYPES: Lazy<DashMap<String, StaticNode>> = Lazy::new(|| {
+    let node_types: Vec<StaticNode> =
+        serde_json::from_str(tree_sitter_owl_ms::NODE_TYPES).expect("valid node types");
 
-static LANGUAGE: Lazy<Language> = Lazy::new(|| unsafe { tree_sitter_owl_ms() });
+    DashMap::<String, StaticNode>::from_iter(
+        node_types
+            .iter()
+            .map(|node| (node._type.clone(), (*node).clone())),
+    )
+});
 
 type Iri = String;
 
@@ -30,9 +40,32 @@ struct Document {
     class_iri_label_map: DashMap<Iri, String>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct StaticNode {
+    #[serde(rename = "type")]
+    _type: String,
+    named: bool,
+    // fields: Vec<??> // TODO when needed
+    #[serde(default)]
+    children: StaticNodeChildren,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+struct StaticNodeChildren {
+    multiple: bool,
+    required: bool,
+    types: Vec<StaticNode>,
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        self.client
+            .log_message(MessageType::INFO, "initialize called")
+            .await;
+
         let encodings = params
             .capabilities
             .general
@@ -60,27 +93,27 @@ impl LanguageServer for Backend {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 position_encoding: Some(encoding),
                 inlay_hint_provider: Some(OneOf::Left(true)),
-                inline_value_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
-            ..Default::default()
         })
     }
 
-    async fn initialized(&self, _: InitializedParams) {
+    async fn initialized(&self, _params: InitializedParams) {
         self.client
             .log_message(MessageType::INFO, "server initialized!")
             .await;
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        log_to_client(&self.client, "did open".to_string());
+
         let mut parser_guard = self.parser.lock().await;
         parser_guard.reset();
-        if let Some(tree) = parser_guard.parse(params.text_document.text.to_owned(), None) {
+        if let Some(tree) = parser_guard.parse(&params.text_document.text, None) {
             let rope = Rope::from(params.text_document.text);
             let class_iri_label_map = generate_class_iri_label_map(&tree, &rope);
             self.document_map.insert(
-                params.text_document.uri,
+                params.text_document.uri.clone(),
                 Document {
                     tree,
                     rope,
@@ -88,6 +121,15 @@ impl LanguageServer for Backend {
                 },
             );
         }
+
+        let backend = self;
+        let uri = params.text_document.uri.clone();
+        let diagnostics = gen_diagostics(backend, &uri);
+
+        backend
+            .client
+            .publish_diagnostics(uri.clone(), diagnostics, None)
+            .await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -147,9 +189,20 @@ impl LanguageServer for Backend {
                 }
             }
         }
+
+        let uri = params.text_document.uri;
+        let diagnostics = gen_diagostics(self, &uri);
+
+        self.client
+            .publish_diagnostics(uri.clone(), diagnostics, None)
+            .await;
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        self.client.log_message(MessageType::WARNING, "hover").await;
+
+        info!("hover");
+
         Ok(
             if let Some(document) = self
                 .document_map
@@ -214,74 +267,10 @@ impl LanguageServer for Backend {
                     .collect::<Vec<InlayHint>>()
             };
 
-            self.client
-                .log_message(MessageType::INFO, format!("{inline_values:?}"))
-                .await;
-
-            self.client
-                .show_message(MessageType::INFO, format!("{inline_values:?}"))
-                .await;
-            // for match_ in  {
-            //     for ele in match_.captures.iter() {
-            //         ele.node;
-            //     }
-            // }
-
             Ok(Some(inline_values))
         } else {
             Ok(None)
         }
-    }
-
-    async fn inline_value(&self, params: InlineValueParams) -> Result<Option<Vec<InlineValue>>> {
-        // TODO test inline value
-        // if let Some(document) = self.document_map.get(&params.text_document.uri) {
-        //     let inline_values = {
-        //         let language = unsafe { tree_sitter_owl_ms() };
-        //         let full_iri_query = Query::new(language, "(full_iri)").unwrap();
-        //         let root = document.tree.root_node();
-        //         let mut query_cursor = QueryCursor::new();
-        //         let s = document.rope.to_string();
-        //         let bytes: &[u8] = s.as_bytes();
-        //         let matches = query_cursor.matches(&full_iri_query, root, bytes);
-        //         matches
-        //             .flat_map(|match_| match_.captures.iter())
-        //             .map(|capture| {
-        //                 let node = capture.node;
-        //                 let start = node.start_position();
-        //                 let end = node.end_position();
-        //                 InlineValue::Text(InlineValueText {
-        //                     range: Range {
-        //                         start: point_to_positon(start),
-        //                         end: point_to_positon(end),
-        //                     },
-        //                     text: format!("INLINE kind: {} index: {}", node.kind(), capture.index),
-        //                 })
-        //             })
-        //             .collect::<Vec<InlineValue>>()
-        //     };
-
-        //     self.client
-        //         .log_message(MessageType::INFO, format!("{inline_values:?}"))
-        //         .await;
-
-        //     self.client
-        //         .show_message(MessageType::INFO, format!("{inline_values:?}"))
-        //         .await;
-        //     // for match_ in  {
-        //     //     for ele in match_.captures.iter() {
-        //     //         ele.node;
-        //     //     }
-        //     // }
-
-        //     // TODO query for some full_iri
-        //     // TODO query for the rdfs:label of that iris frame
-        //     // TODO append the inline value
-        //     Ok(Some(inline_values))
-        // } else {
-        //     Ok(None)
-        // }
-        Ok(None)
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -334,6 +323,8 @@ fn point_to_positon(point: Point) -> Position {
 
 #[tokio::main]
 async fn main() {
+    env_logger::init();
+
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
@@ -365,9 +356,10 @@ fn test_parser() {
 
 #[test]
 fn test_class_annotation_query() {
-    let language = unsafe { tree_sitter_owl_ms() };
+    use tree_sitter::QueryMatch;
+
     let mut parser = Parser::new();
-    parser.set_language(language).unwrap();
+    parser.set_language(*LANGUAGE).unwrap();
 
     let source_code = "
 Ontology: <http://foo.bar>
@@ -383,7 +375,7 @@ Ontology: <http://foo.bar>
                                     (annotation_property_iri (abbreviated_iri)@abbriviated-iri)\
                                     (string_literal_no_language)@literal))";
 
-    let class_frame_query = Query::new(language, query_source).unwrap();
+    let class_frame_query = Query::new(*LANGUAGE, query_source).unwrap();
     let root = tree.root_node();
     let mut query_cursor = QueryCursor::new();
     let bytes: &[u8] = source_code.as_bytes();
@@ -402,4 +394,163 @@ Ontology: <http://foo.bar>
             .expect("valid utf-8"),
         "rdfs:label"
     );
+}
+
+fn log_to_client(client: &Client, msg: String) -> task::JoinHandle<()> {
+    let c = client.clone();
+    task::spawn(async move {
+        c.log_message(MessageType::INFO, msg).await;
+    })
+}
+
+fn gen_diagostics(backend: &Backend, uri: &Url) -> Vec<Diagnostic> {
+    if let Some(doc) = backend.document_map.get(uri) {
+        // let s = doc.rope.to_string();
+        // let bytes: &[u8] = s.as_bytes();
+
+        let mut cursor = doc.tree.walk();
+        let mut diagnostics = Vec::<Diagnostic>::new();
+
+        let mut working = true;
+        while working {
+            let node = cursor.node();
+
+            if node.is_error() {
+                // log
+                let range = cursor.node().range();
+                let parent_kind = node.parent().expect("has a parent").kind();
+
+                let static_node = NODE_TYPES
+                    .get(parent_kind)
+                    .expect("node to be in NODE_TYPES");
+
+                let valid_children: String = static_node
+                    .children
+                    .types
+                    .iter()
+                    .map(|sn| node_type_to_string(&sn._type))
+                    .intersperse(", ".to_string())
+                    .collect();
+
+                // let text = node.utf8_text(bytes).unwrap();
+                let parent = node_type_to_string(parent_kind);
+                let msg = format!("Syntax Error. expected {valid_children} inside {parent}");
+
+                diagnostics.push(Diagnostic {
+                    range: Range {
+                        start: point_to_positon(range.start_point),
+                        end: point_to_positon(range.end_point),
+                    },
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("owl language server".to_string()),
+                    message: msg.to_string(),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                });
+                // move along
+                while !cursor.goto_next_sibling() {
+                    log_to_client(&backend.client, "goto next sibling".to_string());
+
+                    // move out
+                    if !cursor.goto_parent() {
+                        log_to_client(&backend.client, "found root".to_string());
+                        working = false; // this node has no parent, its the root
+                        break;
+                    }
+                    log_to_client(&backend.client, "goto next sibling".to_string());
+                }
+            } else if node.has_error() {
+                // move in
+                let has_child = cursor.goto_first_child(); // should alwayes work
+                debug_assert!(
+                    has_child,
+                    "nodes that have errors but are not errors should have children"
+                );
+                log_to_client(&backend.client, "goto first child".to_string());
+            } else {
+                // move along
+                while !cursor.goto_next_sibling() {
+                    log_to_client(&backend.client, "goto next sibling".to_string());
+
+                    // move out
+                    if !cursor.goto_parent() {
+                        log_to_client(&backend.client, "found root".to_string());
+                        working = false; // this node has no parent, its the root
+                        break;
+                    }
+                    log_to_client(&backend.client, "goto next sibling".to_string());
+                }
+            }
+
+            // if node.child_count() == 0 {
+            //     if node.has_error() || node.is_error() {
+            //         let range = cursor.node().range();
+            //         let parent_kind = node.parent().expect("has a parent").kind();
+            //         let text = node.utf8_text(bytes).unwrap();
+
+            //         let msg =
+            //             format!("Syntax error. The node {parent_kind} does not expect {text}");
+
+            //         diagnostics.push(Diagnostic {
+            //             range: Range {
+            //                 start: point_to_positon(range.start_point),
+            //                 end: point_to_positon(range.end_point),
+            //             },
+            //             severity: Some(DiagnosticSeverity::ERROR),
+            //             code: None,
+            //             code_description: None,
+            //             source: Some("owl language server".to_string()),
+            //             message: msg.to_string(),
+            //             related_information: None,
+            //             tags: None,
+            //             data: None,
+            //         });
+            //         // move out
+            //         if !cursor.goto_parent() {
+            //             log_to_client(&backend.client, "found root".to_string());
+            //             working = false; // this node has no parent, its the root
+            //         }
+            //     }
+
+            //     // move along
+            //     while !cursor.goto_next_sibling() {
+            //         log_to_client(&backend.client, "goto next sibling".to_string());
+
+            //         // move out
+            //         if !cursor.goto_parent() {
+            //             log_to_client(&backend.client, "found root".to_string());
+            //             working = false; // this node has no parent, its the root
+            //             break;
+            //         }
+            //         log_to_client(&backend.client, "goto next sibling".to_string());
+            //     }
+            // } else {
+            //     // move in
+            //     cursor.goto_first_child(); // should alwayes work
+            //     log_to_client(&backend.client, "goto first child".to_string());
+            // }
+        }
+        diagnostics
+    } else {
+        vec![]
+    }
+}
+
+fn node_type_to_string(node_type: &str) -> String {
+    node_type
+        .split_terminator('_')
+        .map(capitilize_string)
+        .intersperse(" ".to_string())
+        .collect()
+}
+
+fn capitilize_string(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+    }
 }
