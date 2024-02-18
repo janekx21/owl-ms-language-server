@@ -1,15 +1,17 @@
 #![feature(async_closure, iter_intersperse)]
 use dashmap::DashMap;
-use log::{info, LevelFilter};
+use log::{error, info, trace, LevelFilter};
 use once_cell::sync::Lazy;
-use ropey::Rope;
+use ropey::{Rope, RopeSlice};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio::task;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree};
+use tree_sitter::{
+    InputEdit, Language, Node, Parser, Point, Query, QueryCursor, TextProvider, Tree,
+};
 use tree_sitter_owl_ms::language;
 
 static LANGUAGE: Lazy<Language> = Lazy::new(language);
@@ -62,8 +64,11 @@ struct StaticNodeChildren {
 
 #[tokio::main]
 async fn main() {
-    simple_logging::log_to_file("lanugage-server.log", LevelFilter::Debug)
+    simple_logging::log_to_file("lanugage-server.log", LevelFilter::Trace)
         .expect("logging to work");
+    std::panic::set_hook(Box::new(|info| {
+        error!("paniced with {}", info);
+    }));
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
@@ -128,7 +133,10 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        log_to_client(&self.client, "did open".to_string());
+        info!(
+            "did_open at {} with version {}",
+            params.text_document.uri, params.text_document.version
+        );
 
         let mut parser_guard = self.parser.lock().await;
         parser_guard.reset();
@@ -138,8 +146,10 @@ impl LanguageServer for Backend {
             .expect("language to be set, no timeout to be used, no cancelation flag");
 
         let rope = Rope::from(params.text_document.text);
-        let class_iri_label_map = generate_class_iri_label_map(&tree, &rope);
-        let diagnostics = gen_diagostics(&tree.root_node());
+        let class_iri_label_map = gen_class_iri_label_map(&tree, &rope);
+        let diagnostics = timeit("gen_diagnostics inside did_open", || {
+            gen_diagnostics(&tree.root_node())
+        });
 
         self.client
             .publish_diagnostics(params.text_document.uri.clone(), diagnostics.clone(), None)
@@ -158,6 +168,18 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        info!(
+            "did_change at {} with version {}",
+            params
+                .text_document
+                .uri
+                .path_segments()
+                .unwrap()
+                .last()
+                .unwrap(),
+            params.text_document.version
+        );
+
         if let Some(mut document) = self.document_map.get_mut(&params.text_document.uri) {
             if document.version >= params.text_document.version {
                 return; // no change needed
@@ -181,8 +203,10 @@ impl LanguageServer for Backend {
                     let old_end_byte = document.rope.char_to_byte(old_end_char);
 
                     // rope replace
-                    document.rope.remove(start_char..old_end_char);
-                    document.rope.insert(start_char, &change.text);
+                    timeit("rope operations", || {
+                        document.rope.remove(start_char..old_end_char);
+                        document.rope.insert(start_char, &change.text);
+                    });
 
                     // this must come after the rope was changed!
                     let start_byte = document.rope.char_to_byte(start_char);
@@ -202,20 +226,26 @@ impl LanguageServer for Backend {
                             column: new_end_character,
                         },
                     };
-                    document.tree.edit(&edit);
+                    timeit("tree edit", || document.tree.edit(&edit));
 
                     let mut parser_guard = self.parser.lock().await;
                     parser_guard.reset();
-                    let tree = parser_guard
-                        .parse(document.rope.to_string(), Some(&document.tree))
-                        .expect("language to be set, no timeout to be used, no cancelation flag");
 
-                    document.class_iri_label_map =
-                        generate_class_iri_label_map(&tree, &document.rope);
+                    let tree =
+                        timeit("parsing", || {
+                            parser_guard
+                        .parse(document.rope.to_string(), Some(&document.tree))
+                        .expect("language to be set, no timeout to be used, no cancelation flag")
+                        });
+
+                    document.class_iri_label_map = timeit("gen_class_iri_label_map", || {
+                        gen_class_iri_label_map(&tree, &document.rope)
+                    });
                     document.tree = tree;
                     document.version = params.text_document.version;
 
                     // diagnostics
+                    // TODO this does not work correctly
                     document
                         .diagnostics
                         .retain(|d| !range_overlaps(&d.range, &range));
@@ -226,13 +256,23 @@ impl LanguageServer for Backend {
                         &range,
                         &ts_range_to_lsp_range(cursor.node().range()),
                     ) {
-                        cursor.goto_first_child_for_point(edit.start_position);
+                        trace!("move in to find error");
+                        if cursor
+                            .goto_first_child_for_point(edit.start_position)
+                            .is_none()
+                        {
+                            break;
+                        }
                     }
+                    cursor.goto_parent();
                     let node_that_has_change = cursor.node();
                     drop(cursor);
                     // while range_overlaps(&ts_range_to_lsp_range(cursor.node().range()), &range) {}
                     // document.diagnostics =
-                    let additional_diagnostics = gen_diagostics(&node_that_has_change)
+                    let additional_diagnostics =
+                        timeit("gen_diagnostics inside did_change", || {
+                            gen_diagnostics(&node_that_has_change)
+                        })
                         .into_iter()
                         .filter(|d| range_overlaps(&d.range, &range)); // should be exclusive to other diagnostics
 
@@ -255,6 +295,12 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        info!(
+            "hover at {:?} in file {}",
+            params.text_document_position_params.position,
+            params.text_document_position_params.text_document.uri
+        );
+
         self.client.log_message(MessageType::INFO, "hover").await;
 
         Ok(
@@ -284,6 +330,8 @@ impl LanguageServer for Backend {
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        info!("inlay_hint at {}", params.text_document.uri);
+
         if let Some(document) = self.document_map.get(&params.text_document.uri) {
             let iri_label_map = &document.class_iri_label_map;
             let inline_values = {
@@ -333,7 +381,7 @@ impl LanguageServer for Backend {
     }
 }
 
-fn generate_class_iri_label_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, String> {
+fn gen_class_iri_label_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, String> {
     // the typed literal is for the string type
     let class_frame_source = "
                             (class_frame (class_iri (full_iri)@iri)\
@@ -348,9 +396,9 @@ fn generate_class_iri_label_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, String
     let class_frame_query = Query::new(*LANGUAGE, class_frame_source).unwrap();
     let root = tree.root_node();
     let mut query_cursor = QueryCursor::new();
-    let string = rope.to_string();
-    let bytes: &[u8] = string.as_bytes();
-    let matches = query_cursor.matches(&class_frame_query, root, bytes);
+
+    let rp = RopeProvider(rope.slice(..));
+    let matches = query_cursor.matches(&class_frame_query, root, rp);
     matches
         .filter(|m| node_text(&m.captures[1].node, rope) == "rdfs:label")
         .map(|m| {
@@ -362,138 +410,111 @@ fn generate_class_iri_label_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, String
         .collect::<DashMap<Iri, String>>()
 }
 
-fn log_to_client(client: &Client, msg: String) -> task::JoinHandle<()> {
-    let c = client.clone();
-    task::spawn(async move {
-        c.log_message(MessageType::INFO, msg).await;
-    })
+// Thanks to the helix team
+// https://github.com/helix-editor/helix/blob/master/helix-core/src/syntax.rs#L1747
+pub struct ChunksBytes<'a> {
+    chunks: ropey::iter::Chunks<'a>,
+}
+impl<'a> Iterator for ChunksBytes<'a> {
+    type Item = &'a [u8];
+    fn next(&mut self) -> Option<Self::Item> {
+        self.chunks.next().map(str::as_bytes)
+    }
 }
 
-fn gen_diagostics(root: &Node) -> Vec<Diagnostic> {
-    // if let Some(doc) = backend.document_map.get(uri) {
-    // let s = doc.rope.to_string();
-    // let bytes: &[u8] = s.as_bytes();
+struct RopeProvider<'a>(pub RopeSlice<'a>);
+impl<'a> TextProvider<'a> for RopeProvider<'a> {
+    type I = ChunksBytes<'a>;
 
+    fn text(&mut self, node: Node) -> Self::I {
+        let fragment = self.0.byte_slice(node.start_byte()..node.end_byte());
+        ChunksBytes {
+            chunks: fragment.chunks(),
+        }
+    }
+}
+
+fn gen_diagnostics(root: &Node) -> Vec<Diagnostic> {
     let mut cursor = root.walk();
     let mut diagnostics = Vec::<Diagnostic>::new();
 
-    let mut working = true;
-    while working {
+    loop {
         let node = cursor.node();
 
         if node.is_error() {
             // log
             let range = cursor.node().range();
-            let parent_kind = node.parent().expect("has a parent").kind();
 
-            let static_node = NODE_TYPES
-                .get(parent_kind)
-                .expect("node to be in NODE_TYPES");
+            // root has no parents so use itself
+            let parent_kind = node.parent().unwrap_or(node).kind();
 
-            let valid_children: String = static_node
-                .children
-                .types
-                .iter()
-                .map(|sn| node_type_to_string(&sn._type))
-                .intersperse(", ".to_string())
-                .collect();
+            if let Some(static_node) = NODE_TYPES.get(parent_kind) {
+                let valid_children: String = static_node
+                    .children
+                    .types
+                    .iter()
+                    .map(|sn| node_type_to_string(&sn._type))
+                    .intersperse(", ".to_string())
+                    .collect();
 
-            // let text = node.utf8_text(bytes).unwrap();
-            let parent = node_type_to_string(parent_kind);
-            let msg = format!("Syntax Error. expected {valid_children} inside {parent}");
+                // let text = node.utf8_text(bytes).unwrap();
+                let parent = node_type_to_string(parent_kind);
+                let msg = format!("Syntax Error. expected {valid_children} inside {parent}");
 
-            diagnostics.push(Diagnostic {
-                range: Range {
-                    start: point_to_positon(range.start_point),
-                    end: point_to_positon(range.end_point),
-                },
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: None,
-                code_description: None,
-                source: Some("owl language server".to_string()),
-                message: msg.to_string(),
-                related_information: None,
-                tags: None,
-                data: None,
-            });
+                diagnostics.push(Diagnostic {
+                    range: Range {
+                        start: point_to_positon(range.start_point),
+                        end: point_to_positon(range.end_point),
+                    },
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("owl language server".to_string()),
+                    message: msg.to_string(),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                });
+            }
             // move along
             while !cursor.goto_next_sibling() {
                 // move out
                 if !cursor.goto_parent() {
-                    working = false; // this node has no parent, its the root
-                    break;
+                    // this node has no parent, its the root
+                    return diagnostics;
                 }
             }
         } else if node.has_error() {
             // move in
             let has_child = cursor.goto_first_child(); // should alwayes work
-            debug_assert!(
-                has_child,
-                "nodes that have errors but are not errors should have children"
-            );
+
+            if !has_child {
+                while !cursor.goto_next_sibling() {
+                    // move out
+                    if !cursor.goto_parent() {
+                        // this node has no parent, its the root
+                        return diagnostics;
+                    }
+                }
+            }
         } else {
             // move along
             while !cursor.goto_next_sibling() {
                 // move out
                 if !cursor.goto_parent() {
-                    working = false; // this node has no parent, its the root
-                    break;
+                    // this node has no parent, its the root
+                    return diagnostics;
                 }
             }
         }
-
-        // if node.child_count() == 0 {
-        //     if node.has_error() || node.is_error() {
-        //         let range = cursor.node().range();
-        //         let parent_kind = node.parent().expect("has a parent").kind();
-        //         let text = node.utf8_text(bytes).unwrap();
-
-        //         let msg =
-        //             format!("Syntax error. The node {parent_kind} does not expect {text}");
-
-        //         diagnostics.push(Diagnostic {
-        //             range: Range {
-        //                 start: point_to_positon(range.start_point),
-        //                 end: point_to_positon(range.end_point),
-        //             },
-        //             severity: Some(DiagnosticSeverity::ERROR),
-        //             code: None,
-        //             code_description: None,
-        //             source: Some("owl language server".to_string()),
-        //             message: msg.to_string(),
-        //             related_information: None,
-        //             tags: None,
-        //             data: None,
-        //         });
-        //         // move out
-        //         if !cursor.goto_parent() {
-        //             log_to_client(&backend.client, "found root".to_string());
-        //             working = false; // this node has no parent, its the root
-        //         }
-        //     }
-
-        //     // move along
-        //     while !cursor.goto_next_sibling() {
-        //         log_to_client(&backend.client, "goto next sibling".to_string());
-
-        //         // move out
-        //         if !cursor.goto_parent() {
-        //             log_to_client(&backend.client, "found root".to_string());
-        //             working = false; // this node has no parent, its the root
-        //             break;
-        //         }
-        //         log_to_client(&backend.client, "goto next sibling".to_string());
-        //     }
-        // } else {
-        //     // move in
-        //     cursor.goto_first_child(); // should alwayes work
-        //     log_to_client(&backend.client, "goto first child".to_string());
-        // }
     }
-    diagnostics
-    // } else {
-    //     vec![]
-    // }
+}
+
+fn _log_to_client(client: &Client, msg: String) -> task::JoinHandle<()> {
+    let c = client.clone();
+    task::spawn(async move {
+        c.log_message(MessageType::INFO, msg).await;
+    })
 }
 
 fn node_type_to_string(node_type: &str) -> String {
@@ -602,4 +623,14 @@ Ontology: <http://foo.bar>
             .expect("valid utf-8"),
         "rdfs:label"
     );
+}
+
+fn timeit<F: FnMut() -> T, T>(name: &str, mut f: F) -> T {
+    use std::time::Instant;
+    let start = Instant::now();
+    let result = f();
+    let end = Instant::now();
+    let duration = end.duration_since(start);
+    info!("⏲ {} took {:?}", name, duration);
+    result
 }
