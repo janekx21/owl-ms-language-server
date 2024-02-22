@@ -120,6 +120,7 @@ impl LanguageServer for Backend {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 position_encoding: Some(encoding),
                 inlay_hint_provider: Some(OneOf::Left(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
         })
@@ -304,24 +305,16 @@ impl LanguageServer for Backend {
         self.client.log_message(MessageType::INFO, "hover").await;
 
         Ok(
-            if let Some(document) = self
+            if let Some(doc) = self
                 .document_map
                 .get(&params.text_document_position_params.text_document.uri)
             {
-                let position = params.text_document_position_params.position;
-                let byte_offset = document.rope.char_to_byte(
-                    document.rope.line_to_char(position.line as usize)
-                        + (position.character as usize),
-                );
-
-                let mut cursor = document.tree.root_node().walk();
-                for _ in 0..20 {
-                    cursor.goto_first_child_for_byte(byte_offset); // brute force the recursive decent
-                }
-                let node = cursor.node();
+                let pos = params.text_document_position_params.position;
+                let node = deepest_named_node_at_pos(&doc.tree, pos);
+                let info = node_info(&node, &doc);
                 Some(Hover {
-                    contents: HoverContents::Scalar(MarkedString::String(node.kind().to_string())),
-                    range: None,
+                    contents: HoverContents::Scalar(MarkedString::String(info)),
+                    range: Some(ts_range_to_lsp_range(node.range())),
                 })
             } else {
                 None
@@ -372,6 +365,65 @@ impl LanguageServer for Backend {
             Ok(Some(inline_values))
         } else {
             Ok(None)
+        }
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        if let Some(doc) = self.document_map.get(&uri) {
+            let pos = params.text_document_position_params.position;
+
+            let leaf_node = deepest_named_node_at_pos(&doc.tree, pos);
+            if leaf_node.kind() == "full_iri" {
+                // is full_iri
+                if leaf_node
+                    .parent()
+                    .map(|n| n.kind() == "class_iri")
+                    .unwrap_or(false)
+                {
+                    // is class_iri
+                    let iri = node_text(&leaf_node, &doc.rope);
+
+                    info!("found iri {}", iri);
+
+                    let definition_query = Query::new(
+                        *LANGUAGE,
+                        format!(
+                            "(class_frame
+                                (class_iri
+                                    (full_iri)@iri
+                                        (#eq? @iri \"{}\")))@class-frame",
+                            iri
+                        )
+                        .as_str(),
+                    )
+                    .expect("valid query syntax expect");
+
+                    let root = doc.tree.root_node();
+                    let mut query_cursor = QueryCursor::new();
+
+                    let rp = RopeProvider(doc.rope.slice(..));
+                    let mut matches = query_cursor.matches(&definition_query, root, rp);
+
+                    if let Some(m) = matches.next() {
+                        info!("found match {:?}", m);
+                        return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                            uri,
+                            range: ts_range_to_lsp_range(m.captures[0].node.range()),
+                        })));
+                    }
+                }
+            }
+
+            info!("no definition found");
+            Ok(None)
+        } else {
+            Err(tower_lsp::jsonrpc::Error::new(
+                tower_lsp::jsonrpc::ErrorCode::InvalidParams,
+            ))
         }
     }
 
@@ -633,4 +685,58 @@ fn timeit<F: FnMut() -> T, T>(name: &str, mut f: F) -> T {
     let duration = end.duration_since(start);
     info!("⏲ {} took {:?}", name, duration);
     result
+}
+
+fn deepest_named_node_at_pos(tree: &Tree, pos: Position) -> Node {
+    let mut cursor = tree.walk();
+    loop {
+        let is_leaf = cursor
+            .goto_first_child_for_point(position_to_point(pos))
+            .is_none();
+        if is_leaf {
+            break;
+        }
+    }
+    while !cursor.node().is_named() {
+        if !cursor.goto_parent() {
+            break;
+        }
+    }
+    return cursor.node();
+}
+
+fn node_info(node: &Node, doc: &Document) -> String {
+    match node.kind() {
+        "class_frame" => {
+            let iri = &node
+                .named_child(0)
+                .map(|c| node_text(&c, &doc.rope).to_string());
+
+            if let Some(iri) = iri {
+                if let Some(label) = doc.class_iri_label_map.get(iri) {
+                    format!("Class Frame {}\nThe full iri is {}", label.clone(), iri)
+                } else {
+                    format!("Class Frame\nThe full iri is {}", iri)
+                }
+            } else {
+                "Class Frame\nNo iri was found".to_string()
+            }
+        }
+        "full_iri" => {
+            let iri_parent_kind = node.parent().expect("full_iri has parent expect").kind();
+            let iri = node_text(node, &doc.rope).to_string();
+            match iri_parent_kind {
+                "class_iri" => {
+                    if let Some(label) = doc.class_iri_label_map.get(&iri) {
+                        format!("Class Iri for {}\nThe full iri is {}", label.clone(), iri)
+                    } else {
+                        format!("Class Iri\nThe full iri is {}", iri)
+                    }
+                }
+                _ => format!("iri {}", iri),
+            }
+        }
+
+        _ => format!("generic node named {}", node.kind()),
+    }
 }
