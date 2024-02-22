@@ -55,15 +55,29 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
 ### Done
 
 - diagnostic (only syntax)
-
-### Simple
-
-- hover (shows info from text under the cursor)
+- goto_definition
+  - class_iri
+- hover
+  - class_iri
+  - class_frame
 - inlay_hint
+  - class_iri
 
 ### Planned
 
+- inlay_hint
+  - others
+- hover
+  - others
 - goto_definition
+  - datatype_iri
+  - annotation_property_iri
+  - ontology_iri
+  - data_property_iri
+  - version_iri
+  - object_property_iri
+  - annotation_property_iri_annotated_list
+  - individual_iri
 - document_symbol
 - code_action (all kinds of quick actions)
 - rename
@@ -96,3 +110,26 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
 - on_type_formatting
 - linked_editing_range (ranges that have the same content)
 - symbol (project-wide symbol search)
+
+
+## Possible implamentation vectors
+
+- iri types
+  - class_iri
+  - datatype_iri
+  - annotation_property_iri
+  - ontology_iri
+  - data_property_iri
+  - version_iri
+  - object_property_iri
+  - annotation_property_iri_annotated_list
+  - individual_iri
+
+- frames
+  - datatype
+  - class
+  - object property
+  - data property
+  - annotation property
+  - individual
+  - misc
