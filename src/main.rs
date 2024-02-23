@@ -4,6 +4,7 @@ use log::{error, info, trace, LevelFilter};
 use once_cell::sync::Lazy;
 use ropey::{Rope, RopeSlice};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tokio::sync::Mutex;
 use tokio::task;
 use tower_lsp::jsonrpc::Result;
@@ -28,6 +29,24 @@ static NODE_TYPES: Lazy<DashMap<String, StaticNode>> = Lazy::new(|| {
 
 type Iri = String;
 
+/// taken from https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing
+#[derive(Clone)]
+enum Entity {
+    Class,
+    DataType,
+    ObjectPropeerty,
+    DataProperty,
+    AnnotationProperty,
+    NamedIndividual,
+}
+
+#[derive(Clone)]
+struct IriInfo {
+    label: Option<String>,
+    annotations: HashMap<String, String>,
+    entity: Entity,
+}
+
 struct Backend {
     client: Client,
     parser: Mutex<Parser>, // stateful because of resume behavior after fail, timeout or cancellation
@@ -39,7 +58,7 @@ struct Document {
     tree: Tree,
     rope: Rope,
     version: i32,
-    class_iri_label_map: DashMap<Iri, String>,
+    iri_info_map: DashMap<Iri, IriInfo>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -147,7 +166,7 @@ impl LanguageServer for Backend {
             .expect("language to be set, no timeout to be used, no cancelation flag");
 
         let rope = Rope::from(params.text_document.text);
-        let class_iri_label_map = gen_class_iri_label_map(&tree, &rope);
+        let iri_info_map = gen_iri_info_map(&tree, &rope);
         let diagnostics = timeit("gen_diagnostics inside did_open", || {
             gen_diagnostics(&tree.root_node())
         });
@@ -162,7 +181,7 @@ impl LanguageServer for Backend {
                 version: params.text_document.version,
                 tree,
                 rope,
-                class_iri_label_map,
+                iri_info_map,
                 diagnostics,
             },
         );
@@ -239,8 +258,8 @@ impl LanguageServer for Backend {
                         .expect("language to be set, no timeout to be used, no cancelation flag")
                         });
 
-                    document.class_iri_label_map = timeit("gen_class_iri_label_map", || {
-                        gen_class_iri_label_map(&tree, &document.rope)
+                    document.iri_info_map = timeit("gen_class_iri_label_map", || {
+                        gen_iri_info_map(&tree, &document.rope)
                     });
                     document.tree = tree;
                     document.version = params.text_document.version;
@@ -326,7 +345,7 @@ impl LanguageServer for Backend {
         info!("inlay_hint at {}", params.text_document.uri);
 
         if let Some(document) = self.document_map.get(&params.text_document.uri) {
-            let iri_label_map = &document.class_iri_label_map;
+            let iri_label_map = &document.iri_info_map;
             let inline_values = {
                 let full_iri_query = Query::new(*LANGUAGE, "(class_iri (full_iri)@iri)").unwrap();
                 let root = document.tree.root_node();
@@ -342,21 +361,21 @@ impl LanguageServer for Backend {
                     .filter_map(|capture| {
                         let iri = node_text(&capture.node, &document.rope).to_string();
 
-                        iri_label_map.get(&iri).map(|label| {
+                        iri_label_map.get(&iri).and_then(|info| {
                             let node = capture.node;
                             // let start = node.start_position();
                             let end = node.end_position();
 
-                            InlayHint {
+                            info.label.clone().map(|label| InlayHint {
                                 position: point_to_positon(end),
-                                label: InlayHintLabel::String(label.to_owned()),
+                                label: InlayHintLabel::String(label),
                                 kind: None,
                                 text_edits: None,
                                 tooltip: Some(InlayHintTooltip::String("Hey there".into())),
                                 padding_left: None, // TOOD test what is possible
                                 padding_right: None,
                                 data: None,
-                            }
+                            })
                         })
                     })
                     .collect::<Vec<InlayHint>>()
@@ -433,17 +452,20 @@ impl LanguageServer for Backend {
     }
 }
 
-fn gen_class_iri_label_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, String> {
+fn gen_iri_info_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, IriInfo> {
+    info!("generating iri info map");
     // the typed literal is for the string type
     let class_frame_source = "
-                            (class_frame (class_iri (full_iri)@iri)\
-                                (annotation\
-                                    (annotation_property_iri (abbreviated_iri)@abbriviated-iri)\
-                                    [\
-                                        (string_literal_no_language)\
-                                        (string_literal_with_language)\
-                                        (typed_literal)\
-                                    ]@literal))";
+        (class_frame (class_iri (full_iri)@iri)
+            (annotation
+                (annotation_property_iri)@iri
+                [
+                    (string_literal_no_language)
+                    (string_literal_with_language)
+                    (typed_literal)
+                ]@literal
+            )
+        )";
 
     let class_frame_query = Query::new(*LANGUAGE, class_frame_source).unwrap();
     let root = tree.root_node();
@@ -451,15 +473,34 @@ fn gen_class_iri_label_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, String> {
 
     let rp = RopeProvider(rope.slice(..));
     let matches = query_cursor.matches(&class_frame_query, root, rp);
-    matches
-        .filter(|m| node_text(&m.captures[1].node, rope) == "rdfs:label")
-        .map(|m| {
-            (
-                node_text(&m.captures[0].node, rope).to_string(),
-                node_text(&m.captures[2].node, rope).to_string(),
-            )
-        })
-        .collect::<DashMap<Iri, String>>()
+
+    let infos = DashMap::<Iri, IriInfo>::new();
+
+    for m in matches {
+        let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
+        let class_iri = capture_texts.next().unwrap().to_string();
+        let annotation_iri = capture_texts.next().unwrap().to_string();
+        let literal = capture_texts.next().unwrap().to_string();
+
+        if !infos.contains_key(&class_iri) {
+            infos.insert(
+                class_iri.clone(),
+                IriInfo {
+                    label: None,
+                    annotations: HashMap::new(),
+                    entity: Entity::Class,
+                },
+            );
+        }
+
+        let mut info = infos.get_mut(&class_iri).unwrap();
+        info.annotations
+            .insert(annotation_iri.clone(), literal.clone());
+        if annotation_iri == "rdfs:label" {
+            info.label = Some(literal);
+        }
+    }
+    infos
 }
 
 // Thanks to the helix team
@@ -713,11 +754,7 @@ fn node_info(node: &Node, doc: &Document) -> String {
                 .map(|c| node_text(&c, &doc.rope).to_string());
 
             if let Some(iri) = iri {
-                if let Some(label) = doc.class_iri_label_map.get(iri) {
-                    format!("Class Frame {}\nThe full iri is {}", label.clone(), iri)
-                } else {
-                    format!("Class Frame\nThe full iri is {}", iri)
-                }
+                class_info(iri, doc)
             } else {
                 "Class Frame\nNo iri was found".to_string()
             }
@@ -726,17 +763,27 @@ fn node_info(node: &Node, doc: &Document) -> String {
             let iri_parent_kind = node.parent().expect("full_iri has parent expect").kind();
             let iri = node_text(node, &doc.rope).to_string();
             match iri_parent_kind {
-                "class_iri" => {
-                    if let Some(label) = doc.class_iri_label_map.get(&iri) {
-                        format!("Class Iri for {}\nThe full iri is {}", label.clone(), iri)
-                    } else {
-                        format!("Class Iri\nThe full iri is {}", iri)
-                    }
-                }
+                "class_iri" => class_info(&iri, doc),
                 _ => format!("iri {}", iri),
             }
         }
 
         _ => format!("generic node named {}", node.kind()),
+    }
+}
+
+fn class_info(iri: &String, doc: &Document) -> String {
+    if let Some(info) = doc.iri_info_map.get(iri) {
+        let label = info.label.clone().unwrap_or("(no label)".to_string());
+        let annotations = info
+            .annotations
+            .iter()
+            .map(|(k, v)| format!("`{k}`: {v}"))
+            .intersperse("\n".to_string())
+            .collect::<String>();
+
+        format!("Class {label}\n\n`IRI`: {iri}\n\n{annotations}")
+    } else {
+        format!("Class {iri}\n\nNo info found")
     }
 }
