@@ -140,6 +140,7 @@ impl LanguageServer for Backend {
                 position_encoding: Some(encoding),
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 ..Default::default()
             },
         })
@@ -396,30 +397,25 @@ impl LanguageServer for Backend {
             let pos = params.text_document_position_params.position;
 
             let leaf_node = deepest_named_node_at_pos(&doc.tree, pos);
-            if leaf_node.kind() == "full_iri" {
-                // is full_iri
-                if leaf_node
-                    .parent()
-                    .map(|n| n.kind() == "class_iri")
-                    .unwrap_or(false)
-                {
-                    // is class_iri
-                    let iri = node_text(&leaf_node, &doc.rope);
+            if ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind()) {
+                let parent_kind = leaf_node.parent().unwrap().kind();
+                let iri = node_text(&leaf_node, &doc.rope);
 
-                    info!("found iri {}", iri);
+                // TODO other frame types
+                let query = match parent_kind {
+                    "class_iri" => Some(format!(
+                        "(class_frame
+                            (class_iri)@iri
+                            (#eq? @iri \"{}\")
+                        )@frame",
+                        iri
+                    )),
+                    _ => None,
+                };
 
-                    let definition_query = Query::new(
-                        *LANGUAGE,
-                        format!(
-                            "(class_frame
-                                (class_iri
-                                    (full_iri)@iri
-                                        (#eq? @iri \"{}\")))@class-frame",
-                            iri
-                        )
-                        .as_str(),
-                    )
-                    .expect("valid query syntax expect");
+                Ok(query.and_then(|query_text| {
+                    let definition_query = Query::new(*LANGUAGE, query_text.as_str())
+                        .expect("valid query syntax expect");
 
                     let root = doc.tree.root_node();
                     let mut query_cursor = QueryCursor::new();
@@ -429,21 +425,46 @@ impl LanguageServer for Backend {
 
                     if let Some(m) = matches.next() {
                         info!("found match {:?}", m);
-                        return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                        Some(GotoDefinitionResponse::Scalar(Location {
                             uri,
                             range: ts_range_to_lsp_range(m.captures[0].node.range()),
-                        })));
+                        }))
+                    } else {
+                        None
                     }
-                }
+                }))
+            } else {
+                Ok(None)
             }
-
-            info!("no definition found");
-            Ok(None)
         } else {
             Err(tower_lsp::jsonrpc::Error::new(
                 tower_lsp::jsonrpc::ErrorCode::InvalidParams,
             ))
         }
+    }
+
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let url = params.text_document.uri;
+        let doc = self.document_map.get(&url).unwrap();
+        let end = point_to_positon(doc.tree.root_node().range().end_point);
+
+        Ok(Some(vec![CodeActionOrCommand::CodeAction(CodeAction {
+            title: "add class".to_string(),
+            edit: Some(WorkspaceEdit {
+                changes: Some(HashMap::from([(
+                    url,
+                    vec![TextEdit {
+                        range: Range { start: end, end },
+                        new_text:
+                            "\nClass: new_class\n    Annotations:\n        rdfs:label \"new class\""
+                                .to_string(),
+                    }],
+                )])),
+                document_changes: None,
+                change_annotations: None,
+            }),
+            ..Default::default()
+        })]))
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -456,7 +477,7 @@ fn gen_iri_info_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, IriInfo> {
     info!("generating iri info map");
     // the typed literal is for the string type
     let class_frame_source = "
-        (class_frame (class_iri (full_iri)@iri)
+        (class_frame (class_iri)@iri
             (annotation
                 (annotation_property_iri)@iri
                 [
@@ -759,14 +780,15 @@ fn node_info(node: &Node, doc: &Document) -> String {
                 "Class Frame\nNo iri was found".to_string()
             }
         }
-        "full_iri" => {
-            let iri_parent_kind = node.parent().expect("full_iri has parent expect").kind();
+        "full_iri" | "simple_iri" | "abbreviated_iri" => {
+            let parent = node.parent().expect("full_iri has parent expect");
             let iri = node_text(node, &doc.rope).to_string();
-            match iri_parent_kind {
-                "class_iri" => class_info(&iri, doc),
-                _ => format!("iri {}", iri),
+            match parent.kind() {
+                "class_iri" => node_info(&parent, doc),
+                _ => format!("full_iri iri {}", iri),
             }
         }
+        "class_iri" => class_info(&node_text(node, &doc.rope).to_string(), doc),
 
         _ => format!("generic node named {}", node.kind()),
     }
