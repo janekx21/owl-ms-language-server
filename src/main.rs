@@ -49,20 +49,21 @@ type Iri = String;
 
 /// taken from https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing
 #[derive(Clone, Copy)]
-enum Entity {
+enum IriType {
     Class,
     DataType,
     ObjectProperty,
     DataProperty,
     AnnotationProperty,
-    NamedIndividual,
+    Individual,
+    Ontology,
 }
 
 #[derive(Clone)]
 struct IriInfo {
     label: Option<String>,
     annotations: HashMap<String, String>,
-    entity: Entity,
+    tipe: IriType,
 }
 
 struct Backend {
@@ -538,11 +539,15 @@ fn gen_iri_info_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, IriInfo> {
 
         let parent_node = m.captures[0].node.parent().unwrap();
         let entity = match parent_node.kind() {
-            "class_iri" => Entity::Class,
-            "annotation_property_iri" => Entity::AnnotationProperty,
+            "class_iri" => IriType::Class,
+            "annotation_property_iri" => IriType::AnnotationProperty,
+            "individual_iri" => IriType::Individual,
+            "ontology_iri" => IriType::Ontology,
+            "data_property_iri" => IriType::DataProperty,
+            "object_property_iri" => IriType::ObjectProperty,
             kind => {
                 error!("implement {kind}");
-                Entity::Class
+                IriType::Class
             }
         };
 
@@ -552,7 +557,7 @@ fn gen_iri_info_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, IriInfo> {
                 IriInfo {
                     label: None,
                     annotations: HashMap::new(),
-                    entity,
+                    tipe: entity,
                 },
             );
         }
@@ -840,7 +845,7 @@ fn node_info(node: &Node, doc: &Document) -> String {
 
 fn iri_info(iri: &String, doc: &Document) -> String {
     if let Some(info) = doc.iri_info_map.get(iri) {
-        let entity = info.entity;
+        let entity = info.tipe;
         let label = info
             .label
             .clone()
@@ -859,7 +864,7 @@ fn iri_info(iri: &String, doc: &Document) -> String {
             .intersperse("\n".to_string())
             .collect::<String>();
 
-        format!("{entity} {label}\n\n{annotations}")
+        format!("{entity} **{label}**\n\n{annotations}")
     } else {
         "No info found on iri".to_string()
     }
@@ -870,21 +875,23 @@ fn trim_string_value(value: String) -> String {
         .trim_start_matches('"')
         .trim_end_matches("@en")
         .trim_end_matches("@de")
+        .trim_end_matches("^^xsd:string") // typed literal with type string
         .trim_end_matches('"')
         .replace("\\\"", "\"")
         .trim()
         .to_string()
 }
 
-impl Display for Entity {
+impl Display for IriType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match self {
-            Entity::Class => "Class",
-            Entity::DataType => "Data Type",
-            Entity::ObjectProperty => "Object Property",
-            Entity::DataProperty => "Data Property",
-            Entity::AnnotationProperty => "Annotation Property",
-            Entity::NamedIndividual => "Named Individual",
+            IriType::Class => "Class",
+            IriType::DataType => "Data Type",
+            IriType::ObjectProperty => "Object Property",
+            IriType::DataProperty => "Data Property",
+            IriType::AnnotationProperty => "Annotation Property",
+            IriType::Individual => "Named Individual",
+            IriType::Ontology => "Ontology",
         };
         write!(f, "{name}")
     }
