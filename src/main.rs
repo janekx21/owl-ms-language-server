@@ -5,13 +5,14 @@ use once_cell::sync::Lazy;
 use ropey::{Rope, RopeSlice};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::Display;
 use tokio::sync::Mutex;
 use tokio::task;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tree_sitter::{
-    InputEdit, Language, Node, Parser, Point, Query, QueryCursor, TextProvider, Tree,
+    InputEdit, Language, Node, Parser, Point, Query, QueryCursor, QueryMatch, TextProvider, Tree,
 };
 use tree_sitter_owl_ms::language;
 
@@ -30,11 +31,11 @@ static NODE_TYPES: Lazy<DashMap<String, StaticNode>> = Lazy::new(|| {
 type Iri = String;
 
 /// taken from https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 enum Entity {
     Class,
     DataType,
-    ObjectPropeerty,
+    ObjectProperty,
     DataProperty,
     AnnotationProperty,
     NamedIndividual,
@@ -410,6 +411,13 @@ impl LanguageServer for Backend {
                         )@frame",
                         iri
                     )),
+                    "annotation_property_iri" => Some(format!(
+                        "(annotation_property_frame
+                            (annotation_property_iri)@iri
+                            (#eq? @iri \"{}\")
+                        )@frame",
+                        iri
+                    )),
                     _ => None,
                 };
 
@@ -475,9 +483,11 @@ impl LanguageServer for Backend {
 
 fn gen_iri_info_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, IriInfo> {
     info!("generating iri info map");
+
     // the typed literal is for the string type
-    let class_frame_source = "
-        (class_frame (class_iri)@iri
+    let frame_source = "
+        (    
+            (_ [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri)
             (annotation
                 (annotation_property_iri)@iri
                 [
@@ -486,35 +496,44 @@ fn gen_iri_info_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, IriInfo> {
                     (typed_literal)
                 ]@literal
             )
-        )";
-
-    let class_frame_query = Query::new(*LANGUAGE, class_frame_source).unwrap();
-    let root = tree.root_node();
-    let mut query_cursor = QueryCursor::new();
+        )
+        ";
 
     let rp = RopeProvider(rope.slice(..));
-    let matches = query_cursor.matches(&class_frame_query, root, rp);
+    let frame_query = Query::new(*LANGUAGE, frame_source).expect("valid query expect");
+    let root = tree.root_node();
+    let mut query_cursor = QueryCursor::new();
+    let matches = query_cursor.matches(&frame_query, root, rp);
 
     let infos = DashMap::<Iri, IriInfo>::new();
 
     for m in matches {
+        info!("captured {}", m.captures.len());
+        info!("{:?}", m.captures);
         let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
-        let class_iri = capture_texts.next().unwrap().to_string();
+        let frame_iri = capture_texts.next().unwrap().to_string();
         let annotation_iri = capture_texts.next().unwrap().to_string();
         let literal = capture_texts.next().unwrap().to_string();
 
-        if !infos.contains_key(&class_iri) {
+        let parent_node = m.captures[0].node.parent().unwrap();
+        let entity = match parent_node.kind() {
+            "class_iri" => Entity::Class,
+            "annotation_property_iri" => Entity::AnnotationProperty,
+            kind => todo!("implament {}", kind),
+        };
+
+        if !infos.contains_key(&frame_iri) {
             infos.insert(
-                class_iri.clone(),
+                frame_iri.clone(),
                 IriInfo {
                     label: None,
                     annotations: HashMap::new(),
-                    entity: Entity::Class,
+                    entity,
                 },
             );
         }
 
-        let mut info = infos.get_mut(&class_iri).unwrap();
+        let mut info = infos.get_mut(&frame_iri).unwrap();
         info.annotations
             .insert(annotation_iri.clone(), literal.clone());
         if annotation_iri == "rdfs:label" {
@@ -769,33 +788,30 @@ fn deepest_named_node_at_pos(tree: &Tree, pos: Position) -> Node {
 
 fn node_info(node: &Node, doc: &Document) -> String {
     match node.kind() {
-        "class_frame" => {
+        "class_frame" | "annotation_property_frame" => {
             let iri = &node
                 .named_child(0)
                 .map(|c| node_text(&c, &doc.rope).to_string());
 
             if let Some(iri) = iri {
-                class_info(iri, doc)
+                iri_info(iri, doc)
             } else {
                 "Class Frame\nNo iri was found".to_string()
             }
         }
         "full_iri" | "simple_iri" | "abbreviated_iri" => {
-            let parent = node.parent().expect("full_iri has parent expect");
             let iri = node_text(node, &doc.rope).to_string();
-            match parent.kind() {
-                "class_iri" => node_info(&parent, doc),
-                _ => format!("full_iri iri {}", iri),
-            }
+            iri_info(&iri, doc)
         }
-        "class_iri" => class_info(&node_text(node, &doc.rope).to_string(), doc),
+        "class_iri" => iri_info(&node_text(node, &doc.rope).to_string(), doc),
 
         _ => format!("generic node named {}", node.kind()),
     }
 }
 
-fn class_info(iri: &String, doc: &Document) -> String {
+fn iri_info(iri: &String, doc: &Document) -> String {
     if let Some(info) = doc.iri_info_map.get(iri) {
+        let entity = info.entity;
         let label = info.label.clone().unwrap_or("(no label)".to_string());
         let annotations = info
             .annotations
@@ -804,8 +820,22 @@ fn class_info(iri: &String, doc: &Document) -> String {
             .intersperse("\n".to_string())
             .collect::<String>();
 
-        format!("Class {label}\n\n`IRI`: {iri}\n\n{annotations}")
+        format!("{entity} {label}\n\n`IRI`: {iri}\n\n{annotations}")
     } else {
-        format!("Class {iri}\n\nNo info found")
+        format!("IRI {iri}\n\nNo info found")
+    }
+}
+
+impl Display for Entity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Entity::Class => "Class",
+            Entity::DataType => "Data Type",
+            Entity::ObjectProperty => "Object Property",
+            Entity::DataProperty => "Data Property",
+            Entity::AnnotationProperty => "Annotation Property",
+            Entity::NamedIndividual => "Named Individual",
+        };
+        write!(f, "{name}")
     }
 }
