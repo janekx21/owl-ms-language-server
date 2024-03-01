@@ -12,7 +12,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tree_sitter::{
-    InputEdit, Language, Node, Parser, Point, Query, QueryCursor, QueryMatch, TextProvider, Tree,
+    InputEdit, Language, Node, Parser, Point, Query, QueryCursor, TextProvider, Tree,
 };
 use tree_sitter_owl_ms::language;
 
@@ -26,6 +26,23 @@ static NODE_TYPES: Lazy<DashMap<String, StaticNode>> = Lazy::new(|| {
             .iter()
             .map(|node| (node._type.clone(), (*node).clone())),
     )
+});
+
+static FRAME_TYPES: [&str; 6] = [
+    "datatype_frame",
+    "class_frame",
+    "object_property_frame",
+    "data_property_frame",
+    "annotation_property_frame",
+    "individual_frame",
+];
+
+static FRAME_QUERY_SOURCE: Lazy<String> = Lazy::new(|| {
+    FRAME_TYPES
+        .iter()
+        .map(|ft| format!("({ft})"))
+        .intersperse(" ".to_string())
+        .collect::<String>()
 });
 
 type Iri = String;
@@ -61,6 +78,15 @@ struct Document {
     version: i32,
     iri_info_map: DashMap<Iri, IriInfo>,
     diagnostics: Vec<Diagnostic>,
+}
+
+impl Document {
+    fn resolve_iri(&self, iri: &String) -> String {
+        self.iri_info_map
+            .get(iri)
+            .and_then(|iri_info| iri_info.label.clone())
+            .unwrap_or(iri.clone())
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -349,15 +375,14 @@ impl LanguageServer for Backend {
         if let Some(document) = self.document_map.get(&params.text_document.uri) {
             let iri_label_map = &document.iri_info_map;
             let inline_values = {
-                let full_iri_query = Query::new(*LANGUAGE, "(class_iri (full_iri)@iri)").unwrap();
+                let full_iri_query = Query::new(*LANGUAGE, "(full_iri)@iri").unwrap();
                 let root = document.tree.root_node();
                 let mut query_cursor = QueryCursor::new();
                 query_cursor.set_point_range(
                     position_to_point(params.range.start)..position_to_point(params.range.end),
                 );
-                let s = document.rope.to_string();
-                let bytes: &[u8] = s.as_bytes();
-                let matches = query_cursor.matches(&full_iri_query, root, bytes);
+                let rp = RopeProvider::new(&document.rope);
+                let matches = query_cursor.matches(&full_iri_query, root, rp);
                 matches
                     .map(|match_| match_.captures[0])
                     .filter_map(|capture| {
@@ -365,19 +390,22 @@ impl LanguageServer for Backend {
 
                         iri_label_map.get(&iri).and_then(|info| {
                             let node = capture.node;
-                            // let start = node.start_position();
-                            let end = node.end_position();
+                            let end = node.end_position(); // inlay hints are at the end of the iri
 
-                            info.label.clone().map(|label| InlayHint {
-                                position: point_to_positon(end),
-                                label: InlayHintLabel::String(label),
-                                kind: None,
-                                text_edits: None,
-                                tooltip: Some(InlayHintTooltip::String("Hey there".into())),
-                                padding_left: None, // TOOD test what is possible
-                                padding_right: None,
-                                data: None,
-                            })
+                            // TODO write a tooltip
+                            info.label
+                                .clone()
+                                .map(trim_string_value)
+                                .map(|label| InlayHint {
+                                    position: point_to_positon(end),
+                                    label: InlayHintLabel::String(label),
+                                    kind: None,
+                                    text_edits: None,
+                                    tooltip: None,
+                                    padding_left: Some(true), // TOOD test what is possible
+                                    padding_right: None,
+                                    data: None,
+                                })
                         })
                     })
                     .collect::<Vec<InlayHint>>()
@@ -428,18 +456,15 @@ impl LanguageServer for Backend {
                     let root = doc.tree.root_node();
                     let mut query_cursor = QueryCursor::new();
 
-                    let rp = RopeProvider(doc.rope.slice(..));
+                    let rp = RopeProvider::new(&doc.rope);
                     let mut matches = query_cursor.matches(&definition_query, root, rp);
 
-                    if let Some(m) = matches.next() {
-                        info!("found match {:?}", m);
-                        Some(GotoDefinitionResponse::Scalar(Location {
+                    matches.next().map(|m| {
+                        GotoDefinitionResponse::Scalar(Location {
                             uri,
                             range: ts_range_to_lsp_range(m.captures[0].node.range()),
-                        }))
-                    } else {
-                        None
-                    }
+                        })
+                    })
                 }))
             } else {
                 Ok(None)
@@ -484,22 +509,20 @@ impl LanguageServer for Backend {
 fn gen_iri_info_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, IriInfo> {
     info!("generating iri info map");
 
+    // TODO check frame [(datatype_frame) (class_frame) (object_property_frame) (data_property_frame) (annotation_property_frame) (individual_frame)]
     // the typed literal is for the string type
     let frame_source = "
-        (    
-            (_ [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri)
+        (_
+            . (_ [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri)
             (annotation
                 (annotation_property_iri)@iri
                 [
                     (string_literal_no_language)
                     (string_literal_with_language)
                     (typed_literal)
-                ]@literal
-            )
-        )
-        ";
+                ]@literal))";
 
-    let rp = RopeProvider(rope.slice(..));
+    let rp = RopeProvider::new(rope);
     let frame_query = Query::new(*LANGUAGE, frame_source).expect("valid query expect");
     let root = tree.root_node();
     let mut query_cursor = QueryCursor::new();
@@ -508,8 +531,6 @@ fn gen_iri_info_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, IriInfo> {
     let infos = DashMap::<Iri, IriInfo>::new();
 
     for m in matches {
-        info!("captured {}", m.captures.len());
-        info!("{:?}", m.captures);
         let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
         let frame_iri = capture_texts.next().unwrap().to_string();
         let annotation_iri = capture_texts.next().unwrap().to_string();
@@ -519,7 +540,10 @@ fn gen_iri_info_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, IriInfo> {
         let entity = match parent_node.kind() {
             "class_iri" => Entity::Class,
             "annotation_property_iri" => Entity::AnnotationProperty,
-            kind => todo!("implament {}", kind),
+            kind => {
+                error!("implement {kind}");
+                Entity::Class
+            }
         };
 
         if !infos.contains_key(&frame_iri) {
@@ -564,6 +588,11 @@ impl<'a> TextProvider<'a> for RopeProvider<'a> {
         ChunksBytes {
             chunks: fragment.chunks(),
         }
+    }
+}
+impl<'a> RopeProvider<'a> {
+    fn new(value: &'a Rope) -> Self {
+        RopeProvider(value.slice(..))
     }
 }
 
@@ -812,18 +841,39 @@ fn node_info(node: &Node, doc: &Document) -> String {
 fn iri_info(iri: &String, doc: &Document) -> String {
     if let Some(info) = doc.iri_info_map.get(iri) {
         let entity = info.entity;
-        let label = info.label.clone().unwrap_or("(no label)".to_string());
+        let label = info
+            .label
+            .clone()
+            .map(trim_string_value)
+            .unwrap_or("(no label)".to_string());
+
         let annotations = info
             .annotations
             .iter()
-            .map(|(k, v)| format!("`{k}`: {v}"))
+            .map(|(iri, v)| {
+                let label = doc.resolve_iri(iri);
+                let label = trim_string_value(label);
+                let v = trim_string_value(v.clone());
+                format!("`{label}`: {v}")
+            })
             .intersperse("\n".to_string())
             .collect::<String>();
 
-        format!("{entity} {label}\n\n`IRI`: {iri}\n\n{annotations}")
+        format!("{entity} {label}\n\n{annotations}")
     } else {
-        format!("IRI {iri}\n\nNo info found")
+        "No info found on iri".to_string()
     }
+}
+
+fn trim_string_value(value: String) -> String {
+    value
+        .trim_start_matches('"')
+        .trim_end_matches("@en")
+        .trim_end_matches("@de")
+        .trim_end_matches('"')
+        .replace("\\\"", "\"")
+        .trim()
+        .to_string()
 }
 
 impl Display for Entity {
