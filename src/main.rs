@@ -1,6 +1,6 @@
 #![feature(async_closure, iter_intersperse)]
 use dashmap::DashMap;
-use log::{error, info, trace, LevelFilter};
+use log::{error, info, LevelFilter};
 use once_cell::sync::Lazy;
 use ropey::{Rope, RopeSlice};
 use serde::{Deserialize, Serialize};
@@ -9,12 +9,14 @@ use std::fmt::Display;
 use tokio::sync::Mutex;
 use tokio::task;
 use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
+use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tree_sitter::{
     InputEdit, Language, Node, Parser, Point, Query, QueryCursor, TextProvider, Tree,
 };
 use tree_sitter_owl_ms::language;
+
+static FULL_REPLACE_THRESHOLD: usize = 10;
 
 static LANGUAGE: Lazy<Language> = Lazy::new(language);
 static NODE_TYPES: Lazy<DashMap<String, StaticNode>> = Lazy::new(|| {
@@ -28,24 +30,115 @@ static NODE_TYPES: Lazy<DashMap<String, StaticNode>> = Lazy::new(|| {
     )
 });
 
-static FRAME_TYPES: [&str; 6] = [
-    "datatype_frame",
-    "class_frame",
-    "object_property_frame",
-    "data_property_frame",
-    "annotation_property_frame",
-    "individual_frame",
-];
+// static FRAME_TYPES: [&str; 6] = [
+//     "datatype_frame",
+//     "class_frame",
+//     "object_property_frame",
+//     "data_property_frame",
+//     "annotation_property_frame",
+//     "individual_frame",
+// ];
 
-static FRAME_QUERY_SOURCE: Lazy<String> = Lazy::new(|| {
-    FRAME_TYPES
-        .iter()
-        .map(|ft| format!("({ft})"))
-        .intersperse(" ".to_string())
-        .collect::<String>()
-});
+// static FRAME_QUERY_SOURCE: Lazy<String> = Lazy::new(|| {
+//     FRAME_TYPES
+//         .iter()
+//         .map(|ft| format!("({ft})"))
+//         .intersperse(" ".to_string())
+//         .collect::<String>()
+// });
 
 type Iri = String;
+
+#[derive(Clone, Copy)]
+struct Position {
+    line: u32,
+    character: u32,
+}
+
+impl From<tower_lsp::lsp_types::Position> for Position {
+    fn from(value: tower_lsp::lsp_types::Position) -> Self {
+        Position {
+            line: value.line,
+            character: value.character,
+        }
+    }
+}
+
+impl Into<tower_lsp::lsp_types::Position> for Position {
+    fn into(self) -> tower_lsp::lsp_types::Position {
+        tower_lsp::lsp_types::Position {
+            line: self.line,
+            character: self.character,
+        }
+    }
+}
+
+impl From<tree_sitter::Point> for Position {
+    fn from(value: tree_sitter::Point) -> Self {
+        Position {
+            line: value.row as u32,
+            character: value.column as u32,
+        }
+    }
+}
+
+impl Into<tree_sitter::Point> for Position {
+    fn into(self) -> tree_sitter::Point {
+        tree_sitter::Point {
+            row: self.line as usize,
+            column: self.character as usize,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Range {
+    start: Position,
+    end: Position,
+}
+
+impl From<tower_lsp::lsp_types::Range> for Range {
+    fn from(value: tower_lsp::lsp_types::Range) -> Self {
+        Range {
+            start: value.start.into(),
+            end: value.end.into(),
+        }
+    }
+}
+
+impl Into<tower_lsp::lsp_types::Range> for Range {
+    fn into(self) -> tower_lsp::lsp_types::Range {
+        tower_lsp::lsp_types::Range {
+            start: self.start.into(),
+            end: self.end.into(),
+        }
+    }
+}
+
+impl From<tree_sitter::Range> for Range {
+    fn from(value: tree_sitter::Range) -> Self {
+        Range {
+            start: value.start_point.into(),
+            end: value.end_point.into(),
+        }
+    }
+}
+
+impl Into<std::ops::Range<Point>> for Range {
+    fn into(self) -> std::ops::Range<Point> {
+        self.start.into()..self.end.into()
+    }
+}
+
+// TODO
+// impl Into<tree_sitter::Range> for Range {
+//     fn into(self) -> tree_sitter::Range {
+//         tower_lsp::lsp_types::Range {
+//             start: self.start.into(),
+//             end: self.end.into(),
+//         }
+//     }
+// }
 
 /// taken from https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing
 #[derive(Clone, Copy)]
@@ -61,9 +154,22 @@ enum IriType {
 
 #[derive(Clone)]
 struct IriInfo {
-    label: Option<String>,
-    annotations: HashMap<String, String>,
+    annotations: HashMap<Iri, ResolvedIri>,
     tipe: IriType,
+}
+
+impl IriInfo {
+    fn label(&self) -> Option<String> {
+        self.annotations
+            .get("rdfs:label")
+            .map(|resolved| resolved.value.clone())
+    }
+}
+
+#[derive(Clone)]
+struct ResolvedIri {
+    value: String,
+    range: Range,
 }
 
 struct Backend {
@@ -85,7 +191,7 @@ impl Document {
     fn resolve_iri(&self, iri: &String) -> String {
         self.iri_info_map
             .get(iri)
-            .and_then(|iri_info| iri_info.label.clone())
+            .and_then(|iri_info| iri_info.label())
             .unwrap_or(iri.clone())
     }
 }
@@ -195,7 +301,7 @@ impl LanguageServer for Backend {
             .expect("language to be set, no timeout to be used, no cancelation flag");
 
         let rope = Rope::from(params.text_document.text);
-        let iri_info_map = gen_iri_info_map(&tree, &rope);
+        let iri_info_map = gen_iri_info_map(&tree, &rope, None);
         let diagnostics = timeit("gen_diagnostics inside did_open", || {
             gen_diagnostics(&tree.root_node())
         });
@@ -234,109 +340,122 @@ impl LanguageServer for Backend {
                 return; // no change needed
             }
 
-            for change in params.content_changes {
-                if let Some(range) = change.range {
-                    let start_char = document
-                        .rope
-                        .try_line_to_char(range.start.line as usize)
-                        .expect("line_idx out of bounds")
-                        + (range.start.character as usize);
+            let use_full_replace = params.content_changes.len() > FULL_REPLACE_THRESHOLD;
 
-                    let old_end_char = document
-                        .rope
-                        .try_line_to_char(range.end.line as usize)
-                        .expect("line_idx out of bounds")
-                        + (range.end.character as usize); // exclusive
+            let mut parser_guard = self.parser.lock().await;
+            let change_ranges = params
+                .content_changes
+                .iter()
+                .map(|change| {
+                    if let Some(range) = change.range {
+                        let range: Range = range.into();
+                        let start_char = document
+                            .rope
+                            .try_line_to_char(range.start.line as usize)
+                            .expect("line_idx out of bounds")
+                            + (range.start.character as usize);
 
-                    // must come before the rope is changed!
-                    let old_end_byte = document.rope.char_to_byte(old_end_char);
+                        let old_end_char = document
+                            .rope
+                            .try_line_to_char(range.end.line as usize)
+                            .expect("line_idx out of bounds")
+                            + (range.end.character as usize); // exclusive
 
-                    // rope replace
-                    timeit("rope operations", || {
-                        document.rope.remove(start_char..old_end_char);
-                        document.rope.insert(start_char, &change.text);
-                    });
+                        // must come before the rope is changed!
+                        let old_end_byte = document.rope.char_to_byte(old_end_char);
 
-                    // this must come after the rope was changed!
-                    let start_byte = document.rope.char_to_byte(start_char);
-                    let new_end_byte = start_byte + change.text.len();
-                    let new_end_line = document.rope.byte_to_line(new_end_byte);
-                    let new_end_character = document.rope.byte_to_char(new_end_byte)
-                        - document.rope.line_to_char(new_end_line);
+                        // rope replace
+                        timeit("rope operations", || {
+                            document.rope.remove(start_char..old_end_char);
+                            document.rope.insert(start_char, &change.text);
+                        });
 
-                    let edit = InputEdit {
-                        start_byte,
-                        old_end_byte,
-                        new_end_byte: start_byte + change.text.len(),
-                        start_position: position_to_point(range.start),
-                        old_end_position: position_to_point(range.end),
-                        new_end_position: Point {
-                            row: new_end_line,
-                            column: new_end_character,
-                        },
-                    };
-                    timeit("tree edit", || document.tree.edit(&edit));
+                        // this must come after the rope was changed!
+                        let start_byte = document.rope.char_to_byte(start_char);
+                        let new_end_byte = start_byte + change.text.len();
+                        let new_end_line = document.rope.byte_to_line(new_end_byte);
+                        let new_end_character = document.rope.byte_to_char(new_end_byte)
+                            - document.rope.line_to_char(new_end_line);
 
-                    let mut parser_guard = self.parser.lock().await;
-                    parser_guard.reset();
+                        let edit = InputEdit {
+                            start_byte,
+                            old_end_byte,
+                            new_end_byte: start_byte + change.text.len(),
+                            start_position: range.start.into(),
+                            old_end_position: position_to_point(range.end),
+                            new_end_position: Point {
+                                row: new_end_line,
+                                column: new_end_character,
+                            },
+                        };
+                        timeit("tree edit", || document.tree.edit(&edit));
 
-                    let tree =
-                        timeit("parsing", || {
+                        parser_guard.reset();
+
+                        let tree = timeit("parsing", || {
                             parser_guard
                         .parse(document.rope.to_string(), Some(&document.tree))
                         .expect("language to be set, no timeout to be used, no cancelation flag")
                         });
-
-                    document.iri_info_map = timeit("gen_class_iri_label_map", || {
-                        gen_iri_info_map(&tree, &document.rope)
-                    });
-                    document.tree = tree;
-                    document.version = params.text_document.version;
-
-                    // diagnostics
-                    // TODO this does not work correctly
-                    document
-                        .diagnostics
-                        .retain(|d| !range_overlaps(&d.range, &range));
-
-                    let mut cursor = document.tree.walk();
-
-                    while range_exclusive_inside(
-                        &range,
-                        &ts_range_to_lsp_range(cursor.node().range()),
-                    ) {
-                        trace!("move in to find error");
-                        if cursor
-                            .goto_first_child_for_point(edit.start_position)
-                            .is_none()
-                        {
-                            break;
-                        }
+                        document.tree = tree;
+                        document.version = params.text_document.version;
+                        range
+                    } else {
+                        document.tree.root_node().range().into()
                     }
-                    cursor.goto_parent();
-                    let node_that_has_change = cursor.node();
-                    drop(cursor);
-                    // while range_overlaps(&ts_range_to_lsp_range(cursor.node().range()), &range) {}
-                    // document.diagnostics =
-                    let additional_diagnostics =
-                        timeit("gen_diagnostics inside did_change", || {
-                            gen_diagnostics(&node_that_has_change)
-                        })
-                        .into_iter()
-                        .filter(|d| range_overlaps(&d.range, &range)); // should be exclusive to other diagnostics
+                })
+                .collect::<Vec<Range>>();
 
-                    document.diagnostics.extend(additional_diagnostics);
+            for range in change_ranges.iter() {
+                let iri_info_map = timeit("gen_class_iri_label_map", || {
+                    gen_iri_info_map(&document.tree, &document.rope, Some(range))
+                });
 
-                    // OK?
-                    let uri = params.text_document.uri.clone();
-                    let d = document.diagnostics.clone();
-                    let c = self.client.clone();
-                    task::spawn(async move {
-                        c.publish_diagnostics(uri, d, None).await;
-                    });
-                } else {
-                    todo!("full replace");
+                // TODO prune
+                // document
+                //     .iri_info_map
+                //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
+
+                document.iri_info_map.extend(iri_info_map);
+            }
+
+            for range in change_ranges.iter() {
+                // diagnostics
+                // TODO this does not work correctly
+                document
+                    .diagnostics
+                    .retain(|d| !range_overlaps(&d.range.into(), range));
+
+                let mut cursor = document.tree.walk();
+
+                while range_exclusive_inside(range, &ts_range_to_lsp_range(cursor.node().range())) {
+                    if cursor
+                        .goto_first_child_for_point(range.start.into())
+                        .is_none()
+                    {
+                        break;
+                    }
                 }
+                cursor.goto_parent();
+                let node_that_has_change = cursor.node();
+                drop(cursor);
+                // while range_overlaps(&ts_range_to_lsp_range(cursor.node().range()), &range) {}
+                // document.diagnostics =
+                let additional_diagnostics = timeit("gen_diagnostics inside did_change", || {
+                    gen_diagnostics(&node_that_has_change)
+                })
+                .into_iter()
+                .filter(|d| range_overlaps(&d.range.into(), &range)); // should be exclusive to other diagnostics
+
+                document.diagnostics.extend(additional_diagnostics);
+
+                // OK?
+                let uri = params.text_document.uri.clone();
+                let d = document.diagnostics.clone();
+                let c = self.client.clone();
+                task::spawn(async move {
+                    c.publish_diagnostics(uri, d, None).await;
+                });
             }
         }
 
@@ -352,70 +471,64 @@ impl LanguageServer for Backend {
 
         self.client.log_message(MessageType::INFO, "hover").await;
 
-        Ok(
-            if let Some(doc) = self
-                .document_map
-                .get(&params.text_document_position_params.text_document.uri)
-            {
-                let pos = params.text_document_position_params.position;
-                let node = deepest_named_node_at_pos(&doc.tree, pos);
-                let info = node_info(&node, &doc);
-                Some(Hover {
+        Ok(self
+            .document_map
+            .get(&params.text_document_position_params.text_document.uri)
+            .map(|document| {
+                let pos = params.text_document_position_params.position.into();
+                let node = deepest_named_node_at_pos(&document.tree, pos);
+                let info = node_info(&node, &document);
+                let range: Range = node.range().into();
+                Hover {
                     contents: HoverContents::Scalar(MarkedString::String(info)),
-                    range: Some(ts_range_to_lsp_range(node.range())),
-                })
-            } else {
-                None
-            },
-        )
+                    range: Some(range.into()),
+                }
+            }))
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         info!("inlay_hint at {}", params.text_document.uri);
 
-        if let Some(document) = self.document_map.get(&params.text_document.uri) {
-            let iri_label_map = &document.iri_info_map;
-            let inline_values = {
+        Ok(self
+            .document_map
+            .get(&params.text_document.uri)
+            .map(|document| {
+                let iri_label_map = &document.iri_info_map;
+
                 let full_iri_query = Query::new(*LANGUAGE, "(full_iri)@iri").unwrap();
-                let root = document.tree.root_node();
+
+                let range: Range = params.range.into();
+
                 let mut query_cursor = QueryCursor::new();
-                query_cursor.set_point_range(
-                    position_to_point(params.range.start)..position_to_point(params.range.end),
-                );
-                let rp = RopeProvider::new(&document.rope);
-                let matches = query_cursor.matches(&full_iri_query, root, rp);
-                matches
+                query_cursor.set_point_range(range.into());
+                query_cursor
+                    .matches(
+                        &full_iri_query,
+                        document.tree.root_node(),
+                        RopeProvider::new(&document.rope),
+                    )
                     .map(|match_| match_.captures[0])
                     .filter_map(|capture| {
-                        let iri = node_text(&capture.node, &document.rope).to_string();
-
-                        iri_label_map.get(&iri).and_then(|info| {
+                        let iri = &node_text(&capture.node, &document.rope).to_string();
+                        iri_label_map.get(iri).and_then(|info| {
                             let node = capture.node;
-                            let end = node.end_position(); // inlay hints are at the end of the iri
+                            let end: Position = node.end_position().into(); // inlay hints are at the end of the iri
 
                             // TODO write a tooltip
-                            info.label
-                                .clone()
-                                .map(trim_string_value)
-                                .map(|label| InlayHint {
-                                    position: point_to_positon(end),
-                                    label: InlayHintLabel::String(label),
-                                    kind: None,
-                                    text_edits: None,
-                                    tooltip: None,
-                                    padding_left: Some(true), // TOOD test what is possible
-                                    padding_right: None,
-                                    data: None,
-                                })
+                            info.label().map(trim_string_value).map(|label| InlayHint {
+                                position: end.into(),
+                                label: InlayHintLabel::String(label),
+                                kind: None,
+                                text_edits: None,
+                                tooltip: None,
+                                padding_left: Some(true),
+                                padding_right: None,
+                                data: None,
+                            })
                         })
                     })
                     .collect::<Vec<InlayHint>>()
-            };
-
-            Ok(Some(inline_values))
-        } else {
-            Ok(None)
-        }
+            }))
     }
 
     async fn goto_definition(
@@ -424,7 +537,7 @@ impl LanguageServer for Backend {
     ) -> Result<Option<GotoDefinitionResponse>> {
         let uri = params.text_document_position_params.text_document.uri;
         if let Some(doc) = self.document_map.get(&uri) {
-            let pos = params.text_document_position_params.position;
+            let pos: Position = params.text_document_position_params.position.into();
 
             let leaf_node = deepest_named_node_at_pos(&doc.tree, pos);
             if ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind()) {
@@ -461,9 +574,10 @@ impl LanguageServer for Backend {
                     let mut matches = query_cursor.matches(&definition_query, root, rp);
 
                     matches.next().map(|m| {
+                        let range: Range = m.captures[0].node.range().into();
                         GotoDefinitionResponse::Scalar(Location {
                             uri,
-                            range: ts_range_to_lsp_range(m.captures[0].node.range()),
+                            range: range.into(),
                         })
                     })
                 }))
@@ -480,7 +594,7 @@ impl LanguageServer for Backend {
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         let url = params.text_document.uri;
         let doc = self.document_map.get(&url).unwrap();
-        let end = point_to_positon(doc.tree.root_node().range().end_point);
+        let end: Position = doc.tree.root_node().range().end_point.into();
 
         Ok(Some(vec![CodeActionOrCommand::CodeAction(CodeAction {
             title: "add class".to_string(),
@@ -488,7 +602,10 @@ impl LanguageServer for Backend {
                 changes: Some(HashMap::from([(
                     url,
                     vec![TextEdit {
-                        range: Range { start: end, end },
+                        range: lsp_types::Range {
+                            start: end.into(),
+                            end: end.into(),
+                        },
                         new_text:
                             "\nClass: new_class\n    Annotations:\n        rdfs:label \"new class\""
                                 .to_string(),
@@ -507,7 +624,8 @@ impl LanguageServer for Backend {
     }
 }
 
-fn gen_iri_info_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, IriInfo> {
+// TODO only do this in a range of changed content
+fn gen_iri_info_map(tree: &Tree, rope: &Rope, range: Option<&Range>) -> DashMap<Iri, IriInfo> {
     info!("generating iri info map");
 
     // TODO check frame [(datatype_frame) (class_frame) (object_property_frame) (data_property_frame) (annotation_property_frame) (individual_frame)]
@@ -523,11 +641,14 @@ fn gen_iri_info_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, IriInfo> {
                     (typed_literal)
                 ]@literal))";
 
-    let rp = RopeProvider::new(rope);
     let frame_query = Query::new(*LANGUAGE, frame_source).expect("valid query expect");
-    let root = tree.root_node();
     let mut query_cursor = QueryCursor::new();
-    let matches = query_cursor.matches(&frame_query, root, rp);
+
+    if let Some(range) = range {
+        query_cursor.set_point_range((*range).into());
+    }
+
+    let matches = query_cursor.matches(&frame_query, tree.root_node(), RopeProvider::new(rope));
 
     let infos = DashMap::<Iri, IriInfo>::new();
 
@@ -540,6 +661,7 @@ fn gen_iri_info_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, IriInfo> {
         let parent_node = m.captures[0].node.parent().unwrap();
         let entity = match parent_node.kind() {
             "class_iri" => IriType::Class,
+            "datatype_iri" => IriType::DataType,
             "annotation_property_iri" => IriType::AnnotationProperty,
             "individual_iri" => IriType::Individual,
             "ontology_iri" => IriType::Ontology,
@@ -555,7 +677,6 @@ fn gen_iri_info_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, IriInfo> {
             infos.insert(
                 frame_iri.clone(),
                 IriInfo {
-                    label: None,
                     annotations: HashMap::new(),
                     tipe: entity,
                 },
@@ -563,11 +684,13 @@ fn gen_iri_info_map(tree: &Tree, rope: &Rope) -> DashMap<Iri, IriInfo> {
         }
 
         let mut info = infos.get_mut(&frame_iri).unwrap();
-        info.annotations
-            .insert(annotation_iri.clone(), literal.clone());
-        if annotation_iri == "rdfs:label" {
-            info.label = Some(literal);
-        }
+        info.annotations.insert(
+            annotation_iri.clone(),
+            ResolvedIri {
+                value: literal.clone(),
+                range: parent_node.range().into(),
+            },
+        );
     }
     infos
 }
@@ -600,9 +723,14 @@ impl<'a> RopeProvider<'a> {
         RopeProvider(value.slice(..))
     }
 }
+impl<'a> From<&'a Rope> for RopeProvider<'a> {
+    fn from(value: &'a Rope) -> Self {
+        RopeProvider::new(value)
+    }
+}
 
-fn gen_diagnostics(root: &Node) -> Vec<Diagnostic> {
-    let mut cursor = root.walk();
+fn gen_diagnostics(node: &Node) -> Vec<Diagnostic> {
+    let mut cursor = node.walk();
     let mut diagnostics = Vec::<Diagnostic>::new();
 
     loop {
@@ -610,7 +738,7 @@ fn gen_diagnostics(root: &Node) -> Vec<Diagnostic> {
 
         if node.is_error() {
             // log
-            let range = cursor.node().range();
+            let range: Range = cursor.node().range().into();
 
             // root has no parents so use itself
             let parent_kind = node.parent().unwrap_or(node).kind();
@@ -629,10 +757,7 @@ fn gen_diagnostics(root: &Node) -> Vec<Diagnostic> {
                 let msg = format!("Syntax Error. expected {valid_children} inside {parent}");
 
                 diagnostics.push(Diagnostic {
-                    range: Range {
-                        start: point_to_positon(range.start_point),
-                        end: point_to_positon(range.end_point),
-                    },
+                    range: range.into(),
                     severity: Some(DiagnosticSeverity::ERROR),
                     code: None,
                     code_description: None,
@@ -847,8 +972,7 @@ fn iri_info(iri: &String, doc: &Document) -> String {
     if let Some(info) = doc.iri_info_map.get(iri) {
         let entity = info.tipe;
         let label = info
-            .label
-            .clone()
+            .label()
             .map(trim_string_value)
             .unwrap_or("(no label)".to_string());
 
@@ -858,7 +982,7 @@ fn iri_info(iri: &String, doc: &Document) -> String {
             .map(|(iri, v)| {
                 let label = doc.resolve_iri(iri);
                 let label = trim_string_value(label);
-                let v = trim_string_value(v.clone());
+                let v = trim_string_value(v.value.clone());
                 format!("`{label}`: {v}")
             })
             .intersperse("\n".to_string())

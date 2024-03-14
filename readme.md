@@ -62,22 +62,26 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
   - class_frame
 - inlay_hint
   - class_iri
+- goto_definition
+  - annotation_property_iri
+
+
+### Doing
+- goto_definition
+  - object_property_iri
+  - data_property_iri
+  - datatype_iri // not working
+  - individual_iri
 
 ### Planned
 
 - inlay_hint
+  - other frame types
   - others
 - hover
+  - other frame types
+  - keywords
   - others
-- goto_definition
-  - datatype_iri
-  - annotation_property_iri
-  - ontology_iri
-  - data_property_iri
-  - version_iri
-  - object_property_iri
-  - annotation_property_iri_annotated_list
-  - individual_iri
 - document_symbol
 - code_action (all kinds of quick actions)
 - rename
@@ -133,3 +137,8 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
   - annotation property
   - individual
   - misc
+
+# Interesting stuff
+- When you apply a text edit you should not re generate the cache for each edit.
+- What could be paralell
+- what to cache and what to query
