@@ -70,17 +70,19 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
 - inlay_hint
   - class_iri
 - goto_definition
+  - class_iri
   - annotation_property_iri
+  - object_property_iri
+  - data_property_iri
+  - individual_iri
 
 
 ### Doing
-- goto_definition
-  - object_property_iri
-  - data_property_iri
-  - datatype_iri // not working
-  - individual_iri
 
 ### Planned
+
+- goto_definition
+  - datatype_iri // not working
 
 - full replace
 

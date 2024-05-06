@@ -1,6 +1,6 @@
 Ontology: foobar
 
-AnnotationProperty: <http://purl.obolibrary.org/obo/uo#abnormal_slim>
+ObjectProperty: <http://purl.obolibrary.org/obo/uo#abnormal_slim>
 
     Annotations: 
         rdfs:comment "Abnormal/normal slim"^^xsd:string

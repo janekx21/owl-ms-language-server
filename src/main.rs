@@ -573,6 +573,35 @@ impl LanguageServer for Backend {
                         )@frame",
                         iri
                     )),
+                    "object_property_iri" => Some(format!(
+                        "(object_property_frame
+                            . (object_property_iri)@iri
+                            (#eq? @iri \"{}\")
+                        )@frame",
+                        iri
+                    )),
+                    "data_property_iri" => Some(format!(
+                        "(data_property_frame
+                            . (data_property_iri)@iri
+                            (#eq? @iri \"{}\")
+                        )@frame",
+                        iri
+                    )),
+                    "individual_iri" => Some(format!(
+                        "(individual_frame
+                            . (individual_iri)@iri
+                            (#eq? @iri \"{}\")
+                        )@frame",
+                        iri
+                    )),
+                    // TODO this is not working :/
+                    // "datatype_iri" => Some(format!(
+                    //     "(datatype_frame
+                    //         . (datatype_iri)@iri
+                    //         (#eq? @iri \"{}\")
+                    //     )@frame",
+                    //     iri
+                    // )),
                     _ => None,
                 };
 
