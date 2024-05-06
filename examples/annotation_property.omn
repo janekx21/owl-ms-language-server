@@ -1,0 +1,17 @@
+Ontology: foobar
+
+AnnotationProperty: <http://purl.obolibrary.org/obo/uo#abnormal_slim>
+
+    Annotations: 
+        rdfs:comment "Abnormal/normal slim"^^xsd:string
+        ,rdfs:label "abnormal"
+    
+    SubPropertyOf: 
+        <http://www.geneontology.org/formats/oboInOwl#SubsetProperty>
+
+AnnotationProperty: <http://purl.obolibrary.org/obo/uo#other>
+    Annotations:
+        rdfs:label "other"
+    SubPropertyOf: 
+        <http://www.geneontology.org/formats/oboInOwl#SubsetProperty>
+

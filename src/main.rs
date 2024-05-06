@@ -561,14 +561,14 @@ impl LanguageServer for Backend {
                 let query = match parent_kind {
                     "class_iri" => Some(format!(
                         "(class_frame
-                            (class_iri)@iri
+                            . (class_iri)@iri
                             (#eq? @iri \"{}\")
                         )@frame",
                         iri
                     )),
                     "annotation_property_iri" => Some(format!(
                         "(annotation_property_frame
-                            (annotation_property_iri)@iri
+                            . (annotation_property_iri)@iri
                             (#eq? @iri \"{}\")
                         )@frame",
                         iri

@@ -10,7 +10,7 @@ An incremental analysis assistant for writing ontologies with the [OWL 2 Web Ont
 
 Add the language server, language and grammar to your `languages.toml`.
 
-```
+```toml
 [language-server.owl-ms-language-server]
 command = "owl-ms-language-server"
 
@@ -29,6 +29,13 @@ grammar = "owl-ms" # this is the default
 [[grammar]]
 name = "owl-ms"
 source = { git = "https://github.com/janekx21/tree-sitter-owl2-manchester-syntax", rev = "a55d6bdd3104cd64bfe7178395aa6a139b5632a9" } # replace rev with head of the repository
+```
+
+Then fetch and build the grammar.
+
+```shell
+helix --grammar fetch
+helix --grammar build
 ```
 
 See the helix documentation page on [adding languages](https://docs.helix-editor.com/guides/adding_languages.html).
