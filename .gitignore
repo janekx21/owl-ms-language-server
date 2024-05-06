@@ -7,3 +7,4 @@ dist
 *.log
 perf.data
 flamegraph.svg
+examples/oeo-full.omn

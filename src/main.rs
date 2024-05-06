@@ -296,13 +296,15 @@ impl LanguageServer for Backend {
         let mut parser_guard = self.parser.lock().await;
         parser_guard.reset();
 
-        let tree = parser_guard
-            .parse(&params.text_document.text, None)
-            .expect("language to be set, no timeout to be used, no cancelation flag");
+        let tree = timeit("did_open > inital parse", || {
+            parser_guard
+                .parse(&params.text_document.text, None)
+                .expect("language to be set, no timeout to be used, no cancelation flag")
+        });
 
         let rope = Rope::from(params.text_document.text);
         let iri_info_map = gen_iri_info_map(&tree, &rope, None);
-        let diagnostics = timeit("gen_diagnostics inside did_open", || {
+        let diagnostics = timeit("did_open > gen_diagnostics", || {
             gen_diagnostics(&tree.root_node())
         });
 
@@ -340,9 +342,6 @@ impl LanguageServer for Backend {
                 return; // no change needed
             }
 
-            let use_full_replace = params.content_changes.len() > FULL_REPLACE_THRESHOLD;
-
-            let mut parser_guard = self.parser.lock().await;
             let change_ranges = params
                 .content_changes
                 .iter()
@@ -390,14 +389,6 @@ impl LanguageServer for Backend {
                         };
                         timeit("tree edit", || document.tree.edit(&edit));
 
-                        parser_guard.reset();
-
-                        let tree = timeit("parsing", || {
-                            parser_guard
-                        .parse(document.rope.to_string(), Some(&document.tree))
-                        .expect("language to be set, no timeout to be used, no cancelation flag")
-                        });
-                        document.tree = tree;
                         document.version = params.text_document.version;
                         range
                     } else {
@@ -405,6 +396,28 @@ impl LanguageServer for Backend {
                     }
                 })
                 .collect::<Vec<Range>>();
+
+            let mut parser_guard = self.parser.lock().await;
+            parser_guard.reset();
+            let tree = timeit("parsing", || {
+                parser_guard
+                    .parse(document.rope.to_string(), Some(&document.tree))
+                    .expect("language to be set, no timeout to be used, no cancelation flag")
+            });
+            document.tree = tree;
+
+            let use_full_replace = params.content_changes.len() > FULL_REPLACE_THRESHOLD;
+            if use_full_replace {
+                document.iri_info_map = gen_iri_info_map(&document.tree, &document.rope, None);
+
+                let diagnostics = gen_diagnostics(&document.tree.root_node());
+                document.diagnostics = diagnostics.clone();
+
+                self.client
+                    .publish_diagnostics(params.text_document.uri, diagnostics, None)
+                    .await;
+                return;
+            }
 
             for range in change_ranges.iter() {
                 let iri_info_map = timeit("gen_class_iri_label_map", || {
@@ -441,7 +454,7 @@ impl LanguageServer for Backend {
                 drop(cursor);
                 // while range_overlaps(&ts_range_to_lsp_range(cursor.node().range()), &range) {}
                 // document.diagnostics =
-                let additional_diagnostics = timeit("gen_diagnostics inside did_change", || {
+                let additional_diagnostics = timeit("did_change > gen_diagnostics", || {
                     gen_diagnostics(&node_that_has_change)
                 })
                 .into_iter()

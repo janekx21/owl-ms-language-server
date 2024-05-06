@@ -75,6 +75,8 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
 
 ### Planned
 
+- full replace
+
 - inlay_hint
   - other frame types
   - others
@@ -142,3 +144,4 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
 - When you apply a text edit you should not re generate the cache for each edit.
 - What could be paralell
 - what to cache and what to query
+- steps that accour when a document changes with edits
