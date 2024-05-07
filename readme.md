@@ -79,6 +79,10 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
 
 ### Doing
 
+- completion
+  This should complete iris and keywords
+  - some keywords work already
+
 ### Planned
 
 - goto_definition
@@ -116,7 +120,6 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
 - semantic_tokens
 - inline_value
 - moniker
-- completion
 - workspace_diagnostic
 - signature_help
 - document_color

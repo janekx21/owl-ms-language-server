@@ -1,6 +1,6 @@
 #![feature(async_closure, iter_intersperse)]
 use dashmap::DashMap;
-use log::{error, info, LevelFilter};
+use log::{error, info, log, LevelFilter};
 use once_cell::sync::Lazy;
 use ropey::{Rope, RopeSlice};
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tree_sitter::{
-    InputEdit, Language, Node, Parser, Point, Query, QueryCursor, TextProvider, Tree,
+    InputEdit, Language, Node, Parser, Point, Query, QueryCursor, TextProvider, Tree, TreeCursor,
 };
 use tree_sitter_owl_ms::language;
 
@@ -196,7 +196,7 @@ impl Document {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 struct StaticNode {
     #[serde(rename = "type")]
@@ -207,7 +207,7 @@ struct StaticNode {
     children: StaticNodeChildren,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 struct StaticNodeChildren {
     multiple: bool,
@@ -275,6 +275,9 @@ impl LanguageServer for Backend {
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                completion_provider: Some(CompletionOptions {
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
         })
@@ -660,6 +663,45 @@ impl LanguageServer for Backend {
         })]))
     }
 
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let url = params.text_document_position.text_document.uri;
+        let doc = self.document_map.get(&url);
+        let pos: Position = params.text_document_position.position.into();
+        Ok(doc.map(|doc| {
+            let mut cursor = doc.tree.walk();
+            cursor_goto_pos(&mut cursor, pos);
+            while cursor.node().is_error() {
+                if !cursor.goto_parent() {
+                    break; // we reached the root
+                }
+            }
+            let parent_kind = cursor.node().kind();
+            let possible_children = NODE_TYPES
+                .get(parent_kind)
+                .map(|static_node| static_node.children.types.clone())
+                .unwrap_or_default();
+
+            let keywords = possible_children
+                .iter()
+                .filter_map(|child| node_type_to_keyword(child._type.as_ref()))
+                .map(|keyword| CompletionItem {
+                    label: keyword,
+                    ..Default::default()
+                });
+
+            let mut items = vec![
+                // CompletionItem {
+                //     label: parent_kind.to_string(),
+                //     ..Default::default()
+                // }
+            ];
+
+            items.extend(keywords);
+
+            CompletionResponse::Array(items)
+        }))
+    }
+
     async fn shutdown(&self) -> Result<()> {
         info!("shutdown");
         Ok(())
@@ -987,6 +1029,22 @@ fn deepest_named_node_at_pos(tree: &Tree, pos: Position) -> Node {
     return cursor.node();
 }
 
+fn cursor_goto_pos(cursor: &mut TreeCursor, pos: Position) {
+    loop {
+        let is_leaf = cursor
+            .goto_first_child_for_point(position_to_point(pos))
+            .is_none();
+        if is_leaf {
+            break;
+        }
+    }
+    while !cursor.node().is_named() {
+        if !cursor.goto_parent() {
+            break;
+        }
+    }
+}
+
 fn node_info(node: &Node, doc: &Document) -> String {
     match node.kind() {
         "class_frame" | "annotation_property_frame" => {
@@ -1060,5 +1118,14 @@ impl Display for IriType {
             IriType::Ontology => "Ontology",
         };
         write!(f, "{name}")
+    }
+}
+
+fn node_type_to_keyword(_type: &str) -> Option<String> {
+    match _type {
+        "annotation_property_frame" => Some("AnnotationProperty:".to_string()),
+        "class_frame" => Some("Class:".to_string()),
+        "annotation" => Some("Annotations:".to_string()),
+        _ => None,
     }
 }
