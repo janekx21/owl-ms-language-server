@@ -32,3 +32,8 @@ AnnotationProperty: <http://openenergy-platform.org/ontology/oeo/OEO_00040001>
 Class: new_class
     Annotations:
         rdfs:label "new class"
+
+Datatype: <http://openenergy-platform.org/ontology/oeo/OEO_00040005>
+    Annotations: 
+        rdfs:label "foobar label"
+

@@ -598,15 +598,16 @@ impl LanguageServer for Backend {
                         iri
                     )),
                     // TODO this is not working :/
-                    // "datatype_iri" => Some(format!(
-                    //     "(datatype_frame
-                    //         . (datatype_iri)@iri
-                    //         (#eq? @iri \"{}\")
-                    //     )@frame",
-                    //     iri
-                    // )),
+                    "datatype_iri" => Some(format!(
+                        "(datatype_frame
+                            . (datatype_iri)@iri
+                            (#eq? @iri \"{}\")
+                        )@frame",
+                        iri
+                    )),
                     _ => None,
                 };
+                info!("{:?}", query);
 
                 Ok(query.and_then(|query_text| {
                     let definition_query = Query::new(*LANGUAGE, query_text.as_str())
@@ -946,7 +947,7 @@ fn node_text<'a>(node: &Node, rope: &'a Rope) -> ropey::RopeSlice<'a> {
 }
 
 #[test]
-fn test_parser() {
+fn test_parse() {
     let mut parser = Parser::new();
     parser.set_language(*LANGUAGE).unwrap();
 
@@ -956,6 +957,20 @@ fn test_parser() {
     assert_eq!(
         tree.root_node().to_sexp(),
         "(source_file (ontology (ontology_iri (simple_iri))))"
+    );
+}
+
+#[test]
+fn test_parse_datatype() {
+    let mut parser = Parser::new();
+    parser.set_language(*LANGUAGE).unwrap();
+
+    let source_code = "Ontology: o\nDatatype: d";
+    let tree = parser.parse(source_code, None).unwrap();
+
+    assert_eq!(
+        tree.root_node().to_sexp(),
+        "(source_file (ontology (ontology_iri (simple_iri)) (datatype_frame (datatype_iri (simple_iri)))))"
     );
 }
 
@@ -1121,6 +1136,7 @@ impl Display for IriType {
     }
 }
 
+// TODO extend with other keywords
 fn node_type_to_keyword(_type: &str) -> Option<String> {
     match _type {
         "annotation_property_frame" => Some("AnnotationProperty:".to_string()),

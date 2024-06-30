@@ -69,30 +69,32 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
   - class_frame
 - inlay_hint
   - class_iri
+  - datatype
+  - class
+  - object property
+  - data property
+  - annotation property
+  - individual
 - goto_definition
   - class_iri
   - annotation_property_iri
   - object_property_iri
   - data_property_iri
   - individual_iri
-
+- goto_definition
+  - datatype_iri // not working
+    - es lag daran, dass in der grammar datatype nicht hidden war
+- completion
+  - some keywords work
 
 ### Doing
 
-- completion
-  This should complete iris and keywords
-  - some keywords work already
 
 ### Planned
 
-- goto_definition
-  - datatype_iri // not working
-
+- completion
+  - iris
 - full replace
-
-- inlay_hint
-  - other frame types
-  - others
 - hover
   - other frame types
   - keywords
