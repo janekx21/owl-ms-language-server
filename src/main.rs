@@ -1,6 +1,6 @@
 #![feature(async_closure, iter_intersperse)]
 use dashmap::DashMap;
-use log::{error, info, log, LevelFilter};
+use log::{error, info, LevelFilter};
 use once_cell::sync::Lazy;
 use ropey::{Rope, RopeSlice};
 use serde::{Deserialize, Serialize};
@@ -64,14 +64,23 @@ impl From<tower_lsp::lsp_types::Position> for Position {
     }
 }
 
-impl Into<tower_lsp::lsp_types::Position> for Position {
-    fn into(self) -> tower_lsp::lsp_types::Position {
+impl From<Position> for tower_lsp::lsp_types::Position {
+    fn from(value: Position) -> Self {
         tower_lsp::lsp_types::Position {
-            line: self.line,
-            character: self.character,
+            line: value.line,
+            character: value.character,
         }
     }
 }
+
+// impl Into<tower_lsp::lsp_types::Position> for Position {
+//     fn into(self) -> tower_lsp::lsp_types::Position {
+//         tower_lsp::lsp_types::Position {
+//             line: self.line,
+//             character: self.character,
+//         }
+//     }
+// }
 
 impl From<tree_sitter::Point> for Position {
     fn from(value: tree_sitter::Point) -> Self {
@@ -82,14 +91,23 @@ impl From<tree_sitter::Point> for Position {
     }
 }
 
-impl Into<tree_sitter::Point> for Position {
-    fn into(self) -> tree_sitter::Point {
+impl From<Position> for tree_sitter::Point {
+    fn from(value: Position) -> tree_sitter::Point {
         tree_sitter::Point {
-            row: self.line as usize,
-            column: self.character as usize,
+            row: value.line as usize,
+            column: value.character as usize,
         }
     }
 }
+
+// impl Into<tree_sitter::Point> for Position {
+//     fn into(self) -> tree_sitter::Point {
+//         tree_sitter::Point {
+//             row: self.line as usize,
+//             column: self.character as usize,
+//         }
+//     }
+// }
 
 #[derive(Clone, Copy)]
 struct Range {
@@ -106,14 +124,23 @@ impl From<tower_lsp::lsp_types::Range> for Range {
     }
 }
 
-impl Into<tower_lsp::lsp_types::Range> for Range {
-    fn into(self) -> tower_lsp::lsp_types::Range {
+impl From<Range> for tower_lsp::lsp_types::Range {
+    fn from(value: Range) -> tower_lsp::lsp_types::Range {
         tower_lsp::lsp_types::Range {
-            start: self.start.into(),
-            end: self.end.into(),
+            start: value.start.into(),
+            end: value.end.into(),
         }
     }
 }
+
+// impl Into<tower_lsp::lsp_types::Range> for Range {
+//     fn into(self) -> tower_lsp::lsp_types::Range {
+//         tower_lsp::lsp_types::Range {
+//             start: self.start.into(),
+//             end: self.end.into(),
+//         }
+//     }
+// }
 
 impl From<tree_sitter::Range> for Range {
     fn from(value: tree_sitter::Range) -> Self {
@@ -124,11 +151,17 @@ impl From<tree_sitter::Range> for Range {
     }
 }
 
-impl Into<std::ops::Range<Point>> for Range {
-    fn into(self) -> std::ops::Range<Point> {
-        self.start.into()..self.end.into()
+impl From<Range> for std::ops::Range<Point> {
+    fn from(value: Range) -> std::ops::Range<Point> {
+        value.start.into()..value.end.into()
     }
 }
+
+// impl Into<std::ops::Range<Point>> for Range {
+//     fn into(self) -> std::ops::Range<Point> {
+//         self.start.into()..self.end.into()
+//     }
+// }
 
 // TODO
 // impl Into<tree_sitter::Range> for Range {
@@ -461,7 +494,7 @@ impl LanguageServer for Backend {
                     gen_diagnostics(&node_that_has_change)
                 })
                 .into_iter()
-                .filter(|d| range_overlaps(&d.range.into(), &range)); // should be exclusive to other diagnostics
+                .filter(|d| range_overlaps(&d.range.into(), range)); // should be exclusive to other diagnostics
 
                 document.diagnostics.extend(additional_diagnostics);
 
@@ -669,6 +702,7 @@ impl LanguageServer for Backend {
         let doc = self.document_map.get(&url);
         let pos: Position = params.text_document_position.position.into();
         Ok(doc.map(|doc| {
+            // generate keyword list that can be applied. Note that this is missing some keywords because of limitations in the grammar.
             let mut cursor = doc.tree.walk();
             cursor_goto_pos(&mut cursor, pos);
             while cursor.node().is_error() {
@@ -696,6 +730,30 @@ impl LanguageServer for Backend {
                 //     ..Default::default()
                 // }
             ];
+
+            // Generate the list of iris that can be inserted.
+            let child_node_types: Vec<String> = possible_children
+                .iter()
+                .filter_map(|child| node_type_to_keyword(child._type.as_ref()))
+                .collect();
+            info!("parent kind {}", parent_kind);
+            info!("child node type {:?}", child_node_types);
+
+            let partial_text = node_text(&cursor.node(), &doc.rope).to_string();
+
+            if parent_kind == "simple_iri" {
+                let iris: Vec<CompletionItem> = doc
+                    .iri_info_map
+                    .iter()
+                    .filter(|item| item.key().contains(partial_text.as_str()))
+                    .map(|item| item.key().clone())
+                    .map(|iri| CompletionItem {
+                        label: iri,
+                        ..Default::default()
+                    })
+                    .collect();
+                items.extend(iris);
+            }
 
             items.extend(keywords);
 
@@ -1136,12 +1194,24 @@ impl Display for IriType {
     }
 }
 
-// TODO extend with other keywords
+// TODO this could be event better, if the grammar would consider all possible sub properties like "sub_class_of" for every frame type. This can be done by splitting a buch of rules up or returning a list of possible keywords for node types.
 fn node_type_to_keyword(_type: &str) -> Option<String> {
     match _type {
-        "annotation_property_frame" => Some("AnnotationProperty:".to_string()),
+        "ontology" => Some("Ontology:".to_string()),
+        "import" => Some("Import:".to_string()),
         "class_frame" => Some("Class:".to_string()),
+        "datatype_frame" => Some("Datatype:".to_string()),
+        "object_property_frame" => Some("ObjectPropertyFrame:".to_string()),
+        "annotation_property_frame" => Some("AnnotationProperty:".to_string()),
+        "data_property_frame" => Some("DataPropertyFrame:".to_string()),
+        "individual_frame" => Some("IndividualFrame:".to_string()),
         "annotation" => Some("Annotations:".to_string()),
+        "datatype_equavalent_to" => Some("EquivalentTo:".to_string()),
+        "sub_class_of" => Some("SubClassOf:".to_string()),
+        "equavalent_to" => Some("EquivalentTo:".to_string()),
+        "disjoint_with" => Some("DisjointWith:".to_string()),
+        "disjoint_union_of" => Some("DisjointUnionOf".to_string()),
+        "has_key" => Some("HasKey:".to_string()),
         _ => None,
     }
 }
