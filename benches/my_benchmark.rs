@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use tree_sitter::{InputEdit, Language, Parser, Point, Query, QueryCursor, QueryMatch, Tree};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use tree_sitter::{Language, Parser};
 
 extern "C" {
     fn tree_sitter_owl_ms() -> Language;

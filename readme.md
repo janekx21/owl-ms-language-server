@@ -81,19 +81,17 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
   - object_property_iri
   - data_property_iri
   - individual_iri
-- goto_definition
-  - datatype_iri // not working
+  - datatype_iri
     - es lag daran, dass in der grammar datatype nicht hidden war
 - completion
   - some keywords work
+  - iris // just simple
 
 ### Doing
 
 
 ### Planned
 
-- completion
-  - iris
 - full replace
 - hover
   - other frame types

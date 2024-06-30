@@ -970,7 +970,7 @@ fn capitilize_string(s: &str) -> String {
 
 /// only looks at the lines
 fn range_overlaps(a: &Range, b: &Range) -> bool {
-    (a.start.line <= b.end.line && a.end.line >= b.start.line)
+    !(a.start.line > b.end.line || a.end.line < b.start.line)
         || (b.start.line <= a.end.line && b.end.line >= a.start.line)
 }
 
