@@ -1,8 +1,17 @@
 #![feature(async_closure, iter_intersperse)]
+mod position;
+mod range;
+mod rope_provider;
+#[cfg(test)]
+mod tests;
+
 use dashmap::DashMap;
-use log::{error, info, LevelFilter};
+use log::{debug, error, LevelFilter};
 use once_cell::sync::Lazy;
-use ropey::{Rope, RopeSlice};
+use position::Position;
+use range::{range_exclusive_inside, range_overlaps, Range};
+use rope_provider::RopeProvider;
+use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -11,10 +20,10 @@ use tokio::task;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-use tree_sitter::{
-    InputEdit, Language, Node, Parser, Point, Query, QueryCursor, TextProvider, Tree, TreeCursor,
-};
+use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree, TreeCursor};
 use tree_sitter_owl_ms::language;
+
+// Constants
 
 static FULL_REPLACE_THRESHOLD: usize = 10;
 
@@ -30,180 +39,7 @@ static NODE_TYPES: Lazy<DashMap<String, StaticNode>> = Lazy::new(|| {
     )
 });
 
-// static FRAME_TYPES: [&str; 6] = [
-//     "datatype_frame",
-//     "class_frame",
-//     "object_property_frame",
-//     "data_property_frame",
-//     "annotation_property_frame",
-//     "individual_frame",
-// ];
-
-// static FRAME_QUERY_SOURCE: Lazy<String> = Lazy::new(|| {
-//     FRAME_TYPES
-//         .iter()
-//         .map(|ft| format!("({ft})"))
-//         .intersperse(" ".to_string())
-//         .collect::<String>()
-// });
-
-type Iri = String;
-
-#[derive(Clone, Copy)]
-struct Position {
-    line: u32,
-    character: u32,
-}
-
-impl From<tower_lsp::lsp_types::Position> for Position {
-    fn from(value: tower_lsp::lsp_types::Position) -> Self {
-        Position {
-            line: value.line,
-            character: value.character,
-        }
-    }
-}
-
-impl From<Position> for tower_lsp::lsp_types::Position {
-    fn from(value: Position) -> Self {
-        tower_lsp::lsp_types::Position {
-            line: value.line,
-            character: value.character,
-        }
-    }
-}
-
-// impl Into<tower_lsp::lsp_types::Position> for Position {
-//     fn into(self) -> tower_lsp::lsp_types::Position {
-//         tower_lsp::lsp_types::Position {
-//             line: self.line,
-//             character: self.character,
-//         }
-//     }
-// }
-
-impl From<tree_sitter::Point> for Position {
-    fn from(value: tree_sitter::Point) -> Self {
-        Position {
-            line: value.row as u32,
-            character: value.column as u32,
-        }
-    }
-}
-
-impl From<Position> for tree_sitter::Point {
-    fn from(value: Position) -> tree_sitter::Point {
-        tree_sitter::Point {
-            row: value.line as usize,
-            column: value.character as usize,
-        }
-    }
-}
-
-// impl Into<tree_sitter::Point> for Position {
-//     fn into(self) -> tree_sitter::Point {
-//         tree_sitter::Point {
-//             row: self.line as usize,
-//             column: self.character as usize,
-//         }
-//     }
-// }
-
-#[derive(Clone, Copy)]
-struct Range {
-    start: Position,
-    end: Position,
-}
-
-impl From<tower_lsp::lsp_types::Range> for Range {
-    fn from(value: tower_lsp::lsp_types::Range) -> Self {
-        Range {
-            start: value.start.into(),
-            end: value.end.into(),
-        }
-    }
-}
-
-impl From<Range> for tower_lsp::lsp_types::Range {
-    fn from(value: Range) -> tower_lsp::lsp_types::Range {
-        tower_lsp::lsp_types::Range {
-            start: value.start.into(),
-            end: value.end.into(),
-        }
-    }
-}
-
-// impl Into<tower_lsp::lsp_types::Range> for Range {
-//     fn into(self) -> tower_lsp::lsp_types::Range {
-//         tower_lsp::lsp_types::Range {
-//             start: self.start.into(),
-//             end: self.end.into(),
-//         }
-//     }
-// }
-
-impl From<tree_sitter::Range> for Range {
-    fn from(value: tree_sitter::Range) -> Self {
-        Range {
-            start: value.start_point.into(),
-            end: value.end_point.into(),
-        }
-    }
-}
-
-impl From<Range> for std::ops::Range<Point> {
-    fn from(value: Range) -> std::ops::Range<Point> {
-        value.start.into()..value.end.into()
-    }
-}
-
-// impl Into<std::ops::Range<Point>> for Range {
-//     fn into(self) -> std::ops::Range<Point> {
-//         self.start.into()..self.end.into()
-//     }
-// }
-
-// TODO
-// impl Into<tree_sitter::Range> for Range {
-//     fn into(self) -> tree_sitter::Range {
-//         tower_lsp::lsp_types::Range {
-//             start: self.start.into(),
-//             end: self.end.into(),
-//         }
-//     }
-// }
-
-/// taken from https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing
-#[derive(Clone, Copy)]
-enum IriType {
-    Class,
-    DataType,
-    ObjectProperty,
-    DataProperty,
-    AnnotationProperty,
-    Individual,
-    Ontology,
-}
-
-#[derive(Clone)]
-struct IriInfo {
-    annotations: HashMap<Iri, ResolvedIri>,
-    tipe: IriType,
-}
-
-impl IriInfo {
-    fn label(&self) -> Option<String> {
-        self.annotations
-            .get("rdfs:label")
-            .map(|resolved| resolved.value.clone())
-    }
-}
-
-#[derive(Clone)]
-struct ResolvedIri {
-    value: String,
-    range: Range,
-}
+// Model
 
 struct Backend {
     client: Client,
@@ -219,15 +55,19 @@ struct Document {
     iri_info_map: DashMap<Iri, IriInfo>,
     diagnostics: Vec<Diagnostic>,
 }
-
-impl Document {
-    fn resolve_iri(&self, iri: &String) -> String {
-        self.iri_info_map
-            .get(iri)
-            .and_then(|iri_info| iri_info.label())
-            .unwrap_or(iri.clone())
-    }
+#[derive(Clone)]
+struct IriInfo {
+    annotations: HashMap<Iri, ResolvedIri>,
+    tipe: IriType,
 }
+
+#[derive(Clone)]
+struct ResolvedIri {
+    value: String,
+    _range: Range,
+}
+
+type Iri = String;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -246,6 +86,18 @@ struct StaticNodeChildren {
     multiple: bool,
     required: bool,
     types: Vec<StaticNode>,
+}
+
+/// taken from https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing
+#[derive(Clone, Copy)]
+enum IriType {
+    Class,
+    DataType,
+    ObjectProperty,
+    DataProperty,
+    AnnotationProperty,
+    Individual,
+    Ontology,
 }
 
 #[tokio::main]
@@ -271,6 +123,7 @@ async fn main() {
     Server::new(stdin, stdout, socket).serve(service).await;
 }
 
+/// This is the main language server implamentation. It is the entry point for all requests to the language server.
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
@@ -293,7 +146,7 @@ impl LanguageServer for Backend {
         let mut pg = self.position_encoding.lock().await;
         *pg = encoding.clone();
 
-        info!("initialize");
+        debug!("initialize");
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "owl-ms-language-server".to_string(),
@@ -317,14 +170,14 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _params: InitializedParams) {
-        info!("initialized");
+        debug!("initialized");
         self.client
             .log_message(MessageType::INFO, "server initialized!")
             .await;
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        info!(
+        debug!(
             "did_open at {} with version {}",
             params.text_document.uri, params.text_document.version
         );
@@ -361,7 +214,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        info!(
+        debug!(
             "did_change at {} with version {}",
             params
                 .text_document
@@ -417,7 +270,7 @@ impl LanguageServer for Backend {
                             old_end_byte,
                             new_end_byte: start_byte + change.text.len(),
                             start_position: range.start.into(),
-                            old_end_position: position_to_point(range.end),
+                            old_end_position: range.end.into(),
                             new_end_position: Point {
                                 row: new_end_line,
                                 column: new_end_character,
@@ -477,7 +330,7 @@ impl LanguageServer for Backend {
 
                 let mut cursor = document.tree.walk();
 
-                while range_exclusive_inside(range, &ts_range_to_lsp_range(cursor.node().range())) {
+                while range_exclusive_inside(range, &cursor.node().range().into()) {
                     if cursor
                         .goto_first_child_for_point(range.start.into())
                         .is_none()
@@ -512,7 +365,7 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        info!(
+        debug!(
             "hover at {:?} in file {}",
             params.text_document_position_params.position,
             params.text_document_position_params.text_document.uri
@@ -536,7 +389,7 @@ impl LanguageServer for Backend {
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
-        info!("inlay_hint at {}", params.text_document.uri);
+        debug!("inlay_hint at {}", params.text_document.uri);
 
         Ok(self
             .document_map
@@ -630,7 +483,6 @@ impl LanguageServer for Backend {
                         )@frame",
                         iri
                     )),
-                    // TODO this is not working :/
                     "datatype_iri" => Some(format!(
                         "(datatype_frame
                             . (datatype_iri)@iri
@@ -640,7 +492,7 @@ impl LanguageServer for Backend {
                     )),
                     _ => None,
                 };
-                info!("{:?}", query);
+                debug!("{:?}", query);
 
                 Ok(query.and_then(|query_text| {
                     let definition_query = Query::new(*LANGUAGE, query_text.as_str())
@@ -736,8 +588,8 @@ impl LanguageServer for Backend {
                 .iter()
                 .filter_map(|child| node_type_to_keyword(child._type.as_ref()))
                 .collect();
-            info!("parent kind {}", parent_kind);
-            info!("child node type {:?}", child_node_types);
+            debug!("parent kind {}", parent_kind);
+            debug!("child node type {:?}", child_node_types);
 
             let partial_text = node_text(&cursor.node(), &doc.rope).to_string();
 
@@ -762,14 +614,17 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
-        info!("shutdown");
+        debug!("shutdown");
         Ok(())
     }
 }
 
+// Functions
+
 // TODO only do this in a range of changed content
+/// Generate an async hash map that resolves iris to infos about that iri
 fn gen_iri_info_map(tree: &Tree, rope: &Rope, range: Option<&Range>) -> DashMap<Iri, IriInfo> {
-    info!("generating iri info map");
+    debug!("generating iri info map");
 
     // TODO check frame [(datatype_frame) (class_frame) (object_property_frame) (data_property_frame) (annotation_property_frame) (individual_frame)]
     // the typed literal is for the string type
@@ -831,47 +686,14 @@ fn gen_iri_info_map(tree: &Tree, rope: &Rope, range: Option<&Range>) -> DashMap<
             annotation_iri.clone(),
             ResolvedIri {
                 value: literal.clone(),
-                range: parent_node.range().into(),
+                _range: parent_node.range().into(),
             },
         );
     }
     infos
 }
 
-// Thanks to the helix team
-// https://github.com/helix-editor/helix/blob/master/helix-core/src/syntax.rs#L1747
-pub struct ChunksBytes<'a> {
-    chunks: ropey::iter::Chunks<'a>,
-}
-impl<'a> Iterator for ChunksBytes<'a> {
-    type Item = &'a [u8];
-    fn next(&mut self) -> Option<Self::Item> {
-        self.chunks.next().map(str::as_bytes)
-    }
-}
-
-struct RopeProvider<'a>(pub RopeSlice<'a>);
-impl<'a> TextProvider<'a> for RopeProvider<'a> {
-    type I = ChunksBytes<'a>;
-
-    fn text(&mut self, node: Node) -> Self::I {
-        let fragment = self.0.byte_slice(node.start_byte()..node.end_byte());
-        ChunksBytes {
-            chunks: fragment.chunks(),
-        }
-    }
-}
-impl<'a> RopeProvider<'a> {
-    fn new(value: &'a Rope) -> Self {
-        RopeProvider(value.slice(..))
-    }
-}
-impl<'a> From<&'a Rope> for RopeProvider<'a> {
-    fn from(value: &'a Rope) -> Self {
-        RopeProvider::new(value)
-    }
-}
-
+/// Generate the diagnostics for a single node, walking recusivly down to every child and every syntax error within
 fn gen_diagnostics(node: &Node) -> Vec<Diagnostic> {
     let mut cursor = node.walk();
     let mut diagnostics = Vec::<Diagnostic>::new();
@@ -945,6 +767,25 @@ fn gen_diagnostics(node: &Node) -> Vec<Diagnostic> {
     }
 }
 
+// Implementations for Structs
+
+impl Document {
+    fn resolve_iri(&self, iri: &String) -> String {
+        self.iri_info_map
+            .get(iri)
+            .and_then(|iri_info| iri_info.label())
+            .unwrap_or(iri.clone())
+    }
+}
+
+impl IriInfo {
+    fn label(&self) -> Option<String> {
+        self.annotations
+            .get("rdfs:label")
+            .map(|resolved| resolved.value.clone())
+    }
+}
+
 fn _log_to_client(client: &Client, msg: String) -> task::JoinHandle<()> {
     let c = client.clone();
     task::spawn(async move {
@@ -968,38 +809,6 @@ fn capitilize_string(s: &str) -> String {
     }
 }
 
-/// only looks at the lines
-fn range_overlaps(a: &Range, b: &Range) -> bool {
-    !(a.start.line > b.end.line || a.end.line < b.start.line)
-        || (b.start.line <= a.end.line && b.end.line >= a.start.line)
-}
-
-/// is one range "inner" inside the range "outer"
-fn range_exclusive_inside(inner: &Range, outer: &Range) -> bool {
-    inner.start.line > outer.start.line && inner.end.line < outer.end.line
-}
-
-fn ts_range_to_lsp_range(range: tree_sitter::Range) -> Range {
-    Range {
-        start: point_to_positon(range.start_point),
-        end: point_to_positon(range.end_point),
-    }
-}
-
-fn position_to_point(position: Position) -> Point {
-    Point {
-        row: position.line as usize,
-        column: position.character as usize,
-    }
-}
-
-fn point_to_positon(point: Point) -> Position {
-    Position {
-        line: point.row as u32,
-        character: point.column as u32,
-    }
-}
-
 fn node_text<'a>(node: &Node, rope: &'a Rope) -> ropey::RopeSlice<'a> {
     rope.byte_slice(node.start_byte()..node.end_byte())
 }
@@ -1010,16 +819,14 @@ fn timeit<F: FnMut() -> T, T>(name: &str, mut f: F) -> T {
     let result = f();
     let end = Instant::now();
     let duration = end.duration_since(start);
-    info!("⏲ {} took {:?}", name, duration);
+    debug!("⏲ {} took {:?}", name, duration);
     result
 }
 
 fn deepest_named_node_at_pos(tree: &Tree, pos: Position) -> Node {
     let mut cursor = tree.walk();
     loop {
-        let is_leaf = cursor
-            .goto_first_child_for_point(position_to_point(pos))
-            .is_none();
+        let is_leaf = cursor.goto_first_child_for_point(pos.into()).is_none();
         if is_leaf {
             break;
         }
@@ -1034,9 +841,7 @@ fn deepest_named_node_at_pos(tree: &Tree, pos: Position) -> Node {
 
 fn cursor_goto_pos(cursor: &mut TreeCursor, pos: Position) {
     loop {
-        let is_leaf = cursor
-            .goto_first_child_for_point(position_to_point(pos))
-            .is_none();
+        let is_leaf = cursor.goto_first_child_for_point(pos.into()).is_none();
         if is_leaf {
             break;
         }
@@ -1144,162 +949,4 @@ fn node_type_to_keyword(_type: &str) -> Option<String> {
         "has_key" => Some("HasKey:".to_string()),
         _ => None,
     }
-}
-
-#[test]
-fn test_parse() {
-    let mut parser = Parser::new();
-    parser.set_language(*LANGUAGE).unwrap();
-
-    let source_code = "Ontology: Foobar";
-    let tree = parser.parse(source_code, None).unwrap();
-
-    assert_eq!(
-        tree.root_node().to_sexp(),
-        "(source_file (ontology (ontology_iri (simple_iri))))"
-    );
-}
-
-#[test]
-fn test_parse_datatype() {
-    let mut parser = Parser::new();
-    parser.set_language(*LANGUAGE).unwrap();
-
-    let source_code = "Ontology: o\nDatatype: d";
-    let tree = parser.parse(source_code, None).unwrap();
-
-    assert_eq!(
-        tree.root_node().to_sexp(),
-        "(source_file (ontology (ontology_iri (simple_iri)) (datatype_frame (datatype_iri (simple_iri)))))"
-    );
-}
-
-#[test]
-fn test_class_annotation_query() {
-    use tree_sitter::QueryMatch;
-
-    let mut parser = Parser::new();
-    parser.set_language(*LANGUAGE).unwrap();
-
-    let source_code = "
-Ontology: <http://foo.bar>
-    Class: <http://foo.bar/0>
-        Annotations:
-            rdfs:label \"Fizz\"
-";
-    let tree = parser.parse(source_code, None).unwrap();
-
-    let query_source = "
-                            (class_frame (class_iri (full_iri)@iri)\
-                                (annotation\
-                                    (annotation_property_iri (abbreviated_iri)@abbriviated-iri)\
-                                    (string_literal_no_language)@literal))";
-
-    let class_frame_query = Query::new(*LANGUAGE, query_source).unwrap();
-    let root = tree.root_node();
-    let mut query_cursor = QueryCursor::new();
-    let bytes: &[u8] = source_code.as_bytes();
-    let matches = query_cursor
-        .matches(&class_frame_query, root, bytes)
-        .collect::<Vec<QueryMatch>>();
-
-    println!("{}", root.to_sexp());
-
-    assert_eq!(matches.len(), 1);
-
-    assert_eq!(
-        matches[0].captures[1]
-            .node
-            .utf8_text(bytes)
-            .expect("valid utf-8"),
-        "rdfs:label"
-    );
-}
-
-/// This tests if the "did_change" feature works on the lsp. It takes the document DEF and adds two changes resolving in ABCDEFGHI.
-#[tokio::test]
-async fn test_language_server_did_change() {
-    let mut parser = Parser::new();
-    parser.set_language(*LANGUAGE).unwrap();
-
-    let (service, _) = LspService::new(|client| Backend {
-        client,
-        parser: Mutex::new(parser),
-        document_map: DashMap::new(),
-        position_encoding: PositionEncodingKind::UTF16.into(),
-    });
-
-    let _ = service
-        .inner()
-        .initialize(InitializeParams {
-            ..Default::default()
-        })
-        .await;
-
-    let url = Url::parse("file://foo.omn").expect("valid url");
-    service
-        .inner()
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: url.clone(),
-                language_id: "owl2md".to_string(),
-                version: 0,
-                text: "DEF".to_string(),
-            },
-        })
-        .await;
-    service
-        .inner()
-        .did_change(DidChangeTextDocumentParams {
-            text_document: VersionedTextDocumentIdentifier {
-                uri: url.clone(),
-                version: 2,
-            },
-            content_changes: vec![
-                TextDocumentContentChangeEvent {
-                    range: Some(
-                        Range {
-                            start: (Position {
-                                line: 0,
-                                character: 0,
-                            }),
-                            end: Position {
-                                line: 0,
-                                character: 0,
-                            },
-                        }
-                        .into(),
-                    ),
-                    range_length: None,
-                    text: "ABC".to_string(),
-                },
-                TextDocumentContentChangeEvent {
-                    range: Some(
-                        Range {
-                            start: (Position {
-                                line: 0,
-                                character: 6,
-                            }),
-                            end: Position {
-                                line: 0,
-                                character: 6,
-                            },
-                        }
-                        .into(),
-                    ),
-                    range_length: None,
-                    text: "GHI".to_string(),
-                },
-            ],
-        })
-        .await;
-
-    let doc = service
-        .inner()
-        .document_map
-        .get(&url.clone())
-        .expect("found the document");
-    let doc_content = doc.rope.to_string();
-
-    assert_eq!(doc_content, "ABCDEFGHI");
 }

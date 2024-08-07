@@ -1,10 +1,26 @@
-# owl-ms-language-server: Owl Manchester Syntax Language Server
+# owl-ms-language-server: Owl 2 Manchester Syntax Language Server
 
 An incremental analysis assistant for writing ontologies with the [OWL 2 Web Ontology Language | Manchester Syntax](https://www.w3.org/TR/owl2-manchester-syntax/).
 
+## Getting Started
+
+To use the language server you have to first install it and then integrate it into you editor. This differs for each editor.
+To install the owl-ms-language-server crate you currently have to use git and Cargo.
+
+```shell
+https://github.com/janekx21/owl-ms-language-server 
+cd owl-ms-language-server 
+cargo install --path .
+```
+
+This installs the langauge server into Cargos's local set of installed binary crates, likely located in `$HOME/.cargo`.
+Alternatifly you can use `cargo build` instead of `cargo install --path .` and handle the binary yourself.
+
 ## Usage / Editor integration
 
-~Cargo install~ (Currently not possible. Use `git clone` and `cargo build` or `cargo install --path .` instead.) the `owl-ms-language-server` crate and integrate it into your editor.
+### [Visual Studio Code](https://code.visualstudio.com/)
+
+\[WIP\]
 
 ### [Helix Editor](https://helix-editor.com/)
 
@@ -103,6 +119,8 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
 - references (shows all referenced locations)
 
 ### Not planned
+
+- test https://www.ebi.ac.uk/chebi/downloadsForward.do
 
 - goto_declaration
 - goto_type_definition
