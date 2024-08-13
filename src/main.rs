@@ -13,7 +13,7 @@ use range::{range_exclusive_inside, range_overlaps, Range};
 use rope_provider::RopeProvider;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{hash_set, HashMap, HashSet};
 use std::fmt::Display;
 use tokio::sync::Mutex;
 use tokio::task;
@@ -102,8 +102,9 @@ enum IriType {
 
 #[tokio::main]
 async fn main() {
-    simple_logging::log_to_file("lanugage-server.log", LevelFilter::Trace)
+    simple_logging::log_to_file("/tmp/owl-ms-lanugage-server.log", LevelFilter::Trace)
         .expect("logging to work");
+
     std::panic::set_hook(Box::new(|info| {
         error!("paniced with {}", info);
     }));
@@ -164,6 +165,18 @@ impl LanguageServer for Backend {
                 completion_provider: Some(CompletionOptions {
                     ..Default::default()
                 }),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: SemanticTokensLegend {
+                                token_types: vec![SemanticTokenType::KEYWORD], // class is just an example
+                                token_modifiers: vec![],
+                            },
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            ..Default::default()
+                        },
+                    ),
+                ),
                 ..Default::default()
             },
         })
@@ -613,6 +626,112 @@ impl LanguageServer for Backend {
         }))
     }
 
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri;
+        if let Some(doc) = self.document_map.get(&uri) {
+            let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
+
+            let query = Query::new(*LANGUAGE, query_source).expect("valid query expect");
+            let mut query_cursor = QueryCursor::new();
+            let matches =
+                query_cursor.matches(&query, doc.tree.root_node(), RopeProvider::new(&doc.rope));
+
+            let mut tokens = vec![];
+            let mut last_start = Point { row: 0, column: 0 };
+
+            // debug!(
+            //     "matches {:?}",
+            //     matches
+            //         .flat_map(|m| m.captures)
+            //         .map(|c| c.index)
+            //         .collect::<Vec<u32>>()
+            // );
+
+            //treesitter_highlight_capture_into_sematic_token_type
+
+            let mut nodes = matches
+                .flat_map(|m| m.captures)
+                .map(|c| {
+                    (
+                        c.node,
+                        treesitter_highlight_capture_into_sematic_token_type(
+                            query.capture_names()[c.index as usize].as_str(),
+                        ),
+                    )
+                })
+                .collect::<Vec<(Node, SemanticTokenType)>>();
+            // node start poins need to be stricly in order, because the delta might otherwise negativly overflow
+            // TODO is this needed? are query matches in order?
+            nodes.sort_unstable_by_key(|(n, _)| n.start_byte());
+            for (node, _type) in nodes {
+                let start = node.range().start_point;
+                let delta_line = (start.row - last_start.row) as u32;
+                let delta_start = if delta_line == 0 {
+                    (start.column - last_start.column) as u32 // same line
+                } else {
+                    start.column as u32 // some other line
+                };
+                let length = node_text(&node, &doc.rope).len_chars() as u32;
+
+                let token = SemanticToken {
+                    delta_line,
+                    delta_start,
+                    length,
+                    token_type: _type,
+                    token_modifiers_bitset: 0,
+                };
+
+                debug!("token {:?}", token);
+
+                last_start = node.start_position();
+                tokens.push(token);
+            }
+
+            return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: None,
+                data: tokens,
+            })));
+        }
+        Ok(None)
+    }
+
+    // async fn semantic_tokens_full_delta(
+    //     &self,
+    //     params: SemanticTokensDeltaParams,
+    // ) -> Result<Option<SemanticTokensFullDeltaResult>> {
+    //     let _ = params;
+    //     debug!("Got a textDocument/semanticTokens/full/delta request, but it is not implemented");
+    //     Ok(None)
+    // }
+
+    // async fn semantic_tokens_range(
+    //     &self,
+    //     params: SemanticTokensRangeParams,
+    // ) -> Result<Option<SemanticTokensRangeResult>> {
+    //     Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
+    //         result_id: None,
+    //         data: vec![
+    //             SemanticToken {
+    //                 delta_line: 0,
+    //                 delta_start: 0,
+    //                 length: 50,
+    //                 token_type: 0, // index into types
+    //                 token_modifiers_bitset: 0,
+    //             },
+    //             SemanticToken {
+    //                 delta_line: 0,
+    //                 delta_start: 0,
+    //                 length: 50,
+    //                 token_type: 1,
+    //                 token_modifiers_bitset: 0,
+    //             },
+    //         ],
+    //     })))
+    // }
+
     async fn shutdown(&self) -> Result<()> {
         debug!("shutdown");
         Ok(())
@@ -766,6 +885,84 @@ fn gen_diagnostics(node: &Node) -> Vec<Diagnostic> {
         }
     }
 }
+
+fn treesitter_highlight_capture_into_sematic_token_type(str: &str) -> SemanticTokenType {
+    match str {
+        "punctuation.bracket" => SemanticTokenType::OPERATOR,
+        "punctuation.delimiter" => SemanticTokenType::OPERATOR,
+        "keyword" => SemanticTokenType::KEYWORD,
+        "operator" => SemanticTokenType::OPERATOR,
+        "variable.buildin" => SemanticTokenType::VARIABLE,
+        "string" => SemanticTokenType::STRING,
+        "number" => SemanticTokenType::NUMBER,
+        "constant.builtin" => SemanticTokenType::VARIABLE,
+        "variable" => SemanticTokenType::VARIABLE,
+        _ => todo!("highlight capture {} not implemented", str),
+    }
+}
+
+fn semantic_token_type_into_index(type_: SemanticTokenType) -> u32 {
+    match type_ {
+        SemanticTokenType::NAMESPACE => 0,
+        SemanticTokenType::TYPE => 1,
+        SemanticTokenType::CLASS => 2,
+        SemanticTokenType::ENUM => 3,
+        SemanticTokenType::INTERFACE => 4,
+        SemanticTokenType::STRUCT => 5,
+        SemanticTokenType::TYPE_PARAMETER => 6,
+        SemanticTokenType::PARAMETER => 7,
+        SemanticTokenType::VARIABLE => 8,
+        SemanticTokenType::PROPERTY => 9,
+        SemanticTokenType::ENUM_MEMBER => 10,
+        SemanticTokenType::EVENT => 11,
+        SemanticTokenType::FUNCTION => 12,
+        SemanticTokenType::METHOD => 13,
+        SemanticTokenType::MACRO => 14,
+        SemanticTokenType::KEYWORD => 15,
+        SemanticTokenType::MODIFIER => 16,
+        SemanticTokenType::COMMENT => 17,
+        SemanticTokenType::STRING => 18,
+        SemanticTokenType::NUMBER => 19,
+        SemanticTokenType::REGEXP => 20,
+        SemanticTokenType::OPERATOR => 21,
+        SemanticTokenType::DECORATOR => 22,
+    }
+}
+
+static SEMANTIC_TOKEN_TYPES: Lazy<HashMap<usize, SemanticTokenType>> = Lazy::new(|| {
+    let tokens = vec![
+        SemanticTokenType::NAMESPACE,
+        SemanticTokenType::TYPE,
+        SemanticTokenType::CLASS,
+        SemanticTokenType::ENUM,
+        SemanticTokenType::INTERFACE,
+        SemanticTokenType::STRUCT,
+        SemanticTokenType::TYPE_PARAMETER,
+        SemanticTokenType::PARAMETER,
+        SemanticTokenType::VARIABLE,
+        SemanticTokenType::PROPERTY,
+        SemanticTokenType::ENUM_MEMBER,
+        SemanticTokenType::EVENT,
+        SemanticTokenType::FUNCTION,
+        SemanticTokenType::METHOD,
+        SemanticTokenType::MACRO,
+        SemanticTokenType::KEYWORD,
+        SemanticTokenType::MODIFIER,
+        SemanticTokenType::COMMENT,
+        SemanticTokenType::STRING,
+        SemanticTokenType::NUMBER,
+        SemanticTokenType::REGEXP,
+        SemanticTokenType::OPERATOR,
+        SemanticTokenType::DECORATOR,
+    ];
+    let mut hash_map = HashMap::new();
+
+    for (index, item) in tokens.iter().enumerate() {
+        hash_map.insert(index, item);
+    }
+    hash_map.shrink_to_fit();
+    hash_map
+});
 
 // Implementations for Structs
 

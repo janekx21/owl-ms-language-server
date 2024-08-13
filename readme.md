@@ -8,7 +8,7 @@ To use the language server you have to first install it and then integrate it in
 To install the owl-ms-language-server crate you currently have to use git and Cargo.
 
 ```shell
-git clone https://github.com/janekx21/owl-ms-language-server 
+git clone https://github.com/janekx21/owl-ms-language-server --recurse-submodules
 cd owl-ms-language-server 
 cargo install --path .
 ```

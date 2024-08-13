@@ -8,3 +8,6 @@ dist
 perf.data
 flamegraph.svg
 examples/oeo-full.omn
+**/.tui-test/cache
+**/node_modules
+**/*.bck
