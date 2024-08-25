@@ -5,6 +5,7 @@ mod rope_provider;
 #[cfg(test)]
 mod tests;
 
+use clap::Parser as ClapParser;
 use dashmap::DashMap;
 use log::{debug, error, LevelFilter};
 use once_cell::sync::Lazy;
@@ -13,7 +14,7 @@ use range::{range_exclusive_inside, range_overlaps, Range};
 use rope_provider::RopeProvider;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
-use std::collections::{hash_set, HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::Display;
 use tokio::sync::Mutex;
 use tokio::task;
@@ -41,6 +42,15 @@ static NODE_TYPES: Lazy<DashMap<String, StaticNode>> = Lazy::new(|| {
 
 // Model
 
+/// A language server for the owl 2 manchester syntax language
+#[derive(ClapParser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Use stdin and stdout for communication
+    #[arg(long, default_value_t = true)]
+    stdio: bool,
+}
+
 struct Backend {
     client: Client,
     parser: Mutex<Parser>, // stateful because of resume behavior after fail, timeout or cancellation
@@ -57,7 +67,7 @@ struct Document {
 }
 #[derive(Clone)]
 struct IriInfo {
-    annotations: HashMap<Iri, ResolvedIri>,
+    annotations: HashMap<Iri, ResolvedIri>, // TODO some iris are used more then once. e.g. rdfs:label for more languages
     tipe: IriType,
 }
 
@@ -102,6 +112,8 @@ enum IriType {
 
 #[tokio::main]
 async fn main() {
+    let _ = Args::parse();
+
     simple_logging::log_to_file("/tmp/owl-ms-lanugage-server.log", LevelFilter::Trace)
         .expect("logging to work");
 
@@ -169,7 +181,31 @@ impl LanguageServer for Backend {
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
                             legend: SemanticTokensLegend {
-                                token_types: vec![SemanticTokenType::KEYWORD], // class is just an example
+                                token_types: vec![
+                                    SemanticTokenType::NAMESPACE,
+                                    SemanticTokenType::TYPE,
+                                    SemanticTokenType::CLASS,
+                                    SemanticTokenType::ENUM,
+                                    SemanticTokenType::INTERFACE,
+                                    SemanticTokenType::STRUCT,
+                                    SemanticTokenType::TYPE_PARAMETER,
+                                    SemanticTokenType::PARAMETER,
+                                    SemanticTokenType::VARIABLE,
+                                    SemanticTokenType::PROPERTY,
+                                    SemanticTokenType::ENUM_MEMBER,
+                                    SemanticTokenType::EVENT,
+                                    SemanticTokenType::FUNCTION,
+                                    SemanticTokenType::METHOD,
+                                    SemanticTokenType::MACRO,
+                                    SemanticTokenType::KEYWORD,
+                                    SemanticTokenType::MODIFIER,
+                                    SemanticTokenType::COMMENT,
+                                    SemanticTokenType::STRING,
+                                    SemanticTokenType::NUMBER,
+                                    SemanticTokenType::REGEXP,
+                                    SemanticTokenType::OPERATOR,
+                                    SemanticTokenType::DECORATOR,
+                                ],
                                 token_modifiers: vec![],
                             },
                             full: Some(SemanticTokensFullOptions::Bool(true)),
@@ -363,18 +399,29 @@ impl LanguageServer for Backend {
                 .filter(|d| range_overlaps(&d.range.into(), range)); // should be exclusive to other diagnostics
 
                 document.diagnostics.extend(additional_diagnostics);
-
-                // OK?
-                let uri = params.text_document.uri.clone();
-                let d = document.diagnostics.clone();
-                let c = self.client.clone();
-                task::spawn(async move {
-                    c.publish_diagnostics(uri, d, None).await;
-                });
             }
-        }
 
-        // TODO
+            let uri = params.text_document.uri.clone();
+            let d = document.diagnostics.clone();
+            let c = self.client.clone();
+            task::spawn(async move {
+                c.publish_diagnostics(uri, d, None).await;
+            });
+        }
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        debug!(
+            "did_close at {}",
+            params
+                .text_document
+                .uri
+                .path_segments()
+                .unwrap()
+                .last()
+                .unwrap(),
+        );
+        self.document_map.remove(&params.text_document.uri);
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -450,6 +497,10 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
+        debug!(
+            "goto_definition at {}",
+            params.text_document_position_params.text_document.uri
+        );
         let uri = params.text_document_position_params.text_document.uri;
         if let Some(doc) = self.document_map.get(&uri) {
             let pos: Position = params.text_document_position_params.position.into();
@@ -536,6 +587,7 @@ impl LanguageServer for Backend {
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        debug!("code_action at {}", params.text_document.uri);
         let url = params.text_document.uri;
         let doc = self.document_map.get(&url).unwrap();
         let end: Position = doc.tree.root_node().range().end_point.into();
@@ -563,6 +615,10 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        debug!(
+            "completion at {}",
+            params.text_document_position.text_document.uri
+        );
         let url = params.text_document_position.text_document.uri;
         let doc = self.document_map.get(&url);
         let pos: Position = params.text_document_position.position.into();
@@ -630,6 +686,7 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
+        debug!("semantic_tokens_full at {}", params.text_document.uri);
         let uri = params.text_document.uri;
         if let Some(doc) = self.document_map.get(&uri) {
             let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
@@ -657,16 +714,16 @@ impl LanguageServer for Backend {
                 .map(|c| {
                     (
                         c.node,
-                        treesitter_highlight_capture_into_sematic_token_type(
+                        treesitter_highlight_capture_into_semantic_token_type_index(
                             query.capture_names()[c.index as usize].as_str(),
                         ),
                     )
                 })
-                .collect::<Vec<(Node, SemanticTokenType)>>();
+                .collect::<Vec<(Node, u32)>>();
             // node start poins need to be stricly in order, because the delta might otherwise negativly overflow
             // TODO is this needed? are query matches in order?
             nodes.sort_unstable_by_key(|(n, _)| n.start_byte());
-            for (node, _type) in nodes {
+            for (node, type_index) in nodes {
                 let start = node.range().start_point;
                 let delta_line = (start.row - last_start.row) as u32;
                 let delta_start = if delta_line == 0 {
@@ -680,7 +737,7 @@ impl LanguageServer for Backend {
                     delta_line,
                     delta_start,
                     length,
-                    token_type: _type,
+                    token_type: type_index,
                     token_modifiers_bitset: 0,
                 };
 
@@ -740,7 +797,6 @@ impl LanguageServer for Backend {
 
 // Functions
 
-// TODO only do this in a range of changed content
 /// Generate an async hash map that resolves iris to infos about that iri
 fn gen_iri_info_map(tree: &Tree, rope: &Rope, range: Option<&Range>) -> DashMap<Iri, IriInfo> {
     debug!("generating iri info map");
@@ -756,7 +812,10 @@ fn gen_iri_info_map(tree: &Tree, rope: &Rope, range: Option<&Range>) -> DashMap<
                     (string_literal_no_language)
                     (string_literal_with_language)
                     (typed_literal)
-                ]@literal))";
+                ]@literal))
+        
+        (prefix_declaration (prefix_name)@prefix_name (full_iri)@iri)
+        ";
 
     let frame_query = Query::new(*LANGUAGE, frame_source).expect("valid query expect");
     let mut query_cursor = QueryCursor::new();
@@ -770,44 +829,57 @@ fn gen_iri_info_map(tree: &Tree, rope: &Rope, range: Option<&Range>) -> DashMap<
     let infos = DashMap::<Iri, IriInfo>::new();
 
     for m in matches {
-        let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
-        let frame_iri = capture_texts.next().unwrap().to_string();
-        let annotation_iri = capture_texts.next().unwrap().to_string();
-        let literal = capture_texts.next().unwrap().to_string();
+        match m.pattern_index {
+            0 => {
+                let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
+                let frame_iri = capture_texts.next().unwrap().to_string();
+                let annotation_iri = capture_texts.next().unwrap().to_string();
+                let literal = capture_texts.next().unwrap().to_string();
 
-        let parent_node = m.captures[0].node.parent().unwrap();
-        let entity = match parent_node.kind() {
-            "class_iri" => IriType::Class,
-            "datatype_iri" => IriType::DataType,
-            "annotation_property_iri" => IriType::AnnotationProperty,
-            "individual_iri" => IriType::Individual,
-            "ontology_iri" => IriType::Ontology,
-            "data_property_iri" => IriType::DataProperty,
-            "object_property_iri" => IriType::ObjectProperty,
-            kind => {
-                error!("implement {kind}");
-                IriType::Class
+                let parent_node = m.captures[0].node.parent().unwrap();
+                let entity = match parent_node.kind() {
+                    "class_iri" => IriType::Class,
+                    "datatype_iri" => IriType::DataType,
+                    "annotation_property_iri" => IriType::AnnotationProperty,
+                    "individual_iri" => IriType::Individual,
+                    "ontology_iri" => IriType::Ontology,
+                    "data_property_iri" => IriType::DataProperty,
+                    "object_property_iri" => IriType::ObjectProperty,
+                    kind => {
+                        error!("implement {kind}");
+                        IriType::Class
+                    }
+                };
+
+                if !infos.contains_key(&frame_iri) {
+                    infos.insert(
+                        frame_iri.clone(),
+                        IriInfo {
+                            annotations: HashMap::new(),
+                            tipe: entity,
+                        },
+                    );
+                }
+
+                let mut info = infos.get_mut(&frame_iri).unwrap();
+                info.annotations.insert(
+                    annotation_iri.clone(),
+                    ResolvedIri {
+                        value: literal.clone(),
+                        _range: parent_node.range().into(),
+                    },
+                );
             }
-        };
+            1 => {
+                let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
+                let prefix_name = capture_texts.next().unwrap().to_string();
+                let iri = capture_texts.next().unwrap().to_string();
 
-        if !infos.contains_key(&frame_iri) {
-            infos.insert(
-                frame_iri.clone(),
-                IriInfo {
-                    annotations: HashMap::new(),
-                    tipe: entity,
-                },
-            );
+                // TODO requst prefix url to cache the ontology there
+                debug!("prefix named {} with iri {}", prefix_name, iri);
+            }
+            i => todo!("pattern index {} not implemented", i),
         }
-
-        let mut info = infos.get_mut(&frame_iri).unwrap();
-        info.annotations.insert(
-            annotation_iri.clone(),
-            ResolvedIri {
-                value: literal.clone(),
-                _range: parent_node.range().into(),
-            },
-        );
     }
     infos
 }
@@ -836,7 +908,6 @@ fn gen_diagnostics(node: &Node) -> Vec<Diagnostic> {
                     .intersperse(", ".to_string())
                     .collect();
 
-                // let text = node.utf8_text(bytes).unwrap();
                 let parent = node_type_to_string(parent_kind);
                 let msg = format!("Syntax Error. expected {valid_children} inside {parent}");
 
@@ -886,83 +957,82 @@ fn gen_diagnostics(node: &Node) -> Vec<Diagnostic> {
     }
 }
 
-fn treesitter_highlight_capture_into_sematic_token_type(str: &str) -> SemanticTokenType {
+fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) -> u32 {
     match str {
-        "punctuation.bracket" => SemanticTokenType::OPERATOR,
-        "punctuation.delimiter" => SemanticTokenType::OPERATOR,
-        "keyword" => SemanticTokenType::KEYWORD,
-        "operator" => SemanticTokenType::OPERATOR,
-        "variable.buildin" => SemanticTokenType::VARIABLE,
-        "string" => SemanticTokenType::STRING,
-        "number" => SemanticTokenType::NUMBER,
-        "constant.builtin" => SemanticTokenType::VARIABLE,
-        "variable" => SemanticTokenType::VARIABLE,
+        "punctuation.bracket" => 21,   // SemanticTokenType::OPERATOR,
+        "punctuation.delimiter" => 21, // SemanticTokenType::OPERATOR,
+        "keyword" => 15,               // SemanticTokenType::KEYWORD,
+        "operator" => 21,              // SemanticTokenType::OPERATOR,
+        "variable.buildin" => 8,       // SemanticTokenType::VARIABLE,
+        "string" => 18,                // SemanticTokenType::STRING,
+        "number" => 19,                //SemanticTokenType::NUMBER,
+        "constant.builtin" => 8,       // SemanticTokenType::VARIABLE,
+        "variable" => 8,               //SemanticTokenType::VARIABLE,
         _ => todo!("highlight capture {} not implemented", str),
     }
 }
 
-fn semantic_token_type_into_index(type_: SemanticTokenType) -> u32 {
-    match type_ {
-        SemanticTokenType::NAMESPACE => 0,
-        SemanticTokenType::TYPE => 1,
-        SemanticTokenType::CLASS => 2,
-        SemanticTokenType::ENUM => 3,
-        SemanticTokenType::INTERFACE => 4,
-        SemanticTokenType::STRUCT => 5,
-        SemanticTokenType::TYPE_PARAMETER => 6,
-        SemanticTokenType::PARAMETER => 7,
-        SemanticTokenType::VARIABLE => 8,
-        SemanticTokenType::PROPERTY => 9,
-        SemanticTokenType::ENUM_MEMBER => 10,
-        SemanticTokenType::EVENT => 11,
-        SemanticTokenType::FUNCTION => 12,
-        SemanticTokenType::METHOD => 13,
-        SemanticTokenType::MACRO => 14,
-        SemanticTokenType::KEYWORD => 15,
-        SemanticTokenType::MODIFIER => 16,
-        SemanticTokenType::COMMENT => 17,
-        SemanticTokenType::STRING => 18,
-        SemanticTokenType::NUMBER => 19,
-        SemanticTokenType::REGEXP => 20,
-        SemanticTokenType::OPERATOR => 21,
-        SemanticTokenType::DECORATOR => 22,
-    }
-}
+// fn semantic_token_type_into_index(type_: SemanticTokenType) -> u32 {
+//     match type_ {
+//         SemanticTokenType::NAMESPACE => 0,
+//         SemanticTokenType::TYPE => 1,
+//         SemanticTokenType::CLASS => 2,
+//         SemanticTokenType::ENUM => 3,
+//         SemanticTokenType::INTERFACE => 4,
+//         SemanticTokenType::STRUCT => 5,
+//         SemanticTokenType::TYPE_PARAMETER => 6,
+//         SemanticTokenType::PARAMETER => 7,
+//         SemanticTokenType::VARIABLE => 8,
+//         SemanticTokenType::PROPERTY => 9,
+//         SemanticTokenType::ENUM_MEMBER => 10,
+//         SemanticTokenType::EVENT => 11,
+//         SemanticTokenType::FUNCTION => 12,
+//         SemanticTokenType::METHOD => 13,
+//         SemanticTokenType::MACRO => 14,
+//         SemanticTokenType::KEYWORD => 15,
+//         SemanticTokenType::MODIFIER => 16,
+//         SemanticTokenType::COMMENT => 17,
+//         SemanticTokenType::STRING => 18,
+//         SemanticTokenType::NUMBER => 19,
+//         SemanticTokenType::REGEXP => 20,
+//         SemanticTokenType::OPERATOR => 21,
+//         SemanticTokenType::DECORATOR => 22,
+//     }
+// }
 
-static SEMANTIC_TOKEN_TYPES: Lazy<HashMap<usize, SemanticTokenType>> = Lazy::new(|| {
-    let tokens = vec![
-        SemanticTokenType::NAMESPACE,
-        SemanticTokenType::TYPE,
-        SemanticTokenType::CLASS,
-        SemanticTokenType::ENUM,
-        SemanticTokenType::INTERFACE,
-        SemanticTokenType::STRUCT,
-        SemanticTokenType::TYPE_PARAMETER,
-        SemanticTokenType::PARAMETER,
-        SemanticTokenType::VARIABLE,
-        SemanticTokenType::PROPERTY,
-        SemanticTokenType::ENUM_MEMBER,
-        SemanticTokenType::EVENT,
-        SemanticTokenType::FUNCTION,
-        SemanticTokenType::METHOD,
-        SemanticTokenType::MACRO,
-        SemanticTokenType::KEYWORD,
-        SemanticTokenType::MODIFIER,
-        SemanticTokenType::COMMENT,
-        SemanticTokenType::STRING,
-        SemanticTokenType::NUMBER,
-        SemanticTokenType::REGEXP,
-        SemanticTokenType::OPERATOR,
-        SemanticTokenType::DECORATOR,
-    ];
-    let mut hash_map = HashMap::new();
+// static SEMANTIC_TOKEN_TYPES: Lazy<HashMap<usize, SemanticTokenType>> = Lazy::new(|| {
+//     let tokens = vec![
+//         SemanticTokenType::NAMESPACE,
+//         SemanticTokenType::TYPE,
+//         SemanticTokenType::CLASS,
+//         SemanticTokenType::ENUM,
+//         SemanticTokenType::INTERFACE,
+//         SemanticTokenType::STRUCT,
+//         SemanticTokenType::TYPE_PARAMETER,
+//         SemanticTokenType::PARAMETER,
+//         SemanticTokenType::VARIABLE,
+//         SemanticTokenType::PROPERTY,
+//         SemanticTokenType::ENUM_MEMBER,
+//         SemanticTokenType::EVENT,
+//         SemanticTokenType::FUNCTION,
+//         SemanticTokenType::METHOD,
+//         SemanticTokenType::MACRO,
+//         SemanticTokenType::KEYWORD,
+//         SemanticTokenType::MODIFIER,
+//         SemanticTokenType::COMMENT,
+//         SemanticTokenType::STRING,
+//         SemanticTokenType::NUMBER,
+//         SemanticTokenType::REGEXP,
+//         SemanticTokenType::OPERATOR,
+//         SemanticTokenType::DECORATOR,
+//     ];
+//     let mut hash_map = HashMap::new();
 
-    for (index, item) in tokens.iter().enumerate() {
-        hash_map.insert(index, item);
-    }
-    hash_map.shrink_to_fit();
-    hash_map
-});
+//     for (index, item) in tokens.iter().enumerate() {
+//         hash_map.insert(index, item);
+//     }
+//     hash_map.shrink_to_fit();
+// });
 
 // Implementations for Structs
 
@@ -1133,10 +1203,10 @@ fn node_type_to_keyword(_type: &str) -> Option<String> {
         "import" => Some("Import:".to_string()),
         "class_frame" => Some("Class:".to_string()),
         "datatype_frame" => Some("Datatype:".to_string()),
-        "object_property_frame" => Some("ObjectPropertyFrame:".to_string()),
+        "object_property_frame" => Some("ObjectProperty:".to_string()),
         "annotation_property_frame" => Some("AnnotationProperty:".to_string()),
-        "data_property_frame" => Some("DataPropertyFrame:".to_string()),
-        "individual_frame" => Some("IndividualFrame:".to_string()),
+        "data_property_frame" => Some("DataProperty:".to_string()),
+        "individual_frame" => Some("Individual:".to_string()),
         "annotation" => Some("Annotations:".to_string()),
         "datatype_equavalent_to" => Some("EquivalentTo:".to_string()),
         "sub_class_of" => Some("SubClassOf:".to_string()),
