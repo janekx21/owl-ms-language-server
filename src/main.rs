@@ -15,6 +15,7 @@ use rope_provider::RopeProvider;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::env;
 use std::fmt::Display;
 use tokio::sync::Mutex;
 use tokio::task;
@@ -114,8 +115,15 @@ enum IriType {
 async fn main() {
     let _ = Args::parse();
 
-    simple_logging::log_to_file("/tmp/owl-ms-lanugage-server.log", LevelFilter::Trace)
-        .expect("logging to work");
+    let mut log_file_path = env::temp_dir();
+    log_file_path.push("owl-ms-lanugage-server.log");
+    let log_file_path = log_file_path.as_path();
+    simple_logging::log_to_file(log_file_path, LevelFilter::Trace).unwrap_or_else(|_| {
+        panic!(
+            "Logging file could not be created at {}",
+            log_file_path.to_str().unwrap_or("[invalid unicode]")
+        )
+    });
 
     std::panic::set_hook(Box::new(|info| {
         error!("paniced with {}", info);
