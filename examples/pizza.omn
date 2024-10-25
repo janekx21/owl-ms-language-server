@@ -1536,7 +1536,7 @@ Class: pizza:VegetarianPizzaEquivalent1
     
     EquivalentTo: 
         pizza:Pizza
-         and (pizza:hasTopping only pizza:VegetarianTopping)
+         and (pizza:hasTopping only <http://www.co-ode.org/ontologies/pizza/pizza.owl#3>)
     
     
 Class: pizza:VegetarianPizzaEquivalent2
@@ -1553,7 +1553,7 @@ Class: pizza:VegetarianPizzaEquivalent2
             (pizza:CheeseTopping or pizza:FruitTopping or pizza:HerbSpiceTopping or pizza:NutTopping or pizza:SauceTopping or pizza:VegetableTopping))
     
     
-Class: pizza:VegetarianTopping
+Class: <http://www.co-ode.org/ontologies/pizza/pizza.owl#3>
 
     Annotations: 
         rdfs:comment "An example of a covering axiom. VegetarianTopping is equivalent to the union of all toppings in the given axiom. VegetarianToppings can only be Cheese or Vegetable or....etc."@en,
@@ -1566,11 +1566,11 @@ Class: pizza:VegetarianTopping
          and (pizza:CheeseTopping or pizza:FruitTopping or pizza:HerbSpiceTopping or pizza:NutTopping or pizza:SauceTopping or pizza:VegetableTopping)
     
     
-Class: pizza:Veneziana
+Class: <http://www.co-ode.org/ontologies/pizza/pizza.owl#4>
 
     Annotations: 
-        rdfs:label "Veneziana"@en,
         rdfs:label "Veneziana"@pt,
+        rdfs:label "Veneziana"@en,
         skos:altLabel "Veneziana"@en,
         skos:altLabel "Veneziana Pizza"@en,
         skos:prefLabel "Veneziana"@en
@@ -1625,7 +1625,7 @@ Individual: pizza:Italy
     
     
 DisjointClasses: 
-    pizza:American,pizza:AmericanHot,pizza:Cajun,pizza:Capricciosa,pizza:Caprina,pizza:Fiorentina,pizza:FourSeasons,pizza:FruttiDiMare,pizza:Giardiniera,pizza:LaReine,pizza:Margherita,pizza:Mushroom,pizza:Napoletana,pizza:Parmense,pizza:PolloAdAstra,pizza:PrinceCarlo,pizza:QuattroFormaggi,pizza:Rosa,pizza:Siciliana,pizza:SloppyGiuseppe,pizza:Soho,pizza:UnclosedPizza,pizza:Veneziana
+    pizza:American,pizza:AmericanHot,pizza:Cajun,pizza:Capricciosa,pizza:Caprina,pizza:Fiorentina,pizza:FourSeasons,pizza:FruttiDiMare,pizza:Giardiniera,pizza:LaReine,pizza:Margherita,pizza:Mushroom,pizza:Napoletana,pizza:Parmense,pizza:PolloAdAstra,pizza:PrinceCarlo,pizza:QuattroFormaggi,pizza:Rosa,pizza:Siciliana,pizza:SloppyGiuseppe,pizza:Soho,pizza:UnclosedPizza,<http://www.co-ode.org/ontologies/pizza/pizza.owl#4>
 
 DisjointClasses: 
     pizza:AnchoviesTopping,pizza:MixedSeafoodTopping,pizza:PrawnsTopping

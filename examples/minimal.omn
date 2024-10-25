@@ -10,7 +10,6 @@ Class: <http://openenergy-platform.org/ontology/oeo/OEO_00000147>
         rdfs:label "emission"
     
     SubClassOf: 
-        new_class,
         <http://purl.obolibrary.org/obo/BFO_0000015>,
         <http://openenergy-platform.org/ontology/oeo/OEO_00000500> some <http://openenergy-platform.org/ontology/oeo/OEO_00000148>
 
@@ -28,12 +27,5 @@ Class: <http://openenergy-platform.org/ontology/oeo/OEO_00000005>
 AnnotationProperty: <http://openenergy-platform.org/ontology/oeo/OEO_00040001>
     Annotations: 
         rdfs:label "belongs to module"
-    
-Class: new_class
-    Annotations:
-        rdfs:label "new class"
-
-Datatype: <http://openenergy-platform.org/ontology/oeo/OEO_00040005>
-    Annotations: 
-        rdfs:label "foobar label"
+   
 
