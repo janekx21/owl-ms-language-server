@@ -2,25 +2,16 @@
 
 An incremental analysis assistant for writing ontologies with the [OWL 2 Web Ontology Language | Manchester Syntax](https://www.w3.org/TR/owl2-manchester-syntax/).
 
-## Getting Started
-
-To use the language server you have to first install it and then integrate it into you editor. This differs for each editor.
-To install the owl-ms-language-server crate you currently have to use git and Cargo.
-
-```shell
-git clone https://github.com/janekx21/owl-ms-language-server --recurse-submodules
-cd owl-ms-language-server 
-cargo install --path .
-```
-
-This installs the langauge server into Cargos's local set of installed binary crates, likely located in `$HOME/.cargo`.
-Alternatifly you can use `cargo build` instead of `cargo install --path .` and handle the binary yourself.
-
-## Usage / Editor integration
+## Getting Started / Editor integration
 
 ### [Visual Studio Code](https://code.visualstudio.com/)
 
-\[WIP\]
+![vscode install instructions](img/2024-10-25-154909_hyprshot.png)
+
+Install the visual studio code plugin by opening visual studio and navigating to extentions. Search for "owl" and your should find the "Owl Mancherster Syntax" Plugin. Click the "Install" button and wait. You can now use the plugin by opening a *.omn file or by running the command "Change Language Mode" and selecting "Owl Manchester Syntax".
+
+- [Distributed via Open VSX Marketplace](https://open-vsx.org/extension/JanekWinkler/vscode-owl-ms)
+- [Distributed via VisualStudio Marketplace](https://marketplace.visualstudio.com/items?itemName=JanekWinkler.vscode-owl-ms)
 
 ### [Helix Editor](https://helix-editor.com/)
 
@@ -72,6 +63,20 @@ Merge this setting into your `coc-settings.json` (open with `:CocConfig`).
 }
 ```
 See [the example config for testing](https://github.com/oxalica/nil/blob/main/dev/vim-coc.nix).
+
+### Manual
+
+To use the language server manual you have to first install it and then integrate it into you editor. This differs for each editor.
+To install the owl-ms-language-server crate you currently have to use git and Cargo.
+
+```shell
+git clone https://github.com/janekx21/owl-ms-language-server --recurse-submodules
+cd owl-ms-language-server 
+cargo install --path .
+```
+
+This installs the langauge server into Cargos's local set of installed binary crates, likely located in `$HOME/.cargo`.
+Alternatifly you can use `cargo build` instead of `cargo install --path .` and handle the binary yourself.
 
 ## Roadmap
 
