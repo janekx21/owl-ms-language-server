@@ -1,13 +1,13 @@
 fn main() {
-    let language = "owl-ms";
-    let package = format!("tree-sitter-{}", language);
-    let source_directory = format!("{}/src", package);
-    let source_file = format!("{}/parser.c", source_directory);
+    // let language = "owl-ms";
+    // let package = format!("tree-sitter-{}", language);
+    // let source_directory = format!("{}/src", package);
+    // let source_file = format!("{}/parser.c", source_directory);
 
-    println!("cargo:rerun-if-changed={}", source_file); // <1>
+    // println!("cargo:rerun-if-changed={}", source_file); // <1>
 
-    cc::Build::new()
-        .file(source_file)
-        .include(source_directory)
-        .compile(&package); // <2>
+    // cc::Build::new()
+    //     .file(source_file)
+    //     .include(source_directory)
+    //     .compile(&package); // <2>
 }

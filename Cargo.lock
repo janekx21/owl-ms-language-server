@@ -1126,6 +1126,8 @@ dependencies = [
 [[package]]
 name = "tree-sitter-owl-ms"
 version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21f9edf750f26551d512b7eace42d3012d2a8287b3ec80ec796a380ae510ec21"
 dependencies = [
  "cc",
  "tree-sitter",
