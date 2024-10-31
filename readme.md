@@ -4,17 +4,20 @@ An incremental analysis assistant for writing ontologies with the [OWL 2 Web Ont
 
 ## Getting Started / Editor integration
 
+The first thing you need to know is that in order to run a a language server you obviusly need a text editor. Most source code editors support the language server protocol in some form or another. You can find a list of supported tools on [this webside](https://microsoft.github.io/language-server-protocol/implementors/tools/) but I recommend [Visual Studio Code](https://code.visualstudio.com/) for beginners. The further instructions for each editor are listed below.
+
 ### [Visual Studio Code](https://code.visualstudio.com/)
 
-![vscode install instructions](img/2024-10-25-154909_hyprshot.png)
+![vscode install instructions](img/vscode_install.png)
 
-Install the visual studio code plugin by opening visual studio and navigating to extentions. Search for "owl" and your should find the "Owl Mancherster Syntax" Plugin. Click the "Install" button and wait. You can now use the plugin by opening a *.omn file or by running the command "Change Language Mode" and selecting "Owl Manchester Syntax".
+Install the visual studio code plugin by (1) opening visual studio and navigating to view > extentions. (2) Search for "owl-ms" and your should find the "Owl Mancherster Syntax" Plugin. (3) Click the "Install" button and wait. You can now use the plugin by opening a *.omn file or by running the command "Change Language Mode" and selecting "Owl Manchester Syntax".
 
 - [Distributed via Open VSX Marketplace](https://open-vsx.org/extension/JanekWinkler/vscode-owl-ms)
 - [Distributed via VisualStudio Marketplace](https://marketplace.visualstudio.com/items?itemName=JanekWinkler.vscode-owl-ms)
 
 ### [Helix Editor](https://helix-editor.com/)
 
+Download and install the binary.
 Add the language server, language and grammar to your `languages.toml`.
 
 ```toml
@@ -64,10 +67,10 @@ Merge this setting into your `coc-settings.json` (open with `:CocConfig`).
 ```
 See [the example config for testing](https://github.com/oxalica/nil/blob/main/dev/vim-coc.nix).
 
-### Manual
+### Installing the binary (Not needed vor visual studio code)
 
 To use the language server manual you have to first install it and then integrate it into you editor. This differs for each editor.
-To install the owl-ms-language-server crate you currently have to use git and Cargo.
+To install the owl-ms-language-server rust crate/package you currently have to use git and Cargo.
 
 ```shell
 git clone https://github.com/janekx21/owl-ms-language-server --recurse-submodules
