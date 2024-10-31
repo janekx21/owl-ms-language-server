@@ -17,7 +17,7 @@ Install the visual studio code plugin by (1) opening visual studio and navigatin
 
 ### [Helix Editor](https://helix-editor.com/)
 
-Make shure the language server binary is installed (See Section [Installing the binary](installing-the-binary)). Then add the language server, language and grammar to your `languages.toml`.
+Make shure the language server binary is installed (See Section [Installing the binary](#installing-the-binary)). Then add the language server, language and grammar to your `languages.toml`.
 
 ```toml
 [language-server.owl-ms-language-server]
@@ -51,7 +51,7 @@ See the helix documentation page on [adding languages](https://docs.helix-editor
 
 ### Vim/Neovim with [coc.nvim](https://github.com/neoclide/coc.nvim)
 
-Make shure the language server binary is installed (See Section [Installing the binary](installing-the-binary)).
+Make shure the language server binary is installed (See Section [Installing the binary](#installing-the-binary)).
 
 Merge this setting into your `coc-settings.json` (open with `:CocConfig`).
 
@@ -68,7 +68,9 @@ Merge this setting into your `coc-settings.json` (open with `:CocConfig`).
 ```
 See [the example config for testing](https://github.com/oxalica/nil/blob/main/dev/vim-coc.nix).
 
-### Installing the binary (Not needed vor visual studio code)
+### Installing the binary
+
+> This is not needed vor visual studio code.
 
 To use the language server you have to first install it and then integrate it into you editor. This differs for each editor.
 Make shure [cargo](https://doc.rust-lang.org/cargo/)(the rust package manager) is installed on your system.
