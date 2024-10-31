@@ -17,8 +17,7 @@ Install the visual studio code plugin by (1) opening visual studio and navigatin
 
 ### [Helix Editor](https://helix-editor.com/)
 
-Download and install the binary.
-Add the language server, language and grammar to your `languages.toml`.
+Make shure the language server binary is installed (See Section [Installing the binary](installing-the-binary)). Then add the language server, language and grammar to your `languages.toml`.
 
 ```toml
 [language-server.owl-ms-language-server]
@@ -30,7 +29,7 @@ injection-regex = "owl-ms"
 scope = "text.omn"
 file-types = ["omn"]
 roots = []
-language-servers = ["owl-ms-language-server"]
+language-servers = ["owl-ms-language-server"] # you can use the absolut path to the binary if needed
 comment-token = "//"
 indent = { tab-width = 4, unit = "    " }
 grammar = "owl-ms" # this is the default
@@ -52,6 +51,8 @@ See the helix documentation page on [adding languages](https://docs.helix-editor
 
 ### Vim/Neovim with [coc.nvim](https://github.com/neoclide/coc.nvim)
 
+Make shure the language server binary is installed (See Section [Installing the binary](installing-the-binary)).
+
 Merge this setting into your `coc-settings.json` (open with `:CocConfig`).
 
 ```
@@ -69,17 +70,19 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
 
 ### Installing the binary (Not needed vor visual studio code)
 
-To use the language server manual you have to first install it and then integrate it into you editor. This differs for each editor.
-To install the owl-ms-language-server rust crate/package you currently have to use git and Cargo.
+To use the language server you have to first install it and then integrate it into you editor. This differs for each editor.
+Make shure [cargo](https://doc.rust-lang.org/cargo/)(the rust package manager) is installed on your system.
+Then to install the owl-ms-language-server binary use cargo install.
 
 ```shell
-git clone https://github.com/janekx21/owl-ms-language-server --recurse-submodules
-cd owl-ms-language-server 
-cargo install --path .
+cargo install owl-ms-language-server
 ```
 
-This installs the langauge server into Cargos's local set of installed binary crates, likely located in `$HOME/.cargo`.
-Alternatifly you can use `cargo build` instead of `cargo install --path .` and handle the binary yourself.
+This installs the langauge server into Cargos's local set of installed binary crates(rust packages), likely located in `$HOME/.cargo`. Make shure your `PATH` variable contains `$HOME/.cargo/bin`.
+Alternatifly you can clone this repostiry and use `cargo build` instead. Using this aproach you have to handle the created binary yourself.
+
+To integrate the languge server into an editor not listed above use the documentation of your editor. A list of supported tools can be found on
+[this webside](https://microsoft.github.io/language-server-protocol/implementors/tools/).
 
 ## Roadmap
 
