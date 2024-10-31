@@ -10,7 +10,7 @@ The first thing you need to know is that in order to run a a language server you
 
 ![vscode install instructions](img/vscode_install.png)
 
-Install the visual studio code plugin by (1) opening visual studio and navigating to view > extentions. (2) Search for "owl-ms" and your should find the "Owl Mancherster Syntax" Plugin. (3) Click the "Install" button and wait. You can now use the plugin by opening a *.omn file or by running the command "Change Language Mode" and selecting "Owl Manchester Syntax".
+Install the visual studio code plugin by (1) opening visual studio and navigating to view > extentions. (2) Search for "owl-ms" and your should find the "Owl Mancherster Syntax" Plugin. (3) Click the "Install" button and wait. You can now use the plugin by opening a `*.omn` file or by running the command "Change Language Mode" and selecting "Owl Manchester Syntax".
 
 - [Distributed via Open VSX Marketplace](https://open-vsx.org/extension/JanekWinkler/vscode-owl-ms)
 - [Distributed via VisualStudio Marketplace](https://marketplace.visualstudio.com/items?itemName=JanekWinkler.vscode-owl-ms)
@@ -42,7 +42,7 @@ source = { git = "https://github.com/janekx21/tree-sitter-owl2-manchester-syntax
 
 Then fetch and build the grammar.
 
-```shell
+```bash
 helix --grammar fetch
 helix --grammar build
 ```
@@ -55,7 +55,7 @@ Make shure the language server binary is installed (See Section [Installing the 
 
 Merge this setting into your `coc-settings.json` (open with `:CocConfig`).
 
-```
+```json
 {
   "languageserver": {
     "owl-ms": {
@@ -73,10 +73,10 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
 > This is not needed vor visual studio code.
 
 To use the language server you have to first install it and then integrate it into you editor. This differs for each editor.
-Make shure [cargo](https://doc.rust-lang.org/cargo/)(the rust package manager) is installed on your system.
+Make shure [cargo](https://doc.rust-lang.org/cargo/) (the rust package manager) is installed on your system.
 Then to install the owl-ms-language-server binary use cargo install.
 
-```shell
+```bash
 cargo install owl-ms-language-server
 ```
 
@@ -85,6 +85,13 @@ Alternatifly you can clone this repostiry and use `cargo build` instead. Using t
 
 To integrate the languge server into an editor not listed above use the documentation of your editor. A list of supported tools can be found on
 [this webside](https://microsoft.github.io/language-server-protocol/implementors/tools/).
+
+- Distributed via [crates.io](https://crates.io/crates/owl-ms-language-server)
+
+## FAQ
+
+### Where can i find logs?
+Logs can be found under `<tempdir>/owl-ms-lanugage-server.log`. On Windows `<tempdir>` is most likely `C:\Users\<username>\AppData\Local\Temp`, on Linux `/tmp` and on MacOS `/private/var/tmp`.
 
 ## Roadmap
 
@@ -130,6 +137,12 @@ To integrate the languge server into an editor not listed above use the document
 - code_action (all kinds of quick actions)
 - rename
 - references (shows all referenced locations)
+
+### Ideas
+
+- code action to create a frame when the IRI can not be found
+- LS could resolve IRI's that are external and parse the info from there
+- pipe logs to LS client
 
 ### Not planned
 
