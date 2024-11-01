@@ -74,9 +74,11 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
 
 To use the language server you have to first install it and then integrate it into you editor. This differs for each editor.
 Make shure [cargo](https://doc.rust-lang.org/cargo/) (the rust package manager) is installed on your system.
+Switch to nightly toolchain.
 Then to install the owl-ms-language-server binary use cargo install.
 
 ```bash
+rustup default nightly
 cargo install owl-ms-language-server
 ```
 

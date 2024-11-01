@@ -636,7 +636,7 @@ checksum = "e2355d85b9a3786f481747ced0e0ff2ba35213a1f9bd406ed906554d7af805a1"
 
 [[package]]
 name = "owl-ms-language-server"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "cc",
  "clap 4.5.16",
@@ -1125,9 +1125,9 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-owl-ms"
-version = "0.0.1"
+version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21f9edf750f26551d512b7eace42d3012d2a8287b3ec80ec796a380ae510ec21"
+checksum = "a4a00f1d1f63ea47e3d3c75579d0fcf9224d748a5a10b1956198abf427df3046"
 dependencies = [
  "cc",
  "tree-sitter",

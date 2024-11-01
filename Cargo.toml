@@ -1,6 +1,6 @@
 [package]
 name = "owl-ms-language-server"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "An incremental analysis assistant for writing ontologies with the OWL Manchester Syntax"
 license = "MIT"

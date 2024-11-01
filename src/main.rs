@@ -75,7 +75,7 @@ struct IriInfo {
 #[derive(Clone)]
 struct ResolvedIri {
     value: String,
-    _range: Range,
+    range: Range,
 }
 
 type Iri = String;
@@ -465,7 +465,9 @@ impl LanguageServer for Backend {
             .map(|document| {
                 let iri_label_map = &document.iri_info_map;
 
-                let full_iri_query = Query::new(*LANGUAGE, "(full_iri)@iri").unwrap();
+                let full_iri_query =
+                    Query::new(*LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri")
+                        .unwrap();
 
                 let range: Range = params.range.into();
 
@@ -874,7 +876,7 @@ fn gen_iri_info_map(tree: &Tree, rope: &Rope, range: Option<&Range>) -> DashMap<
                     annotation_iri.clone(),
                     ResolvedIri {
                         value: literal.clone(),
-                        _range: parent_node.range().into(),
+                        range: parent_node.range().into(),
                     },
                 );
             }
@@ -1168,10 +1170,10 @@ fn iri_info(iri: &String, doc: &Document) -> String {
                 let v = trim_string_value(v.value.clone());
                 format!("`{label}`: {v}")
             })
-            .intersperse("\n".to_string())
+            .intersperse("  \n".to_string())
             .collect::<String>();
 
-        format!("{entity} **{label}**\n\n{annotations}")
+        format!("{entity} **{label}**\n\n---\n{annotations}")
     } else {
         "No info found on iri".to_string()
     }
@@ -1182,6 +1184,7 @@ fn trim_string_value(value: String) -> String {
         .trim_start_matches('"')
         .trim_end_matches("@en")
         .trim_end_matches("@de")
+        .trim_end_matches("@pl")
         .trim_end_matches("^^xsd:string") // typed literal with type string
         .trim_end_matches('"')
         .replace("\\\"", "\"")
