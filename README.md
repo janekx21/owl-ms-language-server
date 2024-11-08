@@ -79,6 +79,7 @@ Then to install the owl-ms-language-server binary use cargo install.
 
 ```bash
 rustup default nightly
+sudo apt install build-essential # on windows you will need some cc linker
 cargo install owl-ms-language-server
 ```
 

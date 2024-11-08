@@ -86,7 +86,6 @@ struct StaticNode {
     #[serde(rename = "type")]
     _type: String,
     named: bool,
-    // fields: Vec<??> // TODO when needed
     #[serde(default)]
     children: StaticNodeChildren,
 }
