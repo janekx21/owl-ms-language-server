@@ -1,7 +1,7 @@
 // use crate::Backend;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use dashmap::DashMap;
-use std::sync::Mutex;
+use std::{sync::Mutex, time::Duration};
 use tower_lsp::{
     lsp_types::{
         DidOpenTextDocumentParams, InitializeParams, PositionEncodingKind, TextDocumentItem, Url,
@@ -17,7 +17,7 @@ fn parse_helper(source_code: &String, parser: &mut Parser) {
 }
 
 fn parse_bench(c: &mut Criterion) {
-    c.bench_function("parse", |b| {
+    c.bench_function("parse_bench", |b| {
         b.iter_batched_ref(
             || {
                 let source_code = "
@@ -38,7 +38,7 @@ Ontology: <http://foo.bar>
 }
 
 fn ontology_size_bench(c: &mut Criterion) {
-    let mut group = c.benchmark_group("from_elem");
+    let mut group = c.benchmark_group("ontology_size_bench");
     for size in (1..20).map(|i| i * 100) {
         group.throughput(Throughput::Elements(size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
@@ -164,5 +164,10 @@ fn ontology_size_bench(c: &mut Criterion) {
 //         .await;
 // }
 
-criterion_group!(benches, parse_bench, ontology_size_bench);
-criterion_main!(benches);
+criterion_group!(
+    name = long_bench;
+    config = Criterion::default().measurement_time(Duration::from_secs(30));
+    targets = ontology_size_bench
+);
+criterion_group!(benches, parse_bench);
+criterion_main!(benches, long_bench);
