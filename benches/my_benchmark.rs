@@ -8,12 +8,16 @@ use tower_lsp::{
     },
     LspService,
 };
-use tree_sitter::Parser;
+use tree_sitter::{InputEdit, Parser, Point, Tree};
 use tree_sitter_owl_ms::language;
 
 fn parse_helper(source_code: &String, parser: &mut Parser) {
     parser.reset();
     parser.parse(source_code, None).unwrap();
+}
+
+fn re_parse_helper(source_code: &String, parser: &mut Parser, old_tree: &Tree) {
+    parser.parse(source_code, Some(old_tree)).unwrap();
 }
 
 fn parse_bench(c: &mut Criterion) {
@@ -39,12 +43,12 @@ Ontology: <http://foo.bar>
 
 fn ontology_size_bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("ontology_size_bench");
-    for size in (1..20).map(|i| i * 100) {
+    for size in (1..10).map(|i| i * 100) {
         group.throughput(Throughput::Elements(size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
             b.iter_batched_ref(
                 || {
-                    let mut source_code = "Ontology: <http://foo.bar>".to_string();
+                    let mut source_code = "Ontology: <http://foo.bar>\n".to_string();
                     source_code.push_str(
                         "Class: <http://foo.bar/0> Annotations: rdfs:label \"Fizz\" "
                             .repeat(size)
@@ -63,111 +67,53 @@ fn ontology_size_bench(c: &mut Criterion) {
     group.finish();
 }
 
-// fn change_bench(c: &mut Criterion) {
-//     let mut group = c.benchmark_group("from_elem");
-//     for size in (1..20).map(|i| i * 100) {
-//         group.throughput(Throughput::Elements(size as u64));
-//         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
-//             b.iter_batched_ref(
-//                 || {
-//                     let mut source_code = "Ontology: <http://foo.bar>".to_string();
-//                     source_code.push_str(
-//                         "Class: <http://foo.bar/0> Annotations: rdfs:label \"Fizz\" "
-//                             .repeat(size)
-//                             .as_str(),
-//                     );
+fn ontology_change_bench(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ontology_change_bench");
+    for size in (1..10).map(|i| i * 1000) {
+        group.throughput(Throughput::Elements(size as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+            b.iter_batched_ref(
+                || {
+                    let mut source_code = "Ontology: <http://foo.bar>\n".to_string();
+                    source_code.push_str(
+                        "Class: <http://foo.bar/0>\nAnnotations: rdfs:label \"Fizz\"\n"
+                            .repeat(size)
+                            .as_str(),
+                    );
 
-//                     let mut parser = Parser::new();
-//                     parser.set_language(language()).unwrap();
+                    let mut parser = Parser::new();
+                    parser.set_language(language()).unwrap();
+                    let mut old_tree = parser.parse(source_code.clone(), None).unwrap();
+                    // println!("{}", old_tree.root_node().to_sexp());
 
-//                     let (service, _) = LspService::new(|client| Backend {
-//                         client,
-//                         parser: Mutex::new(parser),
-//                         document_map: DashMap::new(),
-//                         position_encoding: PositionEncodingKind::UTF8.into(),
-//                     });
+                    // let edit = InputEdit {
+                    //     start_byte: 29usize,
+                    //     old_end_byte: 30usize,
+                    //     new_end_byte: 30usize,
+                    //     start_position: Point { row: 1, column: 0 },
+                    //     old_end_position: Point { row: 1, column: 1 },
+                    //     new_end_position: Point { row: 1, column: 1 },
+                    // };
+                    // old_tree.edit(&edit);
+                    (source_code.to_string(), parser, old_tree)
+                },
+                |(source, parser, old_tree)| re_parse_helper(source, parser, old_tree),
+                criterion::BatchSize::SmallInput,
+            )
+        });
+    }
+    group.finish();
+}
 
-//                     let result = service
-//                         .inner()
-//                         .initialize(InitializeParams {
-//                             ..Default::default()
-//                         })
-//                         .await;
-//                     assert!(result.is_ok(), "initialize returned {:#?}", result);
-
-//                     let url = Url::parse("file://foo.omn").expect("valid url");
-//                     service
-//                         .inner()
-//                         .did_open(DidOpenTextDocumentParams {
-//                             text_document: TextDocumentItem {
-//                                 uri: url.clone(),
-//                                 language_id: "owl2md".to_string(),
-//                                 version: 0,
-//                                 text: "DEF".to_string(),
-//                             },
-//                         })
-//                         .await;
-//                 },
-//                 |(source, parser)| did_change(source, parser),
-//                 criterion::BatchSize::SmallInput,
-//             )
-//         });
-//     }
-//     group.finish();
-// }
-
-// async fn did_change_helper(service: LspService) {
-//     service
-//         .inner()
-//         .did_change(DidChangeTextDocumentParams {
-//             text_document: VersionedTextDocumentIdentifier {
-//                 uri: url.clone(),
-//                 version: 2,
-//             },
-//             content_changes: vec![
-//                 TextDocumentContentChangeEvent {
-//                     range: Some(
-//                         Range {
-//                             start: (Position {
-//                                 line: 0,
-//                                 character: 0,
-//                             }),
-//                             end: Position {
-//                                 line: 0,
-//                                 character: 0,
-//                             },
-//                         }
-//                         .into(),
-//                     ),
-//                     range_length: None,
-//                     text: "ABC".to_string(),
-//                 },
-//                 TextDocumentContentChangeEvent {
-//                     range: Some(
-//                         Range {
-//                             start: (Position {
-//                                 line: 0,
-//                                 character: 6,
-//                             }),
-//                             end: Position {
-//                                 line: 0,
-//                                 character: 6,
-//                             },
-//                         }
-//                         .into(),
-//                     ),
-//                     range_length: None,
-//                     text: "GHI".to_string(),
-//                 },
-//             ],
-//         })
-//         .await;
-// }
-
+// criterion_group!(
+//     name = long_bench;
+//     config = Criterion::default().measurement_time(Duration::from_secs(60));
+//     targets = ontology_size_bench
+// );
 criterion_group!(
-    name = long_bench;
-    config = Criterion::default().measurement_time(Duration::from_secs(30));
-    targets = ontology_size_bench
+    benches,
+    parse_bench,
+    ontology_change_bench,
+    ontology_size_bench
 );
-criterion_group!(benches, parse_bench);
-criterion_main!(benches, long_bench);
+criterion_main!(benches); //, long_bench
