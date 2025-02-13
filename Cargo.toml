@@ -4,6 +4,9 @@ version = "0.1.2"
 edition = "2021"
 description = "An incremental analysis assistant for writing ontologies with the OWL Manchester Syntax"
 license = "MIT"
+readme = "README.md"
+keywords = ["owl", "manchester-syntax"]
+repository = "https://github.com/janekx21/owl-ms-language-server"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
