@@ -4,20 +4,20 @@ An incremental analysis assistant for writing ontologies with the [OWL 2 Web Ont
 
 ## Getting Started / Editor integration
 
-The first thing you need to know is that in order to run a a language server you obviusly need a text editor. Most source code editors support the language server protocol in some form or another. You can find a list of supported tools on [this webside](https://microsoft.github.io/language-server-protocol/implementors/tools/) but I recommend [Visual Studio Code](https://code.visualstudio.com/) for beginners. The further instructions for each editor are listed below.
+The first thing you need to know is that in order to run a a language server you obviously need a text editor. Most source code editors support the language server protocol in some form or another. You can find a list of supported tools on [this website](https://microsoft.github.io/language-server-protocol/implementors/tools/) but I recommend [Visual Studio Code](https://code.visualstudio.com/) for beginners. The further instructions for each editor are listed below.
 
 ### [Visual Studio Code](https://code.visualstudio.com/)
 
 ![vscode install instructions](img/vscode_install.png)
 
-Install the visual studio code plugin by (1) opening visual studio and navigating to view > extentions. (2) Search for "owl-ms" and your should find the "Owl Mancherster Syntax" Plugin. (3) Click the "Install" button and wait. You can now use the plugin by opening a `*.omn` file or by running the command "Change Language Mode" and selecting "Owl Manchester Syntax".
+Install the visual studio code plugin by (1) opening visual studio and navigating to view > extensions. (2) Search for "owl-ms" and your should find the "Owl Manchester Syntax" Plugin. (3) Click the "Install" button and wait. You can now use the plugin by opening a `*.omn` file or by running the command "Change Language Mode" and selecting "Owl Manchester Syntax".
 
 - [Distributed via Open VSX Marketplace](https://open-vsx.org/extension/JanekWinkler/vscode-owl-ms)
 - [Distributed via VisualStudio Marketplace](https://marketplace.visualstudio.com/items?itemName=JanekWinkler.vscode-owl-ms)
 
 ### [Helix Editor](https://helix-editor.com/)
 
-Make shure the language server binary is installed (See Section [Installing the binary](#installing-the-binary)). Then add the language server, language and grammar to your `languages.toml`.
+Make sure the language server binary is installed (See Section [Installing the binary](#installing-the-binary)). Then add the language server, language and grammar to your `languages.toml`.
 
 ```toml
 [language-server.owl-ms-language-server]
@@ -51,7 +51,7 @@ See the helix documentation page on [adding languages](https://docs.helix-editor
 
 ### Vim/Neovim with [coc.nvim](https://github.com/neoclide/coc.nvim)
 
-Make shure the language server binary is installed (See Section [Installing the binary](#installing-the-binary)).
+Make sure the language server binary is installed (See Section [Installing the binary](#installing-the-binary)).
 
 Merge this setting into your `coc-settings.json` (open with `:CocConfig`).
 
@@ -70,10 +70,10 @@ See [the example config for testing](https://github.com/oxalica/nil/blob/main/de
 
 ### Installing the binary
 
-> This is not needed vor visual studio code.
+> This is not needed for visual studio code.
 
 To use the language server you have to first install it and then integrate it into you editor. This differs for each editor.
-Make shure [cargo](https://doc.rust-lang.org/cargo/) (the rust package manager) is installed on your system.
+Make sure [cargo](https://doc.rust-lang.org/cargo/) (the rust package manager) is installed on your system.
 Switch to nightly toolchain.
 Then to install the owl-ms-language-server binary use cargo install.
 
@@ -83,11 +83,11 @@ sudo apt install build-essential # on windows you will need some cc linker
 cargo install owl-ms-language-server
 ```
 
-This installs the langauge server into Cargos's local set of installed binary crates(rust packages), likely located in `$HOME/.cargo`. Make shure your `PATH` variable contains `$HOME/.cargo/bin`.
-Alternatifly you can clone this repostiry and use `cargo build` instead. Using this aproach you have to handle the created binary yourself.
+This installs the language server into Cargo's local set of installed binary crates(rust packages), likely located in `$HOME/.cargo`. Make sure your `PATH` variable contains `$HOME/.cargo/bin`.
+Alternatively you can clone this repository and use `cargo build` instead. Using this approach you have to handle the created binary yourself.
 
-To integrate the languge server into an editor not listed above use the documentation of your editor. A list of supported tools can be found on
-[this webside](https://microsoft.github.io/language-server-protocol/implementors/tools/).
+To integrate the language server into an editor not listed above use the documentation of your editor. A list of supported tools can be found on
+[this website](https://microsoft.github.io/language-server-protocol/implementors/tools/).
 
 - Distributed via [crates.io](https://crates.io/crates/owl-ms-language-server)
 
