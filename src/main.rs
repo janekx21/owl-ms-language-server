@@ -1,4 +1,3 @@
-#![feature(async_closure, iter_intersperse)]
 mod position;
 mod range;
 mod rope_provider;
@@ -24,6 +23,7 @@ use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree, TreeCursor};
 use tree_sitter_owl_ms::language;
+use itertools::Itertools;
 
 // Constants
 
