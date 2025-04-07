@@ -1,0 +1,29 @@
+{
+  "grammars": [
+    {
+      "name": "owl-ms",
+      "camelcase": "OwlMs",
+      "scope": "source.omn",
+      "path": ".",
+      "file-types": [
+        "omn"
+      ]
+    }
+  ],
+  "metadata": {
+    "version": "1.0.0",
+    "license": "ISC",
+    "description": "Parser for owl2 manchester syntex based on tree sitter",
+    "links": {
+      "repository": "https://github.com/tree-sitter/tree-sitter-owl-ms"
+    }
+  },
+  "bindings": {
+    "c": false,
+    "go": false,
+    "node": false,
+    "python": false,
+    "rust": true,
+    "swift": false
+  }
+}
