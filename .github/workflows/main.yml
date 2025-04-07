@@ -60,14 +60,14 @@ jobs:
       run: npm ci
 
     - name: Cargo Build
-      working-directory: lib/owl-ms-language-server
+      working-directory: crates/owl-ms-language-server
       run: cargo build --release --target ${{ matrix.target }}
 
     - name: Move language server binary
       run: |
         # tree server/target
         # mv server/target/${{ matrix.target }}/release/owl-ms-language-server${{ matrix.bin-ext }} server/owl-ms-language-server${{ matrix.bin-ext }}
-        mv lib/owl-ms-language-server/target/release/owl-ms-language-server${{ matrix.bin-ext }} editors/code/server/owl-ms-language-server${{ matrix.bin-ext }}
+        mv crates/owl-ms-language-server/target/release/owl-ms-language-server${{ matrix.bin-ext }} editors/code/server/owl-ms-language-server${{ matrix.bin-ext }}
 
     - name: Publish on OVSX
       working-directory: editors/code
