@@ -48,7 +48,7 @@ jobs:
     - name: Setup Rust toolchain
       run: |
         # rustup update --no-self-update stable
-        # rustup default nightly
+        rustup default stable
         rustup target add ${{ matrix.target }}
         
     - name: Setup Node
@@ -57,17 +57,18 @@ jobs:
         node-version: '22.x'
         
     - name: Install Node Dependencies
+      working-directory: editors/code
       run: npm ci
 
     - name: Cargo Build
-      working-directory: crates/owl-ms-language-server
+      # working-directory: crates/owl-ms-language-server
       run: cargo build --release --target ${{ matrix.target }}
 
     - name: Move language server binary
       run: |
         # tree server/target
         # mv server/target/${{ matrix.target }}/release/owl-ms-language-server${{ matrix.bin-ext }} server/owl-ms-language-server${{ matrix.bin-ext }}
-        mv crates/owl-ms-language-server/target/release/owl-ms-language-server${{ matrix.bin-ext }} editors/code/server/owl-ms-language-server${{ matrix.bin-ext }}
+        mv target/release/owl-ms-language-server${{ matrix.bin-ext }} editors/code/server/owl-ms-language-server${{ matrix.bin-ext }}
 
     - name: Publish on OVSX
       working-directory: editors/code
