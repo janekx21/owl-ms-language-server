@@ -18,7 +18,6 @@ jobs:
 
     - name: Cargo Build
       run: cargo test
-      run: cargo build --release --target ${{ matrix.target }}
 
     # TODO test tree-sitter
 
