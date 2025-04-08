@@ -2,13 +2,14 @@
 members = [
     "crates/owl-ms-language-server"
 ]
+resolver = "2"
 
 [workspace.package]
 edition = "2021"
 authors = ["Janek Winkler"]
 repository = "https://github.com/janekx21/owl-ms-language-server"
 license = "Apache-2.0"
-version = "0.1.4"
+version = "0.4.2"
 
 [workspace.dependencies]
 tree-sitter-owl-ms = { path = "crates/tree-sitter-owl-ms" }

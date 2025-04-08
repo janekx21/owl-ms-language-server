@@ -68,10 +68,11 @@ jobs:
       run: |
         mv target/${{ matrix.target }}/release/owl-ms-language-server${{ matrix.bin-ext }} editors/code/server/owl-ms-language-server${{ matrix.bin-ext }}
 
-    - name: Publish on OVSX
-      working-directory: editors/code
-      run: npx ovsx publish --pat ${{ secrets.PAT_OVSX }} --target ${{ matrix.code-target }}
+    # Disable publish till the job is seperate and after some tests
+    # - name: Publish on OVSX
+    #   working-directory: editors/code
+    #   run: npx ovsx publish --pat ${{ secrets.PAT_OVSX }} --target ${{ matrix.code-target }}
 
-    - name: Publish on VSCE
-      working-directory: editors/code
-      run: npx vsce publish --pat ${{ secrets.PAT_VSCE }} --target ${{ matrix.code-target }}
+    # - name: Publish on VSCE
+    #   working-directory: editors/code
+    #   run: npx vsce publish --pat ${{ secrets.PAT_VSCE }} --target ${{ matrix.code-target }}

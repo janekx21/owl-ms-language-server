@@ -5,6 +5,12 @@ readme = "README.md"
 keywords = ["incremental", "parsing", "owl-ms"]
 categories = ["parsing", "text-editors"]
 
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+version.workspace = true
+
 build = "bindings/rust/build.rs"
 include = [
   "bindings/rust/*",

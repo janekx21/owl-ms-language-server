@@ -4,6 +4,12 @@ description = "An incremental analysis assistant for writing ontologies with the
 readme = "README.md"
 keywords = ["owl", "manchester-syntax"]
 
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+version.workspace = true
+
 [dependencies]
 clap = { version = "4.5.16", features = ["derive"] }
 dashmap = "5.5.3"
