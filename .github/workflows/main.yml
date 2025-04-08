@@ -50,6 +50,10 @@ jobs:
         # rustup update --no-self-update stable
         rustup default stable
         rustup target add ${{ matrix.target }}
+
+    - name: Install compiler dependencies
+      if: matrix.target == 'aarch64-linux-gnu-gcc'
+      run: sudo apt install aarch64-linux-gnu-gcc -y
         
     - name: Setup Node
       uses: actions/setup-node@v4
