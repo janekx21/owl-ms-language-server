@@ -27,9 +27,14 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22.x'
+
     - name: tree-sitter-check
       working-directory: crates/tree-sitter-owl-ms
-      uses: RenjiSann/tree-sitter-check@v0.0.4
+      run: npx tree-sitter-cli test
 
     # TODO test node
     # - name: Setup Node
