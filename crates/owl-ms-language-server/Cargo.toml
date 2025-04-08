@@ -1,14 +1,8 @@
 [package]
 name = "owl-ms-language-server"
-version = "0.1.3"
-edition = "2021"
 description = "An incremental analysis assistant for writing ontologies with the OWL Manchester Syntax"
-license = "MIT"
 readme = "README.md"
 keywords = ["owl", "manchester-syntax"]
-repository = "https://github.com/janekx21/owl-ms-language-server"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 clap = { version = "4.5.16", features = ["derive"] }
@@ -23,8 +17,7 @@ simple-logging = "2.0.2"
 tokio = {version = "1.34.0", features = ["macros", "rt-multi-thread", "io-util", "io-std"]}
 tower-lsp = "0.20.0"
 tree-sitter = "0.20.10"
-tree-sitter-owl-ms = { workspace = true }
-# some usefulle crates could be dashmap, im-rc
+tree-sitter-owl-ms.workspace = true
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }
