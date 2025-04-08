@@ -1,0 +1,34 @@
+on:
+  pull_request:
+  merge_group:
+
+jobs:
+  test_rust:
+    runs-on: ubuntu-latest
+    name: Build and test rust workspace
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Rust toolchain
+      run: |
+        rustup update --no-self-update stable
+        rustup default stable
+
+    - name: Cargo Build
+      run: cargo test
+      run: cargo build --release --target ${{ matrix.target }}
+
+    # TODO test tree-sitter
+
+    # TODO test node
+    # - name: Setup Node
+    #   uses: actions/setup-node@v4
+    #   with:
+    #     node-version: '22.x'
+        
+    # - name: Install Node Dependencies
+    #   working-directory: editors/code
+    #   run: npm ci
+
