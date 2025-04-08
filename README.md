@@ -4,8 +4,8 @@ An incremental analysis assistant for writing ontologies with the [OWL 2 Web Ont
 
 ## Structure of this repository
 
-- [The Language Server](lib/owl-ms-language-server/)
-- [The Grammar written in tree-sitter](lib/tree-sitter-owl-ms/)
+- [The Language Server](crates/owl-ms-language-server/)
+- [The Grammar written in tree-sitter](crates/tree-sitter-owl-ms/)
 - [Visual Studio Code Extension](editors/code/)
 
 ## Getting Started / Editor integration
