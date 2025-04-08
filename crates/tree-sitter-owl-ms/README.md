@@ -1,0 +1,1 @@
+This folder contains the tree-sitter grammar that is used by the owl-ms-language-server.

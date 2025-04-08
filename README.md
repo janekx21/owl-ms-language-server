@@ -1,6 +1,12 @@
-# owl-ms-language-server: Owl 2 Manchester Syntax Language Server
+# Owl 2 Manchester Syntax Language Server
 
 An incremental analysis assistant for writing ontologies with the [OWL 2 Web Ontology Language | Manchester Syntax](https://www.w3.org/TR/owl2-manchester-syntax/).
+
+## Structure of this repository
+
+- [The Language Server](crates/owl-ms-language-server/)
+- [The Grammar written in tree-sitter](crates/tree-sitter-owl-ms/)
+- [Visual Studio Code Extension](editors/code/)
 
 ## Getting Started / Editor integration
 
@@ -98,109 +104,15 @@ Logs can be found under `<tempdir>/owl-ms-lanugage-server.log`. On Windows `<tem
 
 ## Roadmap
 
-### Done
+- [x] Basic Grammar
+- [x] Basic Language Server
+- [x] VS Code plugin
+- [ ] making the LS more practical
 
-- diagnostic (only syntax)
-- goto_definition
-  - class_iri
-- hover
-  - class_iri
-  - class_frame
-- inlay_hint
-  - class_iri
-  - datatype
-  - class
-  - object property
-  - data property
-  - annotation property
-  - individual
-- goto_definition
-  - class_iri
-  - annotation_property_iri
-  - object_property_iri
-  - data_property_iri
-  - individual_iri
-  - datatype_iri
-    - es lag daran, dass in der grammar datatype nicht hidden war
-- completion
-  - some keywords work
-  - iris // just simple
+## Contributing
 
-### Doing
+Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
 
+## License
 
-### Planned
-
-- full replace
-- hover
-  - other frame types
-  - keywords
-  - others
-- document_symbol
-- code_action (all kinds of quick actions)
-- rename
-- references (shows all referenced locations)
-
-### Ideas
-
-- code action to create a frame when the IRI can not be found
-- LS could resolve IRI's that are external and parse the info from there
-- pipe logs to LS client
-
-### Not planned
-
-- test https://www.ebi.ac.uk/chebi/downloadsForward.do
-
-- goto_declaration
-- goto_type_definition
-- goto_implementation
-- incoming_calls
-- outgoing_calls
-- supertypes
-- subtypes
-- document_highlight (highlights text that corresponds to text under the cursor)
-- document_link (all links in a document)
-- document_link_resolve (how to resolve a link)
-- code_lens
-- folding_range
-- selection_range
-- semantic_tokens
-- inline_value
-- moniker
-- workspace_diagnostic
-- signature_help
-- document_color
-- color_presentation
-- formatting
-- on_type_formatting
-- linked_editing_range (ranges that have the same content)
-- symbol (project-wide symbol search)
-
-
-## Possible implamentation vectors
-
-- iri types
-  - class_iri
-  - datatype_iri
-  - annotation_property_iri
-  - ontology_iri
-  - data_property_iri
-  - version_iri
-  - object_property_iri
-  - annotation_property_iri_annotated_list
-  - individual_iri
-
-- frames
-  - datatype
-  - class
-  - object property
-  - data property
-  - annotation property
-  - individual
-  - misc
-
-# Interesting stuff
-- When you apply a text edit you should not re generate the cache for each edit.
-- What could be paralell
-- what to cache and what to query
-- steps that accour when a document changes with edits
+All projects use the [Apache-2.0](https://choosealicense.com/licenses/apache-2.0/) License

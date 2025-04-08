@@ -1,0 +1,89 @@
+{
+	"name": "vscode-owl-ms",
+	"version": "0.4.1",
+	"displayName": "Owl Manchester Syntax",
+	"description": "Owl language server support for vscode",
+	"author": "Janek Winkler",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/janekx21/vscode-owl-ms"
+	},
+	"publisher": "JanekWinkler",
+	"categories": [
+		"Programming Languages"
+	],
+	"keywords": [
+		"owl-ms",
+		"vscode",
+		"owl"
+	],
+	"engines": {
+		"vscode": "^1.75.0"
+	},
+	"activationEvents": [
+		"onLanguage:plaintext",
+		"onLanguage:owl-ms"
+	],
+	"icon": "icon.png",
+	"galleryBanner": {
+		"color": "#6175BE",
+		"theme": "dark"
+	},
+	"main": "./client/out/extension",
+	"contributes": {
+		"languages": [
+			{
+				"id": "owl-ms",
+				"extensions": [
+					".omn"
+				],
+				"aliases": [
+					"Owl Manchester Syntax"
+				]
+			}
+		]
+	},
+	"configuration": {
+		"type": "object",
+		"title": "Example configuration",
+		"properties": {
+			"olw-ms-language-server.maxNumberOfProblems": {
+				"scope": "resource",
+				"type": "number",
+				"default": 100,
+				"description": "Controls the maximum number of problems produced by the server."
+			},
+			"olw-ms-language-server.trace.server": {
+				"scope": "window",
+				"type": "string",
+				"enum": [
+					"off",
+					"messages",
+					"verbose"
+				],
+				"default": "off",
+				"description": "Traces the communication between VS Code and the language server."
+			}
+		}
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -b",
+		"watch": "tsc -b -w",
+		"lint": "eslint ./client/src --ext .ts,.tsx",
+		"postinstall": "cd client && npm install && cd ..",
+		"test": "sh ./scripts/e2e.sh",
+		"package": "vsce package"
+	},
+	"devDependencies": {
+		"@types/mocha": "^9.1.0",
+		"@types/node": "^16.18.34",
+		"@typescript-eslint/eslint-plugin": "^6.7.0",
+		"@typescript-eslint/parser": "^6.7.0",
+		"eslint": "^8.35.0",
+		"mocha": "^9.2.1",
+		"typescript": "^5.2.2",
+		"vsce": "^2.15.0"
+	}
+}
