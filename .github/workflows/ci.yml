@@ -1,0 +1,48 @@
+on:
+  pull_request:
+  merge_group:
+
+jobs:
+  test_rust:
+    runs-on: ubuntu-latest
+    name: Build and test rust workspace
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Rust toolchain
+      run: |
+        rustup update --no-self-update stable
+        rustup default stable
+
+    - name: Cargo Test
+      run: cargo test
+
+  test_tree_sitter:
+    runs-on: ubuntu-latest
+    name: Test tree-sitter grammar
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22.x'
+
+    - name: tree-sitter-check
+      working-directory: crates/tree-sitter-owl-ms
+      run: npx tree-sitter-cli test
+
+    # TODO test node
+    # - name: Setup Node
+    #   uses: actions/setup-node@v4
+    #   with:
+    #     node-version: '22.x'
+        
+    # - name: Install Node Dependencies
+    #   working-directory: editors/code
+    #   run: npm ci
+
