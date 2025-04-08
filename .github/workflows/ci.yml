@@ -16,10 +16,19 @@ jobs:
         rustup update --no-self-update stable
         rustup default stable
 
-    - name: Cargo Build
+    - name: Cargo Test
       run: cargo test
 
-    # TODO test tree-sitter
+  test_tree_sitter:
+    runs-on: ubuntu-latest
+    name: Test tree-sitter grammar
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: tree-sitter-check
+      uses: RenjiSann/tree-sitter-check@v0.0.4
 
     # TODO test node
     # - name: Setup Node
