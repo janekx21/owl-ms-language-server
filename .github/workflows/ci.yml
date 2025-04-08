@@ -28,6 +28,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: tree-sitter-check
+      working-directory: crates/tree-sitter-owl-ms
       uses: RenjiSann/tree-sitter-check@v0.0.4
 
     # TODO test node
