@@ -1,0 +1,8 @@
+Ontology: <http://a.b/multi-file>
+
+Import: <http://a.b/multi-file/other>
+
+Class: class-in-first-file
+    Annotations: rdfs:label "This class is in the first file"
+
+    SubClassOf: class-in-other-file
