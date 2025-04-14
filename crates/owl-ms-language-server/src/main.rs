@@ -6,7 +6,8 @@ mod tests;
 
 use clap::Parser as ClapParser;
 use dashmap::DashMap;
-use log::{debug, error, LevelFilter};
+use itertools::Itertools;
+use log::{debug, error, warn, LevelFilter};
 use once_cell::sync::Lazy;
 use position::Position;
 use range::{range_exclusive_inside, range_overlaps, Range};
@@ -14,16 +15,17 @@ use rope_provider::RopeProvider;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::env;
 use std::fmt::Display;
+use std::path::Path;
+use std::{env, fs};
 use tokio::sync::Mutex;
-use tokio::task;
+use tokio::task::{self, spawn_blocking};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree, TreeCursor};
 use tree_sitter_owl_ms::language;
-use itertools::Itertools;
+use walkdir::WalkDir;
 
 // Constants
 
@@ -57,15 +59,33 @@ struct Backend {
     parser: Mutex<Parser>, // stateful because of resume behavior after fail, timeout or cancellation
     document_map: DashMap<Url, Document>, // async hash map
     position_encoding: Mutex<PositionEncodingKind>,
+    workspace_folders: Mutex<Vec<WorkspaceFolder>>,
+    catalogs: Mutex<Vec<Catalog>>,
+}
+
+impl Backend {
+    /// Creates a new [`Backend`].
+    fn new(client: Client, parser: Parser) -> Self {
+        Backend {
+            client,
+            parser: Mutex::new(parser),
+            document_map: DashMap::new(),
+            position_encoding: PositionEncodingKind::UTF16.into(),
+            workspace_folders: Mutex::new(vec![]),
+            catalogs: Mutex::new(vec![]),
+        }
+    }
 }
 
 struct Document {
+    uri: Url,
     tree: Tree,
     rope: Rope,
     version: i32,
     iri_info_map: DashMap<Iri, IriInfo>,
     diagnostics: Vec<Diagnostic>,
 }
+
 #[derive(Clone)]
 struct IriInfo {
     annotations: HashMap<Iri, ResolvedIri>, // TODO some iris are used more then once. e.g. rdfs:label for more languages
@@ -110,6 +130,30 @@ enum IriType {
     Ontology,
 }
 
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "kebab-case")]
+struct Catalog {
+    // uri: Vec<String>,
+    #[serde(rename = "@prefer")]
+    prefer: String,
+
+    uri: Vec<CatalogUri>,
+
+    #[serde(skip)]
+    locaton: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "kebab-case")]
+struct CatalogUri {
+    #[serde(rename = "@id")]
+    id: String, // Non unique name of item
+    #[serde(rename = "@name")]
+    name: String, // Full URL of the ontology. This will be used in OMN import statements
+    #[serde(rename = "@uri")]
+    uri: String, // Relative file path of the backing ontology file
+}
+
 #[tokio::main]
 async fn main() {
     let _ = Args::parse();
@@ -117,7 +161,7 @@ async fn main() {
     let mut log_file_path = env::temp_dir();
     log_file_path.push("owl-ms-lanugage-server.log");
     let log_file_path = log_file_path.as_path();
-    simple_logging::log_to_file(log_file_path, LevelFilter::Trace).unwrap_or_else(|_| {
+    simple_logging::log_to_file(log_file_path, LevelFilter::Debug).unwrap_or_else(|_| {
         panic!(
             "Logging file could not be created at {}",
             log_file_path.to_str().unwrap_or("[invalid unicode]")
@@ -131,12 +175,7 @@ async fn main() {
     let mut parser = Parser::new();
     parser.set_language(*LANGUAGE).unwrap();
 
-    let (service, socket) = LspService::new(|client| Backend {
-        client,
-        parser: Mutex::new(parser),
-        document_map: DashMap::new(),
-        position_encoding: PositionEncodingKind::UTF16.into(),
-    });
+    let (service, socket) = LspService::new(|client| Backend::new(client, parser));
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
@@ -148,7 +187,7 @@ async fn main() {
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         self.client
-            .log_message(MessageType::INFO, "initialize called")
+            .log_message(MessageType::INFO, "initialize called.")
             .await;
 
         let encodings = params
@@ -166,7 +205,16 @@ impl LanguageServer for Backend {
         let mut pg = self.position_encoding.lock().await;
         *pg = encoding.clone();
 
-        debug!("initialize");
+        let mut wf = self.workspace_folders.lock().await;
+        *wf = params.workspace_folders.unwrap_or_default();
+
+        let mut catalogs_guard = self.catalogs.lock().await;
+        for folder in wf.iter() {
+            let read_catalogs = read_catalog(folder.uri.clone());
+            catalogs_guard.extend(read_catalogs);
+        }
+
+        debug!("initialize. Workspace folders: {:?}", wf);
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "owl-ms-language-server".to_string(),
@@ -233,39 +281,38 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let uri = params.text_document.uri;
         debug!(
             "did_open at {} with version {}",
-            params.text_document.uri, params.text_document.version
+            uri.clone(),
+            params.text_document.version.clone()
         );
 
         let mut parser_guard = self.parser.lock().await;
-        parser_guard.reset();
 
-        let tree = timeit("did_open > inital parse", || {
-            parser_guard
-                .parse(&params.text_document.text, None)
-                .expect("language to be set, no timeout to be used, no cancelation flag")
-        });
-
-        let rope = Rope::from(params.text_document.text);
-        let iri_info_map = gen_iri_info_map(&tree, &rope, None);
-        let diagnostics = timeit("did_open > gen_diagnostics", || {
-            gen_diagnostics(&tree.root_node())
-        });
+        let document = create_document(
+            uri.clone(),
+            params.text_document.version,
+            params.text_document.text,
+            &mut parser_guard,
+        );
 
         self.client
-            .publish_diagnostics(params.text_document.uri.clone(), diagnostics.clone(), None)
+            .publish_diagnostics(
+                uri.clone(),
+                document.diagnostics.clone(),
+                Some(document.version),
+            )
             .await;
 
-        self.document_map.insert(
-            params.text_document.uri.clone(),
-            Document {
-                version: params.text_document.version,
-                tree,
-                rope,
-                iri_info_map,
-                diagnostics,
-            },
+        self.document_map.insert(uri.clone(), document);
+
+        let catalog_g = self.catalogs.lock().await;
+        resolve_imports(
+            &self.document_map.get(&uri).unwrap(),
+            self,
+            &mut parser_guard,
+            &catalog_g,
         );
     }
 
@@ -277,7 +324,7 @@ impl LanguageServer for Backend {
                 .uri
                 .path_segments()
                 .unwrap()
-                .last()
+                .next_back()
                 .unwrap(),
             params.text_document.version
         );
@@ -446,7 +493,7 @@ impl LanguageServer for Backend {
             .map(|document| {
                 let pos = params.text_document_position_params.position.into();
                 let node = deepest_named_node_at_pos(&document.tree, pos);
-                let info = node_info(&node, &document);
+                let info = node_info(&node, &document, self);
                 let range: Range = node.range().into();
                 Hover {
                     contents: HoverContents::Scalar(MarkedString::String(info)),
@@ -457,13 +504,15 @@ impl LanguageServer for Backend {
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         debug!("inlay_hint at {}", params.text_document.uri);
+        let mut combined_iri_info_map: DashMap<Iri, IriInfo> = DashMap::new();
+        for doc in self.document_map.iter() {
+            combined_iri_info_map.extend(doc.value().iri_info_map.clone());
+        }
 
         Ok(self
             .document_map
             .get(&params.text_document.uri)
             .map(|document| {
-                let iri_label_map = &document.iri_info_map;
-
                 let full_iri_query =
                     Query::new(*LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri")
                         .unwrap();
@@ -481,7 +530,7 @@ impl LanguageServer for Backend {
                     .map(|match_| match_.captures[0])
                     .filter_map(|capture| {
                         let iri = &node_text(&capture.node, &document.rope).to_string();
-                        iri_label_map.get(iri).and_then(|info| {
+                        combined_iri_info_map.get(iri).and_then(|info| {
                             let node = capture.node;
                             let end: Position = node.end_position().into(); // inlay hints are at the end of the iri
 
@@ -631,6 +680,10 @@ impl LanguageServer for Backend {
         let url = params.text_document_position.text_document.uri;
         let doc = self.document_map.get(&url);
         let pos: Position = params.text_document_position.position.into();
+        let mut combined_iri_info_map: DashMap<Iri, IriInfo> = DashMap::new();
+        for doc in self.document_map.iter() {
+            combined_iri_info_map.extend(doc.value().iri_info_map.clone());
+        }
         Ok(doc.map(|doc| {
             // generate keyword list that can be applied. Note that this is missing some keywords because of limitations in the grammar.
             let mut cursor = doc.tree.walk();
@@ -672,8 +725,7 @@ impl LanguageServer for Backend {
             let partial_text = node_text(&cursor.node(), &doc.rope).to_string();
 
             if parent_kind == "simple_iri" {
-                let iris: Vec<CompletionItem> = doc
-                    .iri_info_map
+                let iris: Vec<CompletionItem> = combined_iri_info_map
                     .iter()
                     .filter(|item| item.key().contains(partial_text.as_str()))
                     .map(|item| item.key().clone())
@@ -750,7 +802,7 @@ impl LanguageServer for Backend {
                     token_modifiers_bitset: 0,
                 };
 
-                debug!("token {:?}", token);
+                // debug!("token {:?}", token);
 
                 last_start = node.start_position();
                 tokens.push(token);
@@ -802,6 +854,191 @@ impl LanguageServer for Backend {
         debug!("shutdown");
         Ok(())
     }
+}
+
+fn read_catalog(uri: Url) -> Vec<Catalog> {
+    let path = uri.to_file_path().unwrap();
+    let walker = WalkDir::new(path);
+    let mut catalogs: Vec<Catalog> = vec![];
+    for entry in walker.into_iter().filter_map(|e| e.ok()) {
+        if entry.file_type().is_file() && entry.file_name().to_str() == "catalog-v001.xml".into() {
+            // Possible catalog file. Lets parse it
+
+            let path = entry.path().iter().as_path();
+            let xml = fs::read_to_string(path).expect("Catalog file should be readable");
+            let mut catalog: Catalog = quick_xml::de::from_str(xml.as_str()).unwrap();
+            catalog.locaton = path.to_str().unwrap().to_string();
+            debug!("Found catalog {:?}", catalog);
+            catalogs.push(catalog);
+        };
+    }
+    catalogs
+}
+
+fn create_document(uri: Url, version: i32, text: String, parser: &mut Parser) -> Document {
+    parser.reset();
+
+    let tree = timeit("create_document / parse", || {
+        parser
+            .parse(&text, None)
+            .expect("language to be set, no timeout to be used, no cancelation flag")
+    });
+
+    let rope = Rope::from(text);
+    let iri_info_map = gen_iri_info_map(&tree, &rope, None);
+    let diagnostics = timeit("create_document / gen_diagnostics", || {
+        gen_diagnostics(&tree.root_node())
+    });
+
+    Document {
+        uri,
+        version,
+        tree,
+        rope,
+        iri_info_map,
+        diagnostics,
+    }
+}
+
+static IMPORT_QUERY: Lazy<Query> = Lazy::new(|| {
+    Query::new(
+        *LANGUAGE,
+        "(import [(full_iri) (simple_iri) (abbreviated_iri)]@iri)",
+    )
+    .unwrap()
+});
+
+fn resolve_imports(
+    document: &Document,
+    backend: &Backend,
+    parser: &mut Parser,
+    catalogs: &Vec<Catalog>,
+) {
+    for m in query_document(document, &IMPORT_QUERY) {
+        for c in m.captures {
+            let iri_text = node_text(&c.node, &document.rope).to_string();
+            let url = Url::parse(iri_text.trim_end_matches(">").trim_start_matches("<"))
+                .expect("valid URL"); //  TODO ignore invalid URL's
+
+            // TODO #8 filepath
+            // if url.path().ends_with(".omn") {
+            if backend.document_map.contains_key(&url) {
+                debug!("This document is already in the backend. URL: {}", url);
+            } else {
+                debug!("Try to resolve URL {}", url);
+                // Find uri in catalog
+                debug!("{:?}", catalogs);
+                for c in catalogs {
+                    for u in &c.uri {
+                        debug!("url {}  u.name {}", url, u.name);
+                        if u.name == url.to_string() {
+                            // This is an import of a local file!
+                            let path = Path::new(&c.locaton).parent().unwrap().join(&u.uri);
+                            debug!(
+                                "Found matching local file {:?} loading from path {}",
+                                u,
+                                path.display()
+                            );
+                            let ontology_text = fs::read_to_string(path).unwrap();
+                            let document = create_document(url.clone(), -1, ontology_text, parser);
+                            backend.document_map.insert(url.clone(), document);
+                        }
+                    }
+                }
+
+                // debug!("Resolving import of {}", url.clone());
+                // let ontology_text = ureq::get(url.to_string())
+                //     .call()
+                //     .unwrap()
+                //     .body_mut()
+                //     .read_to_string()
+                //     .unwrap();
+
+                // debug!(
+                //     "Inserted imported document URL: {}, number of iris: {}, number of diagnostics: {}",
+                //     url,
+                //     document.iri_info_map.iter().count(),
+                //     document.diagnostics.len()
+                // );
+            }
+            // } else {
+            // warn!("The imported URL type is not supported. URL: {}", url);
+            // }
+
+            // debug!("Resolved import {} to\n{}", url, resolved_import);
+        }
+    }
+
+    // let mut query_cursor = QueryCursor::new();
+    // query_cursor
+    //     .matches(
+    //         &query,
+    //         document.tree.root_node(),
+    //         RopeProvider::new(&document.rope),
+    //     )
+    //     .map(|match_| match_.captures[0])
+    //     .filter_map(|capture| {
+    //         let iri = &node_text(&capture.node, &document.rope).to_string();
+    //         iri_label_map.get(iri).and_then(|info| {
+    //             let node = capture.node;
+    //             let end: Position = node.end_position().into(); // inlay hints are at the end of the iri
+
+    //             // TODO write a tooltip
+    //             info.label().map(trim_string_value).map(|label| InlayHint {
+    //                 position: end.into(),
+    //                 label: InlayHintLabel::String(label),
+    //                 kind: None,
+    //                 text_edits: None,
+    //                 tooltip: None,
+    //                 padding_left: Some(true),
+    //                 padding_right: None,
+    //                 data: None,
+    //             })
+    //         })
+    //     })
+    //     .collect::<Vec<InlayHint>>()
+}
+
+fn query_document<'a>(
+    document: &'a Document,
+    // source: &str,
+    query: &'a Query,
+) -> Vec<UnwrappedQueryMatch<'a>> {
+    // let query = Query::new(*LANGUAGE, source).unwrap();
+    // let query_ref: &'a Query = &query;
+
+    let mut query_cursor = QueryCursor::new();
+    let rope_provider: RopeProvider<'a> = RopeProvider::new(&document.rope);
+    let matches = query_cursor
+        .matches(query, document.tree.root_node(), rope_provider)
+        .map(|m| UnwrappedQueryMatch::<'a> {
+            pattern_index: m.pattern_index,
+            id: m.id(),
+            captures: m
+                .captures
+                .iter()
+                .map(|c| UnwrappedQueryCapture::<'a> {
+                    node: c.node,
+                    index: c.index,
+                })
+                .collect_vec(),
+        })
+        .collect_vec();
+
+    return matches;
+}
+
+#[derive(Debug)]
+struct UnwrappedQueryMatch<'a> {
+    pattern_index: usize,
+    captures: Vec<UnwrappedQueryCapture<'a>>,
+    id: u32,
+}
+
+#[derive(Debug)]
+struct UnwrappedQueryCapture<'a> {
+    node: Node<'a>,
+    index: u32,
 }
 
 // Functions
@@ -1045,13 +1282,16 @@ fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) -> u32
 
 // Implementations for Structs
 
-impl Document {
-    fn resolve_iri(&self, iri: &String) -> String {
-        self.iri_info_map
-            .get(iri)
-            .and_then(|iri_info| iri_info.label())
-            .unwrap_or(iri.clone())
+fn global_resolve_iri(backend: &Backend, iri: &String) -> String {
+    let mut combined_iri_info_map: DashMap<Iri, IriInfo> = DashMap::new();
+    for doc in backend.document_map.iter() {
+        combined_iri_info_map.extend(doc.value().iri_info_map.clone());
     }
+
+    combined_iri_info_map
+        .get(iri)
+        .and_then(|iri_info| iri_info.label())
+        .unwrap_or(iri.clone())
 }
 
 impl IriInfo {
@@ -1112,7 +1352,7 @@ fn deepest_named_node_at_pos(tree: &Tree, pos: Position) -> Node {
             break;
         }
     }
-    return cursor.node();
+    cursor.node()
 }
 
 fn cursor_goto_pos(cursor: &mut TreeCursor, pos: Position) {
@@ -1129,7 +1369,7 @@ fn cursor_goto_pos(cursor: &mut TreeCursor, pos: Position) {
     }
 }
 
-fn node_info(node: &Node, doc: &Document) -> String {
+fn node_info(node: &Node, doc: &Document, backend: &Backend) -> String {
     match node.kind() {
         "class_frame" | "annotation_property_frame" => {
             let iri = &node
@@ -1137,23 +1377,29 @@ fn node_info(node: &Node, doc: &Document) -> String {
                 .map(|c| node_text(&c, &doc.rope).to_string());
 
             if let Some(iri) = iri {
-                iri_info(iri, doc)
+                iri_info_display(iri, backend)
             } else {
                 "Class Frame\nNo iri was found".to_string()
             }
         }
         "full_iri" | "simple_iri" | "abbreviated_iri" => {
             let iri = node_text(node, &doc.rope).to_string();
-            iri_info(&iri, doc)
+            iri_info_display(&iri, backend)
         }
-        "class_iri" => iri_info(&node_text(node, &doc.rope).to_string(), doc),
+        "class_iri" => iri_info_display(&node_text(node, &doc.rope).to_string(), backend),
 
         _ => format!("generic node named {}", node.kind()),
     }
 }
 
-fn iri_info(iri: &String, doc: &Document) -> String {
-    if let Some(info) = doc.iri_info_map.get(iri) {
+fn iri_info_display(iri: &String, backend: &Backend) -> String {
+    let mut combined_iri_info_map: DashMap<Iri, IriInfo> = DashMap::new();
+    for doc in backend.document_map.iter() {
+        combined_iri_info_map.extend(doc.value().iri_info_map.clone());
+    }
+
+    // TODO remove this clone of combined_iri_info_map
+    if let Some(info) = combined_iri_info_map.clone().get(iri) {
         let entity = info.tipe;
         let label = info
             .label()
@@ -1164,7 +1410,7 @@ fn iri_info(iri: &String, doc: &Document) -> String {
             .annotations
             .iter()
             .map(|(iri, v)| {
-                let label = doc.resolve_iri(iri);
+                let label = global_resolve_iri(backend, iri);
                 let label = trim_string_value(label);
                 let v = trim_string_value(v.value.clone());
                 format!("`{label}`: {v}")
