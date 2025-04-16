@@ -1,13 +1,16 @@
+mod catalog;
+mod debugging;
 mod position;
 mod range;
 mod rope_provider;
 #[cfg(test)]
 mod tests;
+mod workspace;
 
 use clap::Parser as ClapParser;
-use dashmap::DashMap;
-use itertools::Itertools;
-use log::{debug, error, warn, LevelFilter};
+use dashmap::{DashMap, DashSet};
+use debugging::timeit;
+use log::{debug, error, LevelFilter};
 use once_cell::sync::Lazy;
 use position::Position;
 use range::{range_exclusive_inside, range_overlaps, Range};
@@ -18,14 +21,15 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::path::Path;
 use std::{env, fs};
-use tokio::sync::Mutex;
-use tokio::task::{self, spawn_blocking};
+use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
+use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree, TreeCursor};
 use tree_sitter_owl_ms::language;
 use walkdir::WalkDir;
+use workspace::{gen_diagnostics, gen_iri_info_map, Document, Workspace};
 
 // Constants
 
@@ -57,10 +61,8 @@ struct Args {
 struct Backend {
     client: Client,
     parser: Mutex<Parser>, // stateful because of resume behavior after fail, timeout or cancellation
-    document_map: DashMap<Url, Document>, // async hash map
     position_encoding: Mutex<PositionEncodingKind>,
-    workspace_folders: Mutex<Vec<WorkspaceFolder>>,
-    catalogs: Mutex<Vec<Catalog>>,
+    workspaces: Mutex<Vec<Workspace>>,
 }
 
 impl Backend {
@@ -69,33 +71,14 @@ impl Backend {
         Backend {
             client,
             parser: Mutex::new(parser),
-            document_map: DashMap::new(),
+            // document_map: DashMap::new(),
             position_encoding: PositionEncodingKind::UTF16.into(),
-            workspace_folders: Mutex::new(vec![]),
-            catalogs: Mutex::new(vec![]),
+            // workspace_folders: Mutex::new(vec![]),
+            // catalogs: Mutex::new(vec![]),
+            // frame_infos: DashMap::new(),
+            workspaces: Mutex::new(vec![]),
         }
     }
-}
-
-struct Document {
-    uri: Url,
-    tree: Tree,
-    rope: Rope,
-    version: i32,
-    iri_info_map: DashMap<Iri, IriInfo>,
-    diagnostics: Vec<Diagnostic>,
-}
-
-#[derive(Clone)]
-struct IriInfo {
-    annotations: HashMap<Iri, ResolvedIri>, // TODO some iris are used more then once. e.g. rdfs:label for more languages
-    tipe: IriType,
-}
-
-#[derive(Clone)]
-struct ResolvedIri {
-    value: String,
-    range: Range,
 }
 
 type Iri = String;
@@ -120,7 +103,7 @@ struct StaticNodeChildren {
 
 /// taken from https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing
 #[derive(Clone, Copy)]
-enum IriType {
+enum FrameType {
     Class,
     DataType,
     ObjectProperty,
@@ -128,30 +111,6 @@ enum IriType {
     AnnotationProperty,
     Individual,
     Ontology,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(rename_all = "kebab-case")]
-struct Catalog {
-    // uri: Vec<String>,
-    #[serde(rename = "@prefer")]
-    prefer: String,
-
-    uri: Vec<CatalogUri>,
-
-    #[serde(skip)]
-    locaton: String,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(rename_all = "kebab-case")]
-struct CatalogUri {
-    #[serde(rename = "@id")]
-    id: String, // Non unique name of item
-    #[serde(rename = "@name")]
-    name: String, // Full URL of the ontology. This will be used in OMN import statements
-    #[serde(rename = "@uri")]
-    uri: String, // Relative file path of the backing ontology file
 }
 
 #[tokio::main]
@@ -205,16 +164,20 @@ impl LanguageServer for Backend {
         let mut pg = self.position_encoding.lock().await;
         *pg = encoding.clone();
 
-        let mut wf = self.workspace_folders.lock().await;
-        *wf = params.workspace_folders.unwrap_or_default();
+        let mut wf = self.workspaces.lock().await;
+        *wf = params
+            .workspace_folders
+            .unwrap_or_default()
+            .iter()
+            .map(|wf| Workspace::new(wf.clone()))
+            .collect();
 
-        let mut catalogs_guard = self.catalogs.lock().await;
-        for folder in wf.iter() {
-            let read_catalogs = read_catalog(folder.uri.clone());
-            catalogs_guard.extend(read_catalogs);
-        }
+        // let mut catalogs_guard = self.catalogs.lock().await;
+        // for folder in wf.iter() {
+        //     let read_catalogs = read_catalog(folder.uri.clone());
+        //     catalogs_guard.extend(read_catalogs);
+        // }
 
-        debug!("initialize. Workspace folders: {:?}", wf);
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "owl-ms-language-server".to_string(),
@@ -281,17 +244,20 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let uri = params.text_document.uri;
+        let url = params.text_document.uri;
+
+        let workspace = self.find_workspace(&url).await;
+
         debug!(
             "did_open at {} with version {}",
-            uri.clone(),
+            url.clone(),
             params.text_document.version.clone()
         );
 
         let mut parser_guard = self.parser.lock().await;
 
-        let document = create_document(
-            uri.clone(),
+        let document = Document::new(
+            url.clone(),
             params.text_document.version,
             params.text_document.text,
             &mut parser_guard,
@@ -299,21 +265,16 @@ impl LanguageServer for Backend {
 
         self.client
             .publish_diagnostics(
-                uri.clone(),
+                url.clone(),
                 document.diagnostics.clone(),
                 Some(document.version),
             )
             .await;
 
-        self.document_map.insert(uri.clone(), document);
+        let document = workspace.insert_document(document);
 
-        let catalog_g = self.catalogs.lock().await;
-        resolve_imports(
-            &self.document_map.get(&uri).unwrap(),
-            self,
-            &mut parser_guard,
-            &catalog_g,
-        );
+        // let catalog_g = self.catalogs.lock().await;
+        self.resolve_imports(&document, &mut parser_guard, &workspace.catalogs);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -329,7 +290,10 @@ impl LanguageServer for Backend {
             params.text_document.version
         );
 
-        if let Some(mut document) = self.document_map.get_mut(&params.text_document.uri) {
+        let url = &params.text_document.uri;
+        let workspace = self.find_workspace(url).await;
+
+        if let Some(mut document) = workspace.document_map.get_mut(&params.text_document.uri) {
             if document.version >= params.text_document.version {
                 return; // no change needed
             }
@@ -400,7 +364,7 @@ impl LanguageServer for Backend {
 
             let use_full_replace = params.content_changes.len() > FULL_REPLACE_THRESHOLD;
             if use_full_replace {
-                document.iri_info_map = gen_iri_info_map(&document.tree, &document.rope, None);
+                document.frame_infos = gen_iri_info_map(&document.tree, &document.rope, None);
 
                 let diagnostics = gen_diagnostics(&document.tree.root_node());
                 document.diagnostics = diagnostics.clone();
@@ -421,7 +385,7 @@ impl LanguageServer for Backend {
                 //     .iri_info_map
                 //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
 
-                document.iri_info_map.extend(iri_info_map);
+                document.frame_infos.extend(iri_info_map);
             }
 
             for range in change_ranges.iter() {
@@ -461,7 +425,7 @@ impl LanguageServer for Backend {
             task::spawn(async move {
                 c.publish_diagnostics(uri, d, None).await;
             });
-        }
+        };
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -475,36 +439,40 @@ impl LanguageServer for Backend {
                 .last()
                 .unwrap(),
         );
-        self.document_map.remove(&params.text_document.uri);
+        let workspace = self.find_workspace(&url).await;
+        workspace.document_map.remove(&params.text_document.uri);
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let url = params.text_document_position_params.text_document.uri;
         debug!(
             "hover at {:?} in file {}",
-            params.text_document_position_params.position,
-            params.text_document_position_params.text_document.uri
+            params.text_document_position_params.position, &url
         );
 
         self.client.log_message(MessageType::INFO, "hover").await;
 
-        Ok(self
-            .document_map
-            .get(&params.text_document_position_params.text_document.uri)
-            .map(|document| {
-                let pos = params.text_document_position_params.position.into();
-                let node = deepest_named_node_at_pos(&document.tree, pos);
-                let info = node_info(&node, &document, self);
-                let range: Range = node.range().into();
-                Hover {
-                    contents: HoverContents::Scalar(MarkedString::String(info)),
-                    range: Some(range.into()),
-                }
-            }))
+        let workspace = self.find_workspace(&url).await;
+
+        Ok(workspace.document_map.get(&url).map(|document| {
+            let pos = params.text_document_position_params.position.into();
+            let node = deepest_named_node_at_pos(&document.tree, pos);
+            let info = node_info(&node, &document, self);
+            let range: Range = node.range().into();
+            Hover {
+                contents: HoverContents::Scalar(MarkedString::String(info)),
+                range: Some(range.into()),
+            }
+        }))
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         debug!("inlay_hint at {}", params.text_document.uri);
-        let mut combined_iri_info_map: DashMap<Iri, IriInfo> = DashMap::new();
+
+        let url = params.text_document.uri;
+        let workspace = self.find_workspace(&url).await;
+
+        let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
         for doc in self.document_map.iter() {
             combined_iri_info_map.extend(doc.value().iri_info_map.clone());
         }
@@ -680,7 +648,7 @@ impl LanguageServer for Backend {
         let url = params.text_document_position.text_document.uri;
         let doc = self.document_map.get(&url);
         let pos: Position = params.text_document_position.position.into();
-        let mut combined_iri_info_map: DashMap<Iri, IriInfo> = DashMap::new();
+        let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
         for doc in self.document_map.iter() {
             combined_iri_info_map.extend(doc.value().iri_info_map.clone());
         }
@@ -856,47 +824,100 @@ impl LanguageServer for Backend {
     }
 }
 
-fn read_catalog(uri: Url) -> Vec<Catalog> {
-    let path = uri.to_file_path().unwrap();
-    let walker = WalkDir::new(path);
-    let mut catalogs: Vec<Catalog> = vec![];
-    for entry in walker.into_iter().filter_map(|e| e.ok()) {
-        if entry.file_type().is_file() && entry.file_name().to_str() == "catalog-v001.xml".into() {
-            // Possible catalog file. Lets parse it
-
-            let path = entry.path().iter().as_path();
-            let xml = fs::read_to_string(path).expect("Catalog file should be readable");
-            let mut catalog: Catalog = quick_xml::de::from_str(xml.as_str()).unwrap();
-            catalog.locaton = path.to_str().unwrap().to_string();
-            debug!("Found catalog {:?}", catalog);
-            catalogs.push(catalog);
-        };
+impl Backend {
+    async fn find_workspace<'a>(&'a self, url: &Url) -> MappedMutexGuard<'a, Workspace> {
+        MutexGuard::map(self.workspaces.lock().await, |f| {
+            f.iter_mut()
+                .find(|w| w.document_map.contains_key(url))
+                .unwrap()
+        })
     }
-    catalogs
-}
 
-fn create_document(uri: Url, version: i32, text: String, parser: &mut Parser) -> Document {
-    parser.reset();
+    fn resolve_imports(&self, document: &Document, parser: &mut Parser, catalogs: &Vec<Catalog>) {
+        for m in query_document(document, &IMPORT_QUERY) {
+            for c in m.captures {
+                let iri_text = node_text(&c.node, &document.rope).to_string();
+                let url = Url::parse(iri_text.trim_end_matches(">").trim_start_matches("<"))
+                    .expect("valid URL"); //  TODO ignore invalid URL's
 
-    let tree = timeit("create_document / parse", || {
-        parser
-            .parse(&text, None)
-            .expect("language to be set, no timeout to be used, no cancelation flag")
-    });
+                // TODO #8 filepath
+                // if url.path().ends_with(".omn") {
+                if backend.document_map.contains_key(&url) {
+                    debug!("This document is already in the backend. URL: {}", url);
+                } else {
+                    debug!("Try to resolve URL {}", url);
+                    // Find uri in catalog
+                    debug!("{:?}", catalogs);
+                    for c in catalogs {
+                        for u in &c.uri {
+                            debug!("url {}  u.name {}", url, u.name);
+                            if u.name == url.to_string() {
+                                // This is an import of a local file!
+                                let path = Path::new(&c.locaton).parent().unwrap().join(&u.uri);
+                                debug!(
+                                    "Found matching local file {:?} loading from path {}",
+                                    u,
+                                    path.display()
+                                );
+                                let ontology_text = fs::read_to_string(path).unwrap();
+                                let document =
+                                    create_document(url.clone(), -1, ontology_text, parser);
+                                backend.document_map.insert(url.clone(), document);
+                            }
+                        }
+                    }
 
-    let rope = Rope::from(text);
-    let iri_info_map = gen_iri_info_map(&tree, &rope, None);
-    let diagnostics = timeit("create_document / gen_diagnostics", || {
-        gen_diagnostics(&tree.root_node())
-    });
+                    // debug!("Resolving import of {}", url.clone());
+                    // let ontology_text = ureq::get(url.to_string())
+                    //     .call()
+                    //     .unwrap()
+                    //     .body_mut()
+                    //     .read_to_string()
+                    //     .unwrap();
 
-    Document {
-        uri,
-        version,
-        tree,
-        rope,
-        iri_info_map,
-        diagnostics,
+                    // debug!(
+                    //     "Inserted imported document URL: {}, number of iris: {}, number of diagnostics: {}",
+                    //     url,
+                    //     document.iri_info_map.iter().count(),
+                    //     document.diagnostics.len()
+                    // );
+                }
+                // } else {
+                // warn!("The imported URL type is not supported. URL: {}", url);
+                // }
+
+                // debug!("Resolved import {} to\n{}", url, resolved_import);
+            }
+        }
+
+        // let mut query_cursor = QueryCursor::new();
+        // query_cursor
+        //     .matches(
+        //         &query,
+        //         document.tree.root_node(),
+        //         RopeProvider::new(&document.rope),
+        //     )
+        //     .map(|match_| match_.captures[0])
+        //     .filter_map(|capture| {
+        //         let iri = &node_text(&capture.node, &document.rope).to_string();
+        //         iri_label_map.get(iri).and_then(|info| {
+        //             let node = capture.node;
+        //             let end: Position = node.end_position().into(); // inlay hints are at the end of the iri
+
+        //             // TODO write a tooltip
+        //             info.label().map(trim_string_value).map(|label| InlayHint {
+        //                 position: end.into(),
+        //                 label: InlayHintLabel::String(label),
+        //                 kind: None,
+        //                 text_edits: None,
+        //                 tooltip: None,
+        //                 padding_left: Some(true),
+        //                 padding_right: None,
+        //                 data: None,
+        //             })
+        //         })
+        //     })
+        //     .collect::<Vec<InlayHint>>()
     }
 }
 
@@ -907,97 +928,6 @@ static IMPORT_QUERY: Lazy<Query> = Lazy::new(|| {
     )
     .unwrap()
 });
-
-fn resolve_imports(
-    document: &Document,
-    backend: &Backend,
-    parser: &mut Parser,
-    catalogs: &Vec<Catalog>,
-) {
-    for m in query_document(document, &IMPORT_QUERY) {
-        for c in m.captures {
-            let iri_text = node_text(&c.node, &document.rope).to_string();
-            let url = Url::parse(iri_text.trim_end_matches(">").trim_start_matches("<"))
-                .expect("valid URL"); //  TODO ignore invalid URL's
-
-            // TODO #8 filepath
-            // if url.path().ends_with(".omn") {
-            if backend.document_map.contains_key(&url) {
-                debug!("This document is already in the backend. URL: {}", url);
-            } else {
-                debug!("Try to resolve URL {}", url);
-                // Find uri in catalog
-                debug!("{:?}", catalogs);
-                for c in catalogs {
-                    for u in &c.uri {
-                        debug!("url {}  u.name {}", url, u.name);
-                        if u.name == url.to_string() {
-                            // This is an import of a local file!
-                            let path = Path::new(&c.locaton).parent().unwrap().join(&u.uri);
-                            debug!(
-                                "Found matching local file {:?} loading from path {}",
-                                u,
-                                path.display()
-                            );
-                            let ontology_text = fs::read_to_string(path).unwrap();
-                            let document = create_document(url.clone(), -1, ontology_text, parser);
-                            backend.document_map.insert(url.clone(), document);
-                        }
-                    }
-                }
-
-                // debug!("Resolving import of {}", url.clone());
-                // let ontology_text = ureq::get(url.to_string())
-                //     .call()
-                //     .unwrap()
-                //     .body_mut()
-                //     .read_to_string()
-                //     .unwrap();
-
-                // debug!(
-                //     "Inserted imported document URL: {}, number of iris: {}, number of diagnostics: {}",
-                //     url,
-                //     document.iri_info_map.iter().count(),
-                //     document.diagnostics.len()
-                // );
-            }
-            // } else {
-            // warn!("The imported URL type is not supported. URL: {}", url);
-            // }
-
-            // debug!("Resolved import {} to\n{}", url, resolved_import);
-        }
-    }
-
-    // let mut query_cursor = QueryCursor::new();
-    // query_cursor
-    //     .matches(
-    //         &query,
-    //         document.tree.root_node(),
-    //         RopeProvider::new(&document.rope),
-    //     )
-    //     .map(|match_| match_.captures[0])
-    //     .filter_map(|capture| {
-    //         let iri = &node_text(&capture.node, &document.rope).to_string();
-    //         iri_label_map.get(iri).and_then(|info| {
-    //             let node = capture.node;
-    //             let end: Position = node.end_position().into(); // inlay hints are at the end of the iri
-
-    //             // TODO write a tooltip
-    //             info.label().map(trim_string_value).map(|label| InlayHint {
-    //                 position: end.into(),
-    //                 label: InlayHintLabel::String(label),
-    //                 kind: None,
-    //                 text_edits: None,
-    //                 tooltip: None,
-    //                 padding_left: Some(true),
-    //                 padding_right: None,
-    //                 data: None,
-    //             })
-    //         })
-    //     })
-    //     .collect::<Vec<InlayHint>>()
-}
 
 fn query_document<'a>(
     document: &'a Document,
@@ -1042,166 +972,6 @@ struct UnwrappedQueryCapture<'a> {
 }
 
 // Functions
-
-/// Generate an async hash map that resolves iris to infos about that iri
-fn gen_iri_info_map(tree: &Tree, rope: &Rope, range: Option<&Range>) -> DashMap<Iri, IriInfo> {
-    debug!("generating iri info map");
-
-    // TODO check frame [(datatype_frame) (class_frame) (object_property_frame) (data_property_frame) (annotation_property_frame) (individual_frame)]
-    // the typed literal is for the string type
-    let frame_source = "
-        (_
-            . (_ [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri)
-            (annotation
-                (annotation_property_iri)@iri
-                [
-                    (string_literal_no_language)
-                    (string_literal_with_language)
-                    (typed_literal)
-                ]@literal))
-        
-        (prefix_declaration (prefix_name)@prefix_name (full_iri)@iri)
-        ";
-
-    let frame_query = Query::new(*LANGUAGE, frame_source).expect("valid query expect");
-    let mut query_cursor = QueryCursor::new();
-
-    if let Some(range) = range {
-        query_cursor.set_point_range((*range).into());
-    }
-
-    let matches = query_cursor.matches(&frame_query, tree.root_node(), RopeProvider::new(rope));
-
-    let infos = DashMap::<Iri, IriInfo>::new();
-
-    for m in matches {
-        match m.pattern_index {
-            0 => {
-                let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
-                let frame_iri = capture_texts.next().unwrap().to_string();
-                let annotation_iri = capture_texts.next().unwrap().to_string();
-                let literal = capture_texts.next().unwrap().to_string();
-
-                let parent_node = m.captures[0].node.parent().unwrap();
-                let entity = match parent_node.kind() {
-                    "class_iri" => IriType::Class,
-                    "datatype_iri" => IriType::DataType,
-                    "annotation_property_iri" => IriType::AnnotationProperty,
-                    "individual_iri" => IriType::Individual,
-                    "ontology_iri" => IriType::Ontology,
-                    "data_property_iri" => IriType::DataProperty,
-                    "object_property_iri" => IriType::ObjectProperty,
-                    kind => {
-                        error!("implement {kind}");
-                        IriType::Class
-                    }
-                };
-
-                if !infos.contains_key(&frame_iri) {
-                    infos.insert(
-                        frame_iri.clone(),
-                        IriInfo {
-                            annotations: HashMap::new(),
-                            tipe: entity,
-                        },
-                    );
-                }
-
-                let mut info = infos.get_mut(&frame_iri).unwrap();
-                info.annotations.insert(
-                    annotation_iri.clone(),
-                    ResolvedIri {
-                        value: literal.clone(),
-                        range: parent_node.range().into(),
-                    },
-                );
-            }
-            1 => {
-                let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
-                let prefix_name = capture_texts.next().unwrap().to_string();
-                let iri = capture_texts.next().unwrap().to_string();
-
-                // TODO requst prefix url to cache the ontology there
-                debug!("prefix named {} with iri {}", prefix_name, iri);
-            }
-            i => todo!("pattern index {} not implemented", i),
-        }
-    }
-    infos
-}
-
-/// Generate the diagnostics for a single node, walking recusivly down to every child and every syntax error within
-fn gen_diagnostics(node: &Node) -> Vec<Diagnostic> {
-    let mut cursor = node.walk();
-    let mut diagnostics = Vec::<Diagnostic>::new();
-
-    loop {
-        let node = cursor.node();
-
-        if node.is_error() {
-            // log
-            let range: Range = cursor.node().range().into();
-
-            // root has no parents so use itself
-            let parent_kind = node.parent().unwrap_or(node).kind();
-
-            if let Some(static_node) = NODE_TYPES.get(parent_kind) {
-                let valid_children: String = static_node
-                    .children
-                    .types
-                    .iter()
-                    .map(|sn| node_type_to_string(&sn._type))
-                    .intersperse(", ".to_string())
-                    .collect();
-
-                let parent = node_type_to_string(parent_kind);
-                let msg = format!("Syntax Error. expected {valid_children} inside {parent}");
-
-                diagnostics.push(Diagnostic {
-                    range: range.into(),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: None,
-                    code_description: None,
-                    source: Some("owl language server".to_string()),
-                    message: msg.to_string(),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                });
-            }
-            // move along
-            while !cursor.goto_next_sibling() {
-                // move out
-                if !cursor.goto_parent() {
-                    // this node has no parent, its the root
-                    return diagnostics;
-                }
-            }
-        } else if node.has_error() {
-            // move in
-            let has_child = cursor.goto_first_child(); // should alwayes work
-
-            if !has_child {
-                while !cursor.goto_next_sibling() {
-                    // move out
-                    if !cursor.goto_parent() {
-                        // this node has no parent, its the root
-                        return diagnostics;
-                    }
-                }
-            }
-        } else {
-            // move along
-            while !cursor.goto_next_sibling() {
-                // move out
-                if !cursor.goto_parent() {
-                    // this node has no parent, its the root
-                    return diagnostics;
-                }
-            }
-        }
-    }
-}
 
 fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) -> u32 {
     match str {
@@ -1283,7 +1053,7 @@ fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) -> u32
 // Implementations for Structs
 
 fn global_resolve_iri(backend: &Backend, iri: &String) -> String {
-    let mut combined_iri_info_map: DashMap<Iri, IriInfo> = DashMap::new();
+    let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
     for doc in backend.document_map.iter() {
         combined_iri_info_map.extend(doc.value().iri_info_map.clone());
     }
@@ -1294,7 +1064,7 @@ fn global_resolve_iri(backend: &Backend, iri: &String) -> String {
         .unwrap_or(iri.clone())
 }
 
-impl IriInfo {
+impl FrameInfo {
     fn label(&self) -> Option<String> {
         self.annotations
             .get("rdfs:label")
@@ -1307,36 +1077,6 @@ fn _log_to_client(client: &Client, msg: String) -> task::JoinHandle<()> {
     task::spawn(async move {
         c.log_message(MessageType::INFO, msg).await;
     })
-}
-
-fn node_type_to_string(node_type: &str) -> String {
-    node_type
-        .split_terminator('_')
-        .map(capitilize_string)
-        .intersperse(" ".to_string())
-        .collect()
-}
-
-fn capitilize_string(s: &str) -> String {
-    let mut c = s.chars();
-    match c.next() {
-        None => String::new(),
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-    }
-}
-
-fn node_text<'a>(node: &Node, rope: &'a Rope) -> ropey::RopeSlice<'a> {
-    rope.byte_slice(node.start_byte()..node.end_byte())
-}
-
-fn timeit<F: FnMut() -> T, T>(name: &str, mut f: F) -> T {
-    use std::time::Instant;
-    let start = Instant::now();
-    let result = f();
-    let end = Instant::now();
-    let duration = end.duration_since(start);
-    debug!("⏲ {} took {:?}", name, duration);
-    result
 }
 
 fn deepest_named_node_at_pos(tree: &Tree, pos: Position) -> Node {
@@ -1393,14 +1133,14 @@ fn node_info(node: &Node, doc: &Document, backend: &Backend) -> String {
 }
 
 fn iri_info_display(iri: &String, backend: &Backend) -> String {
-    let mut combined_iri_info_map: DashMap<Iri, IriInfo> = DashMap::new();
+    let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
     for doc in backend.document_map.iter() {
         combined_iri_info_map.extend(doc.value().iri_info_map.clone());
     }
 
     // TODO remove this clone of combined_iri_info_map
     if let Some(info) = combined_iri_info_map.clone().get(iri) {
-        let entity = info.tipe;
+        let entity = info.frame_type;
         let label = info
             .label()
             .map(trim_string_value)
@@ -1437,16 +1177,16 @@ fn trim_string_value(value: String) -> String {
         .to_string()
 }
 
-impl Display for IriType {
+impl Display for FrameType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match self {
-            IriType::Class => "Class",
-            IriType::DataType => "Data Type",
-            IriType::ObjectProperty => "Object Property",
-            IriType::DataProperty => "Data Property",
-            IriType::AnnotationProperty => "Annotation Property",
-            IriType::Individual => "Named Individual",
-            IriType::Ontology => "Ontology",
+            FrameType::Class => "Class",
+            FrameType::DataType => "Data Type",
+            FrameType::ObjectProperty => "Object Property",
+            FrameType::DataProperty => "Data Property",
+            FrameType::AnnotationProperty => "Annotation Property",
+            FrameType::Individual => "Named Individual",
+            FrameType::Ontology => "Ontology",
         };
         write!(f, "{name}")
     }

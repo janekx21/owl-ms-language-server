@@ -1,4 +1,4 @@
-use std::{env::temp_dir, fs::File};
+use std::fs::File;
 use tempdir::{self, TempDir};
 
 use quick_xml::de::from_str;
@@ -209,6 +209,7 @@ async fn test_import_resolve() {
         document_map: DashMap::new(),
         position_encoding: PositionEncodingKind::UTF16.into(),
         workspace_folders: Mutex::new(vec![]),
+        frame_infos: DashMap::new(),
         catalogs: Mutex::new(vec![Catalog {
             prefer: "".into(),
             uri: vec![CatalogUri {
