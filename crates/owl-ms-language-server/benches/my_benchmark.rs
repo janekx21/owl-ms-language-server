@@ -1,14 +1,6 @@
 // use crate::Backend;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use dashmap::DashMap;
-use std::{sync::Mutex, time::Duration};
-use tower_lsp::{
-    lsp_types::{
-        DidOpenTextDocumentParams, InitializeParams, PositionEncodingKind, TextDocumentItem, Url,
-    },
-    LspService,
-};
-use tree_sitter::{InputEdit, Parser, Point, Tree};
+use tree_sitter::{Parser, Tree};
 use tree_sitter_owl_ms::language;
 
 fn parse_helper(source_code: &String, parser: &mut Parser) {
@@ -83,7 +75,7 @@ fn ontology_change_bench(c: &mut Criterion) {
 
                     let mut parser = Parser::new();
                     parser.set_language(language()).unwrap();
-                    let mut old_tree = parser.parse(source_code.clone(), None).unwrap();
+                    let old_tree = parser.parse(source_code.clone(), None).unwrap();
                     // println!("{}", old_tree.root_node().to_sexp());
 
                     // let edit = InputEdit {

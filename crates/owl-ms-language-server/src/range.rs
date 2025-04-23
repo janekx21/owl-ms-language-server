@@ -1,6 +1,6 @@
 use crate::position::Position;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Range {
     pub start: Position,
     pub end: Position,

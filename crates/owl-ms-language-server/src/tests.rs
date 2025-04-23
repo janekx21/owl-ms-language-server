@@ -195,7 +195,6 @@ fn test_parsing_catalog() {
 
     let catalog: Catalog = from_str(xml).unwrap();
 
-    assert_eq!(catalog.prefer, "public".to_string());
     assert_eq!(catalog.uri.len(), 19);
     assert_eq!(catalog.uri[0].uri, "imports/cco-extracted.owl".to_string());
 }
@@ -221,9 +220,8 @@ async fn test_import_resolve() {
             },
             document_map: DashMap::new(),
             catalogs: vec![Catalog {
-                prefer: "".into(),
                 uri: vec![CatalogUri {
-                    id: "Testing".into(),
+                    _id: "Testing".into(),
                     name: "http://foo.bar/onto".into(),
                     uri: file_path.file_name().unwrap().to_str().unwrap().to_string(),
                 }],
@@ -268,6 +266,9 @@ async fn test_import_resolve() {
         .await;
 
     // Assert
+
+    let workspaces = service.inner().lock_workspaces().await;
+    println!("{:?}", workspaces);
     let workspace = service.inner().find_workspace(&url).await;
     let document_count = workspace.document_map.iter().count();
     assert_eq!(document_count, 2);

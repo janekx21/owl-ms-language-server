@@ -79,9 +79,11 @@ impl Backend {
             workspaces: Mutex::new(vec![]),
         }
     }
-}
 
-type Iri = String;
+    async fn lock_workspaces(&self) -> MappedMutexGuard<Vec<Workspace>> {
+        MutexGuard::map(self.workspaces.lock().await, |w| w)
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -102,7 +104,7 @@ struct StaticNodeChildren {
 }
 
 /// taken from https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 enum FrameType {
     Class,
     DataType,
@@ -275,7 +277,8 @@ impl LanguageServer for Backend {
         let document = workspace.insert_document(document);
 
         // let catalog_g = self.catalogs.lock().await;
-        self.resolve_imports(&document, &mut parser_guard, &workspace.catalogs);
+        self.resolve_imports(&document, &mut parser_guard, &workspace.catalogs)
+            .await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -831,10 +834,9 @@ impl LanguageServer for Backend {
 impl Backend {
     /// LSP clients can open multiple workspaces at a time. To find the one that a particular file is located in
     /// this functions searches in all openend workspaces.
-    async fn has_document<'a>(&'a self, url: &Url) -> bool {
-        let guard = self.workspaces.lock().await;
-        let found = guard.iter().any(|w| w.document_map.contains_key(url));
-        found
+    async fn has_document(&self, url: &Url) -> bool {
+        let workspaces = self.lock_workspaces().await;
+        workspaces.iter().any(|w| w.document_map.contains_key(url))
     }
 
     async fn find_workspace<'a>(&'a self, url: &Url) -> MappedMutexGuard<'a, Workspace> {
@@ -863,56 +865,59 @@ impl Backend {
         parser: &mut Parser,
         catalogs: &Vec<Catalog>,
     ) {
-        for m in query_document(document, &IMPORT_QUERY) {
-            for c in m.captures {
-                let iri_text = node_text(&c.node, &document.rope).to_string();
-                let url = Url::parse(iri_text.trim_end_matches(">").trim_start_matches("<"))
-                    .expect("valid URL"); //  TODO ignore invalid URL's
+        let urls = query_document(document, &IMPORT_QUERY)
+            .iter()
+            .flat_map(|match_| &match_.captures)
+            .map(|capture| node_text(&capture.node, &document.rope).to_string())
+            .filter_map(|iri_text| {
+                Url::parse(iri_text.trim_end_matches(">").trim_start_matches("<")).ok()
+            })
+            .collect_vec();
 
-                // TODO #8 filepath
-                if self.has_document(&url).await {
-                    debug!("This document is already in the backend. URL: {}", url);
-                } else {
-                    debug!("Try to resolve URL {}", url);
-                    // Find uri in catalog
-                    debug!("{:?}", catalogs);
-                    for c in catalogs {
-                        for u in &c.uri {
-                            debug!("url {}  u.name {}", url, u.name);
-                            if u.name == url.to_string() {
-                                // This is an import of a local file!
-                                let path = Path::new(&c.locaton).parent().unwrap().join(&u.uri);
-                                debug!(
-                                    "Found matching local file {:?} loading from path {}",
-                                    u,
-                                    path.display()
-                                );
-                                let ontology_text = fs::read_to_string(path).unwrap();
-                                let document =
-                                    Document::new(url.clone(), -1, ontology_text, parser);
-                                self.find_workspace(&url)
-                                    .await
-                                    .document_map
-                                    .insert(url.clone(), document);
-                            }
+        for url in urls {
+            // TODO #8 filepath
+            if self.has_document(&url).await {
+                debug!("This document is already in the backend. URL: {}", url);
+            } else {
+                debug!("Try to resolve URL {}", url);
+                // Find uri in catalog
+                debug!("{:?}", catalogs);
+                for c in catalogs {
+                    for u in &c.uri {
+                        debug!("url {}  u.name {}", url, u.name);
+                        if u.name == url.to_string() {
+                            // This is an import of a local file!
+                            let path = Path::new(&c.locaton).parent().unwrap().join(&u.uri);
+                            debug!(
+                                "Found matching local file {:?} loading from path {}",
+                                u,
+                                path.display()
+                            );
+                            let ontology_text = fs::read_to_string(path).unwrap();
+                            let document = Document::new(url.clone(), -1, ontology_text, parser);
+                            self.find_workspace(&url)
+                                .await
+                                .document_map
+                                .insert(url.clone(), document);
                         }
                     }
-
-                    // debug!("Resolving import of {}", url.clone());
-                    // let ontology_text = ureq::get(url.to_string())
-                    //     .call()
-                    //     .unwrap()
-                    //     .body_mut()
-                    //     .read_to_string()
-                    //     .unwrap();
-
-                    // debug!(
-                    //     "Inserted imported document URL: {}, number of iris: {}, number of diagnostics: {}",
-                    //     url,
-                    //     document.iri_info_map.iter().count(),
-                    //     document.diagnostics.len()
-                    // );
                 }
+
+                // debug!("Resolving import of {}", url.clone());
+                // let ontology_text = ureq::get(url.to_string())
+                //     .call()
+                //     .unwrap()
+                //     .body_mut()
+                //     .read_to_string()
+                //     .unwrap();
+
+                // debug!(
+                //     "Inserted imported document URL: {}, number of iris: {}, number of diagnostics: {}",
+                //     url,
+                //     document.iri_info_map.iter().count(),
+                //     document.diagnostics.len()
+                // );
+                // }
                 // } else {
                 // warn!("The imported URL type is not supported. URL: {}", url);
                 // }
@@ -920,35 +925,6 @@ impl Backend {
                 // debug!("Resolved import {} to\n{}", url, resolved_import);
             }
         }
-
-        // let mut query_cursor = QueryCursor::new();
-        // query_cursor
-        //     .matches(
-        //         &query,
-        //         document.tree.root_node(),
-        //         RopeProvider::new(&document.rope),
-        //     )
-        //     .map(|match_| match_.captures[0])
-        //     .filter_map(|capture| {
-        //         let iri = &node_text(&capture.node, &document.rope).to_string();
-        //         iri_label_map.get(iri).and_then(|info| {
-        //             let node = capture.node;
-        //             let end: Position = node.end_position().into(); // inlay hints are at the end of the iri
-
-        //             // TODO write a tooltip
-        //             info.label().map(trim_string_value).map(|label| InlayHint {
-        //                 position: end.into(),
-        //                 label: InlayHintLabel::String(label),
-        //                 kind: None,
-        //                 text_edits: None,
-        //                 tooltip: None,
-        //                 padding_left: Some(true),
-        //                 padding_right: None,
-        //                 data: None,
-        //             })
-        //         })
-        //     })
-        //     .collect::<Vec<InlayHint>>()
     }
 }
 
@@ -970,36 +946,34 @@ fn query_document<'a>(
 
     let mut query_cursor = QueryCursor::new();
     let rope_provider: RopeProvider<'a> = RopeProvider::new(&document.rope);
-    let matches = query_cursor
+    query_cursor
         .matches(query, document.tree.root_node(), rope_provider)
         .map(|m| UnwrappedQueryMatch::<'a> {
-            pattern_index: m.pattern_index,
-            id: m.id(),
+            _pattern_index: m.pattern_index,
+            _id: m.id(),
             captures: m
                 .captures
                 .iter()
                 .map(|c| UnwrappedQueryCapture::<'a> {
                     node: c.node,
-                    index: c.index,
+                    _index: c.index,
                 })
                 .collect_vec(),
         })
-        .collect_vec();
-
-    return matches;
+        .collect_vec()
 }
 
 #[derive(Debug)]
 struct UnwrappedQueryMatch<'a> {
-    pattern_index: usize,
+    _pattern_index: usize,
     captures: Vec<UnwrappedQueryCapture<'a>>,
-    id: u32,
+    _id: u32,
 }
 
 #[derive(Debug)]
 struct UnwrappedQueryCapture<'a> {
     node: Node<'a>,
-    index: u32,
+    _index: u32,
 }
 
 // Functions
@@ -1132,19 +1106,6 @@ fn cursor_goto_pos(cursor: &mut TreeCursor, pos: Position) {
     }
 }
 
-fn trim_string_value(value: String) -> String {
-    value
-        .trim_start_matches('"')
-        .trim_end_matches("@en")
-        .trim_end_matches("@de")
-        .trim_end_matches("@pl")
-        .trim_end_matches("^^xsd:string") // typed literal with type string
-        .trim_end_matches('"')
-        .replace("\\\"", "\"")
-        .trim()
-        .to_string()
-}
-
 impl Display for FrameType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match self {
@@ -1161,7 +1122,7 @@ impl Display for FrameType {
     }
 }
 
-// TODO this could be event better, if the grammar would consider all possible sub properties like "sub_class_of" for every frame type. This can be done by splitting a buch of rules up or returning a list of possible keywords for node types.
+// TODO this could be even better, if the grammar would consider all possible sub properties like "sub_class_of" for every frame type. This can be done by splitting a buch of rules up or returning a list of possible keywords for node types.
 fn node_type_to_keyword(_type: &str) -> Option<String> {
     match _type {
         "ontology" => Some("Ontology:".to_string()),

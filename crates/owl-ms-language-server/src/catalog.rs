@@ -9,10 +9,6 @@ use walkdir::WalkDir;
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct Catalog {
-    // uri: Vec<String>,
-    #[serde(rename = "@prefer")]
-    pub prefer: String,
-
     pub uri: Vec<CatalogUri>,
 
     #[serde(skip)]
@@ -23,7 +19,7 @@ pub struct Catalog {
 #[serde(rename_all = "kebab-case")]
 pub struct CatalogUri {
     #[serde(rename = "@id")]
-    pub id: String, // Non unique name of item
+    pub _id: String, // Non unique name of item
     #[serde(rename = "@name")]
     pub name: String, // Full URL of the ontology. This will be used in OMN import statements
     #[serde(rename = "@uri")]

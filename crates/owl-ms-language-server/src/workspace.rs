@@ -12,7 +12,7 @@ use crate::{
     LANGUAGE, NODE_TYPES,
 };
 
-#[derive()]
+#[derive(Debug)]
 pub struct Workspace {
     pub document_map: DashMap<Url, Document>,
     pub workspace_folder: WorkspaceFolder,
@@ -42,10 +42,7 @@ impl Workspace {
         fp_file.starts_with(fp_folder)
     }
 
-    pub fn insert_document<'a>(
-        &'a self,
-        document: Document,
-    ) -> dashmap::mapref::one::Ref<'a, Url, Document> {
+    pub fn insert_document(&self, document: Document) -> dashmap::mapref::one::Ref<Url, Document> {
         let uri = document.uri.clone();
         self.document_map.insert(uri.clone(), document);
         self.document_map.get(&uri).unwrap()
@@ -69,7 +66,7 @@ impl Workspace {
         self.document_map
             .iter()
             .filter_map(|dm| dm.frame_infos.get(iri).map(|v| v.value().clone()))
-            .tree_reduce(|a, b| FrameInfo::merge(a, b))
+            .tree_reduce(FrameInfo::merge)
     }
 
     pub fn node_info(&self, node: &Node, doc: &Document) -> String {
@@ -108,6 +105,7 @@ impl Workspace {
     }
 }
 
+#[derive(Debug)]
 pub struct Document {
     uri: Url,
     pub tree: Tree,
@@ -144,7 +142,7 @@ impl Document {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FrameInfo {
     pub annotations: HashMap<Iri, Vec<ResolvedIri>>,
     pub frame_type: FrameType,
@@ -232,10 +230,10 @@ fn trim_string_value(value: String) -> String {
         .to_string()
 }
 
-#[derive(Clone)]
-struct ResolvedIri {
-    value: String,
-    origin_doucment_range: Range,
+#[derive(Clone, Debug)]
+pub struct ResolvedIri {
+    pub value: String,
+    pub _origin_doucment_range: Range,
 }
 
 type Iri = String;
@@ -311,7 +309,7 @@ pub fn gen_iri_info_map(
                 let mut info = infos.get_mut(&frame_iri).unwrap();
                 let resolved_iri = ResolvedIri {
                     value: literal.clone(),
-                    origin_doucment_range: parent_node.range().into(),
+                    _origin_doucment_range: parent_node.range().into(),
                 };
 
                 if let Some(vec) = info.annotations.get_mut(&annotation_iri) {
@@ -355,13 +353,15 @@ pub fn gen_diagnostics(node: &Node) -> Vec<Diagnostic> {
             let parent_kind = node.parent().unwrap_or(node).kind();
 
             if let Some(static_node) = NODE_TYPES.get(parent_kind) {
-                let valid_children: String = static_node
-                    .children
-                    .types
-                    .iter()
-                    .map(|sn| node_type_to_string(&sn._type))
-                    .intersperse(", ".to_string())
-                    .collect();
+                let valid_children: String = Itertools::intersperse(
+                    static_node
+                        .children
+                        .types
+                        .iter()
+                        .map(|sn| node_type_to_string(&sn._type)),
+                    ", ".to_string(),
+                )
+                .collect();
 
                 let parent = node_type_to_string(parent_kind);
                 let msg = format!("Syntax Error. expected {valid_children} inside {parent}");
@@ -413,11 +413,11 @@ pub fn gen_diagnostics(node: &Node) -> Vec<Diagnostic> {
 }
 
 fn node_type_to_string(node_type: &str) -> String {
-    node_type
-        .split_terminator('_')
-        .map(capitilize_string)
-        .intersperse(" ".to_string())
-        .collect()
+    Itertools::intersperse(
+        node_type.split_terminator('_').map(capitilize_string),
+        " ".to_string(),
+    )
+    .collect()
 }
 
 fn capitilize_string(s: &str) -> String {

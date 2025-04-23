@@ -1,4 +1,4 @@
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Position {
     pub line: u32,
     pub character: u32,
