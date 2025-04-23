@@ -1,14 +1,17 @@
-use std::fs::File;
+use std::{fs::File, io::BufWriter};
 use tempdir::{self, TempDir};
 
 use quick_xml::de::from_str;
+use test_log::test;
 
-use crate::{catalog::CatalogUri, *};
+use crate::{
+    catalog::{Catalog, CatalogUri},
+    *,
+};
 
 #[test]
 fn test_parse() {
-    let mut parser = Parser::new();
-    parser.set_language(*LANGUAGE).unwrap();
+    let mut parser = arrange_parser();
 
     let source_code = "Ontology: Foobar";
     let tree = parser.parse(source_code, None).unwrap();
@@ -21,8 +24,7 @@ fn test_parse() {
 
 #[test]
 fn test_parse_datatype() {
-    let mut parser = Parser::new();
-    parser.set_language(*LANGUAGE).unwrap();
+    let mut parser = arrange_parser();
 
     let source_code = "Ontology: o\nDatatype: d";
     let tree = parser.parse(source_code, None).unwrap();
@@ -37,9 +39,7 @@ fn test_parse_datatype() {
 fn test_class_annotation_query() {
     use tree_sitter::QueryMatch;
 
-    let mut parser = Parser::new();
-    parser.set_language(*LANGUAGE).unwrap();
-
+    let mut parser = arrange_parser();
     let source_code = "
 Ontology: <http://foo.bar>
     Class: <http://foo.bar/0>
@@ -76,13 +76,10 @@ Ontology: <http://foo.bar>
 }
 
 /// This tests if the "did_change" feature works on the lsp. It takes the document DEF and adds two changes resolving in ABCDEFGHI.
-#[tokio::test]
+#[test(tokio::test)]
 async fn test_language_server_did_change() {
     // Arrange
-    let mut parser = Parser::new();
-    parser.set_language(*LANGUAGE).unwrap();
-
-    let (service, _) = LspService::new(|client| Backend::new(client, parser));
+    let (service, _) = LspService::new(|client| Backend::new(client, arrange_parser()));
 
     let result = service
         .inner()
@@ -199,60 +196,68 @@ fn test_parsing_catalog() {
     assert_eq!(catalog.uri[0].uri, "imports/cco-extracted.owl".to_string());
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn test_import_resolve() {
     // Arrange
+    let parser = arrange_parser();
 
     let dir = TempDir::new("owl-ms-test").unwrap();
     let file_path = dir.path().join("foobaronto.omn");
     File::create(file_path.clone()).unwrap(); // no content for now
 
-    let mut parser = Parser::new();
-    parser.set_language(*LANGUAGE).unwrap();
+    let catalog_path = dir.path().join("catalog-v001.xml");
+    let mut catalog_file = File::create(catalog_path).unwrap();
+
+    let catalog = Catalog {
+        uri: vec![CatalogUri {
+            _id: "Testing".into(),
+            name: "http://external.org/shared.omn".into(),
+            uri: file_path.file_name().unwrap().to_str().unwrap().to_string(),
+        }],
+        locaton: dir.path().join("catalog.xml").to_str().unwrap().to_string(),
+    };
+
+    let buffer = BufWriter::new(catalog_file);
+    quick_xml::se::to_writer::<File, Catalog>(&mut catalog_file, &catalog);
+
+    println!("starting service...");
+
     let (service, _) = LspService::new(|client| Backend {
         client,
         parser: Mutex::new(parser),
         position_encoding: PositionEncodingKind::UTF16.into(),
         workspaces: Mutex::new(vec![Workspace {
-            workspace_folder: WorkspaceFolder {
-                uri: Url::parse("file:///tmp").unwrap(),
-                name: "bar".into(),
-            },
+            workspace_folder: vec![],
             document_map: DashMap::new(),
             catalogs: vec![Catalog {
                 uri: vec![CatalogUri {
                     _id: "Testing".into(),
-                    name: "http://foo.bar/onto".into(),
+                    name: "http://external.org/shared.omn".into(),
                     uri: file_path.file_name().unwrap().to_str().unwrap().to_string(),
                 }],
-                locaton: file_path
-                    .parent()
-                    .unwrap()
-                    .join("catalog.xml")
-                    .to_str()
-                    .unwrap()
-                    .to_string(),
+                locaton: dir.path().join("catalog.xml").to_str().unwrap().to_string(),
             }],
-        }]), // frame_infos: DashMap::new(),
+        }]),
     });
 
-    let result = service
-        .inner()
-        .initialize(InitializeParams {
-            ..Default::default()
-        })
-        .await;
-    assert!(result.is_ok(), "initialize returned {:#?}", result);
+    arrange_init_backend(
+        &service,
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(dir.path()).unwrap(),
+            name: "bar".into(),
+        }),
+    )
+    .await;
 
-    let url = Url::parse("file:///foo.omn").expect("valid url");
+    let url = Url::from_file_path(dir.path().join("foo.omn")).expect("valid url");
 
     let ontology = r#"
-        Ontology: <http://f.b/>
-        <http://f.b/o.omn>
-        Import: <http://foo.bar/onto>
+Ontology: <http://foobar.org/ontology/> <http://foobar.org/ontology.omn>
+Import: <http://external.org/shared.omn>
     "#;
 
     // Act
+    println!("open file...");
     service
         .inner()
         .did_open(DidOpenTextDocumentParams {
@@ -265,17 +270,20 @@ async fn test_import_resolve() {
         })
         .await;
 
+    println!("file opend");
+
     // Assert
 
     let workspaces = service.inner().lock_workspaces().await;
-    println!("{:?}", workspaces);
-    let workspace = service.inner().find_workspace(&url).await;
+    assert_eq!(workspaces.len(), 1);
+    let workspace = workspaces.first().unwrap();
+    println!(" Workspace documents {:#?}", workspace.document_map);
     let document_count = workspace.document_map.iter().count();
     assert_eq!(document_count, 2);
 }
 
 #[test]
-fn path_segment_test() {
+fn test_path_segment() {
     // Arrange
     let url = Url::parse("file://example.com/this/is/a/path.html").unwrap();
     let mut url = url.clone();
@@ -287,4 +295,31 @@ fn path_segment_test() {
 
     // Assert
     assert_eq!(url.as_str(), "file://example.com/this/is/a");
+}
+
+fn arrange_parser() -> Parser {
+    let mut parser = Parser::new();
+    parser.set_language(*LANGUAGE).unwrap();
+    parser
+}
+
+async fn arrange_init_backend(
+    service: &LspService<Backend>,
+    workspacefolder: Option<WorkspaceFolder>,
+) {
+    println!(
+        "service started. {:?}",
+        service.inner().lock_workspaces().await
+    );
+
+    let result = service
+        .inner()
+        .initialize(InitializeParams {
+            workspace_folders: workspacefolder.map(|w| vec![w]),
+            ..Default::default()
+        })
+        .await;
+    assert!(result.is_ok(), "initialize returned {:#?}", result);
+
+    service.inner().initialized(InitializedParams {}).await;
 }

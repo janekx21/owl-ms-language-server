@@ -2,11 +2,11 @@ use std::fs::read_to_string;
 
 use log::debug;
 use quick_xml::de::from_str;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Url;
 use walkdir::WalkDir;
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct Catalog {
     pub uri: Vec<CatalogUri>,
@@ -15,7 +15,7 @@ pub struct Catalog {
     pub locaton: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct CatalogUri {
     #[serde(rename = "@id")]

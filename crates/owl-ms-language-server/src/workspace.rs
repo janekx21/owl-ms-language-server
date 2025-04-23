@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dashmap::DashMap;
 use itertools::Itertools;
-use log::{debug, error};
+use log::{debug, error, info};
 use ropey::Rope;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Url, WorkspaceFolder};
 use tree_sitter::{Node, Parser, Query, QueryCursor, Tree};
@@ -22,7 +22,7 @@ pub struct Workspace {
 impl Workspace {
     pub fn new(workspace_folder: WorkspaceFolder) -> Self {
         let catalogs = Catalog::load_catalogs(workspace_folder.uri.clone());
-        debug!("new workspace at {}", workspace_folder.uri);
+        info!("New workspace at {}", workspace_folder.uri);
         Workspace {
             document_map: DashMap::new(),
             workspace_folder,
@@ -107,7 +107,7 @@ impl Workspace {
 
 #[derive(Debug)]
 pub struct Document {
-    uri: Url,
+    pub uri: Url,
     pub tree: Tree,
     pub rope: Rope,
     pub version: i32,

@@ -7,12 +7,11 @@ mod rope_provider;
 mod tests;
 mod workspace;
 
-use catalog::Catalog;
 use clap::Parser as ClapParser;
 use dashmap::DashMap;
 use debugging::timeit;
 use itertools::Itertools;
-use log::{debug, error, LevelFilter};
+use log::{debug, error, info, LevelFilter};
 use once_cell::sync::Lazy;
 use position::Position;
 use range::{range_exclusive_inside, range_overlaps, Range};
@@ -240,7 +239,26 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _params: InitializedParams) {
-        debug!("initialized");
+        let workspaces = self.workspaces.lock().await;
+        let workspace_paths = workspaces
+            .iter()
+            .map(|w| {
+                w.workspace_folder
+                    .uri
+                    .to_file_path()
+                    .expect("Valid filepath")
+                    .display()
+                    .to_string()
+            })
+            .join(", ");
+        info!(
+            "Initialized Languag Server with workspaces: {}",
+            if workspace_paths.is_empty() {
+                "No Workspace".into()
+            } else {
+                workspace_paths
+            }
+        );
         self.client
             .log_message(MessageType::INFO, "server initialized!")
             .await;
@@ -250,6 +268,8 @@ impl LanguageServer for Backend {
         let url = params.text_document.uri;
 
         let workspace = self.find_workspace(&url).await;
+
+        debug!("Found workspace! Folder: {:#?}", workspace.workspace_folder);
 
         debug!(
             "did_open at {} with version {}",
@@ -276,8 +296,9 @@ impl LanguageServer for Backend {
 
         let document = workspace.insert_document(document);
 
-        // let catalog_g = self.catalogs.lock().await;
-        self.resolve_imports(&document, &mut parser_guard, &workspace.catalogs)
+        debug!("Inserted document");
+
+        self.resolve_imports(&document, &workspace, &mut parser_guard)
             .await;
     }
 
@@ -847,7 +868,7 @@ impl Backend {
             let mut file_path = url.to_file_path().expect("URL should be a filepath");
             file_path.pop();
             let workspace = Workspace::new(WorkspaceFolder {
-                uri: Url::from_file_path(file_path).expect("Valid URL from filepath"), // TODO do i need the parent folder fot that?
+                uri: Url::from_file_path(file_path.clone()).expect("Valid URL from filepath"), // TODO do i need the parent folder fot that?
                 name: "Single File".into(),
             });
             guard.push(workspace);
@@ -862,8 +883,8 @@ impl Backend {
     async fn resolve_imports(
         &self,
         document: &Document,
+        workspace: &Workspace,
         parser: &mut Parser,
-        catalogs: &Vec<Catalog>,
     ) {
         let urls = query_document(document, &IMPORT_QUERY)
             .iter()
@@ -874,15 +895,17 @@ impl Backend {
             })
             .collect_vec();
 
+        // let workspace = self.find_workspace(&document.uri).await;
+
         for url in urls {
             // TODO #8 filepath
-            if self.has_document(&url).await {
+            if workspace.document_map.contains_key(&url) {
                 debug!("This document is already in the backend. URL: {}", url);
             } else {
                 debug!("Try to resolve URL {}", url);
                 // Find uri in catalog
-                debug!("{:?}", catalogs);
-                for c in catalogs {
+                debug!("{:?}", workspace.catalogs);
+                for c in &workspace.catalogs {
                     for u in &c.uri {
                         debug!("url {}  u.name {}", url, u.name);
                         if u.name == url.to_string() {
@@ -895,10 +918,7 @@ impl Backend {
                             );
                             let ontology_text = fs::read_to_string(path).unwrap();
                             let document = Document::new(url.clone(), -1, ontology_text, parser);
-                            self.find_workspace(&url)
-                                .await
-                                .document_map
-                                .insert(url.clone(), document);
+                            workspace.insert_document(document);
                         }
                     }
                 }
