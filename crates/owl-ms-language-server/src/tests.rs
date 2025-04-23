@@ -3,7 +3,7 @@ use tempdir::{self, TempDir};
 
 use quick_xml::de::from_str;
 
-use crate::*;
+use crate::{catalog::CatalogUri, *};
 
 #[test]
 fn test_parse() {
@@ -78,6 +78,7 @@ Ontology: <http://foo.bar>
 /// This tests if the "did_change" feature works on the lsp. It takes the document DEF and adds two changes resolving in ABCDEFGHI.
 #[tokio::test]
 async fn test_language_server_did_change() {
+    // Arrange
     let mut parser = Parser::new();
     parser.set_language(*LANGUAGE).unwrap();
 
@@ -91,7 +92,9 @@ async fn test_language_server_did_change() {
         .await;
     assert!(result.is_ok(), "initialize returned {:#?}", result);
 
-    let url = Url::parse("file://foo.omn").expect("valid url");
+    let url = Url::parse("file:///tmp/foo.omn").expect("valid url");
+    //                              ^^^ 2 for the scheme, 1 for the root
+
     service
         .inner()
         .did_open(DidOpenTextDocumentParams {
@@ -103,6 +106,8 @@ async fn test_language_server_did_change() {
             },
         })
         .await;
+
+    // Act
     service
         .inner()
         .did_change(DidChangeTextDocumentParams {
@@ -149,8 +154,10 @@ async fn test_language_server_did_change() {
         })
         .await;
 
-    let doc = service
-        .inner()
+    // Assert
+    let workspace = service.inner().find_workspace(&url).await;
+
+    let doc = workspace
         .document_map
         .get(&url.clone())
         .expect("found the document");
@@ -206,25 +213,29 @@ async fn test_import_resolve() {
     let (service, _) = LspService::new(|client| Backend {
         client,
         parser: Mutex::new(parser),
-        document_map: DashMap::new(),
         position_encoding: PositionEncodingKind::UTF16.into(),
-        workspace_folders: Mutex::new(vec![]),
-        frame_infos: DashMap::new(),
-        catalogs: Mutex::new(vec![Catalog {
-            prefer: "".into(),
-            uri: vec![CatalogUri {
-                id: "Testing".into(),
-                name: "http://foo.bar/onto".into(),
-                uri: file_path.file_name().unwrap().to_str().unwrap().to_string(),
+        workspaces: Mutex::new(vec![Workspace {
+            workspace_folder: WorkspaceFolder {
+                uri: Url::parse("file:///tmp").unwrap(),
+                name: "bar".into(),
+            },
+            document_map: DashMap::new(),
+            catalogs: vec![Catalog {
+                prefer: "".into(),
+                uri: vec![CatalogUri {
+                    id: "Testing".into(),
+                    name: "http://foo.bar/onto".into(),
+                    uri: file_path.file_name().unwrap().to_str().unwrap().to_string(),
+                }],
+                locaton: file_path
+                    .parent()
+                    .unwrap()
+                    .join("catalog.xml")
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
             }],
-            locaton: file_path
-                .parent()
-                .unwrap()
-                .join("catalog.xml")
-                .to_str()
-                .unwrap()
-                .to_string(),
-        }]),
+        }]), // frame_infos: DashMap::new(),
     });
 
     let result = service
@@ -235,7 +246,7 @@ async fn test_import_resolve() {
         .await;
     assert!(result.is_ok(), "initialize returned {:#?}", result);
 
-    let url = Url::parse("file://foo.omn").expect("valid url");
+    let url = Url::parse("file:///foo.omn").expect("valid url");
 
     let ontology = r#"
         Ontology: <http://f.b/>
@@ -257,6 +268,22 @@ async fn test_import_resolve() {
         .await;
 
     // Assert
-    let document_count = service.inner().document_map.iter().count();
+    let workspace = service.inner().find_workspace(&url).await;
+    let document_count = workspace.document_map.iter().count();
     assert_eq!(document_count, 2);
+}
+
+#[test]
+fn path_segment_test() {
+    // Arrange
+    let url = Url::parse("file://example.com/this/is/a/path.html").unwrap();
+    let mut url = url.clone();
+
+    // Act
+    url.path_segments_mut()
+        .expect("The provided url was a cannot-be-a-base url")
+        .pop();
+
+    // Assert
+    assert_eq!(url.as_str(), "file://example.com/this/is/a");
 }

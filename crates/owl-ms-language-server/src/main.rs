@@ -7,15 +7,16 @@ mod rope_provider;
 mod tests;
 mod workspace;
 
+use catalog::Catalog;
 use clap::Parser as ClapParser;
-use dashmap::{DashMap, DashSet};
+use dashmap::DashMap;
 use debugging::timeit;
+use itertools::Itertools;
 use log::{debug, error, LevelFilter};
 use once_cell::sync::Lazy;
 use position::Position;
 use range::{range_exclusive_inside, range_overlaps, Range};
 use rope_provider::RopeProvider;
-use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -28,8 +29,7 @@ use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree, TreeCursor};
 use tree_sitter_owl_ms::language;
-use walkdir::WalkDir;
-use workspace::{gen_diagnostics, gen_iri_info_map, Document, Workspace};
+use workspace::{gen_diagnostics, gen_iri_info_map, node_text, Document, Workspace};
 
 // Constants
 
@@ -102,7 +102,7 @@ struct StaticNodeChildren {
 }
 
 /// taken from https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 enum FrameType {
     Class,
     DataType,
@@ -111,6 +111,7 @@ enum FrameType {
     AnnotationProperty,
     Individual,
     Ontology,
+    Invalid, // The frame type of an IRI that has no valid frame
 }
 
 #[tokio::main]
@@ -439,7 +440,7 @@ impl LanguageServer for Backend {
                 .last()
                 .unwrap(),
         );
-        let workspace = self.find_workspace(&url).await;
+        let workspace = self.find_workspace(&params.text_document.uri).await;
         workspace.document_map.remove(&params.text_document.uri);
     }
 
@@ -457,7 +458,7 @@ impl LanguageServer for Backend {
         Ok(workspace.document_map.get(&url).map(|document| {
             let pos = params.text_document_position_params.position.into();
             let node = deepest_named_node_at_pos(&document.tree, pos);
-            let info = node_info(&node, &document, self);
+            let info = workspace.node_info(&node, &document);
             let range: Range = node.range().into();
             Hover {
                 contents: HoverContents::Scalar(MarkedString::String(info)),
@@ -472,51 +473,49 @@ impl LanguageServer for Backend {
         let url = params.text_document.uri;
         let workspace = self.find_workspace(&url).await;
 
-        let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
-        for doc in self.document_map.iter() {
-            combined_iri_info_map.extend(doc.value().iri_info_map.clone());
-        }
+        // let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
+        // for doc in self.document_map.iter() {
+        //     combined_iri_info_map.extend(doc.value().iri_info_map.clone());
+        // }
 
-        Ok(self
-            .document_map
-            .get(&params.text_document.uri)
-            .map(|document| {
-                let full_iri_query =
-                    Query::new(*LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri")
-                        .unwrap();
+        Ok(workspace.document_map.get(&url).map(|document| {
+            let full_iri_query =
+                Query::new(*LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri").unwrap();
 
-                let range: Range = params.range.into();
+            let range: Range = params.range.into();
 
-                let mut query_cursor = QueryCursor::new();
-                query_cursor.set_point_range(range.into());
-                query_cursor
-                    .matches(
-                        &full_iri_query,
-                        document.tree.root_node(),
-                        RopeProvider::new(&document.rope),
-                    )
-                    .map(|match_| match_.captures[0])
-                    .filter_map(|capture| {
-                        let iri = &node_text(&capture.node, &document.rope).to_string();
-                        combined_iri_info_map.get(iri).and_then(|info| {
-                            let node = capture.node;
-                            let end: Position = node.end_position().into(); // inlay hints are at the end of the iri
+            let mut query_cursor = QueryCursor::new();
+            query_cursor.set_point_range(range.into());
+            query_cursor
+                .matches(
+                    &full_iri_query,
+                    document.tree.root_node(),
+                    RopeProvider::new(&document.rope),
+                )
+                .map(|match_| match_.captures[0])
+                .filter_map(|capture| {
+                    let iri = &node_text(&capture.node, &document.rope).to_string();
+                    workspace.get_frame_info(iri).map(|info| {
+                        let node = capture.node;
+                        // inlay hints are at the end of the iri
+                        let end: Position = node.end_position().into();
 
-                            // TODO write a tooltip
-                            info.label().map(trim_string_value).map(|label| InlayHint {
-                                position: end.into(),
-                                label: InlayHintLabel::String(label),
-                                kind: None,
-                                text_edits: None,
-                                tooltip: None,
-                                padding_left: Some(true),
-                                padding_right: None,
-                                data: None,
-                            })
-                        })
+                        // TODO write a tooltip
+                        let label = info.label();
+                        InlayHint {
+                            position: end.into(),
+                            label: InlayHintLabel::String(label),
+                            kind: None,
+                            text_edits: None,
+                            tooltip: None,
+                            padding_left: Some(true),
+                            padding_right: None,
+                            data: None,
+                        }
                     })
-                    .collect::<Vec<InlayHint>>()
-            }))
+                })
+                .collect::<Vec<InlayHint>>()
+        }))
     }
 
     async fn goto_definition(
@@ -528,7 +527,9 @@ impl LanguageServer for Backend {
             params.text_document_position_params.text_document.uri
         );
         let uri = params.text_document_position_params.text_document.uri;
-        if let Some(doc) = self.document_map.get(&uri) {
+        let workspace = self.find_workspace(&uri).await;
+        let maybe_doc = workspace.document_map.get(&uri);
+        if let Some(doc) = maybe_doc {
             let pos: Position = params.text_document_position_params.position.into();
 
             let leaf_node = deepest_named_node_at_pos(&doc.tree, pos);
@@ -615,7 +616,8 @@ impl LanguageServer for Backend {
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         debug!("code_action at {}", params.text_document.uri);
         let url = params.text_document.uri;
-        let doc = self.document_map.get(&url).unwrap();
+        let workspace = self.find_workspace(&url).await;
+        let doc = workspace.document_map.get(&url).unwrap();
         let end: Position = doc.tree.root_node().range().end_point.into();
 
         Ok(Some(vec![CodeActionOrCommand::CodeAction(CodeAction {
@@ -646,12 +648,13 @@ impl LanguageServer for Backend {
             params.text_document_position.text_document.uri
         );
         let url = params.text_document_position.text_document.uri;
-        let doc = self.document_map.get(&url);
+        let workspace = self.find_workspace(&url).await;
+        let doc = workspace.document_map.get(&url);
         let pos: Position = params.text_document_position.position.into();
-        let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
-        for doc in self.document_map.iter() {
-            combined_iri_info_map.extend(doc.value().iri_info_map.clone());
-        }
+        // let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
+        // for doc in wor.document_map.iter() {
+        //     combined_iri_info_map.extend(doc.value().iri_info_map.clone());
+        // }
         Ok(doc.map(|doc| {
             // generate keyword list that can be applied. Note that this is missing some keywords because of limitations in the grammar.
             let mut cursor = doc.tree.walk();
@@ -693,12 +696,12 @@ impl LanguageServer for Backend {
             let partial_text = node_text(&cursor.node(), &doc.rope).to_string();
 
             if parent_kind == "simple_iri" {
-                let iris: Vec<CompletionItem> = combined_iri_info_map
+                let iris: Vec<CompletionItem> = workspace
+                    .search_frame(&partial_text)
                     .iter()
-                    .filter(|item| item.key().contains(partial_text.as_str()))
-                    .map(|item| item.key().clone())
-                    .map(|iri| CompletionItem {
-                        label: iri,
+                    .map(|(iri, _frame)| CompletionItem {
+                        label: iri.clone(),
+                        // TODO #29 add details from the frame
                         ..Default::default()
                     })
                     .collect();
@@ -717,7 +720,8 @@ impl LanguageServer for Backend {
     ) -> Result<Option<SemanticTokensResult>> {
         debug!("semantic_tokens_full at {}", params.text_document.uri);
         let uri = params.text_document.uri;
-        if let Some(doc) = self.document_map.get(&uri) {
+        let workspace = self.find_workspace(&uri).await;
+        if let Some(doc) = workspace.document_map.get(&uri) {
             let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
 
             let query = Query::new(*LANGUAGE, query_source).expect("valid query expect");
@@ -825,15 +829,40 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
+    /// LSP clients can open multiple workspaces at a time. To find the one that a particular file is located in
+    /// this functions searches in all openend workspaces.
+    async fn has_document<'a>(&'a self, url: &Url) -> bool {
+        let guard = self.workspaces.lock().await;
+        let found = guard.iter().any(|w| w.document_map.contains_key(url));
+        found
+    }
+
     async fn find_workspace<'a>(&'a self, url: &Url) -> MappedMutexGuard<'a, Workspace> {
-        MutexGuard::map(self.workspaces.lock().await, |f| {
+        let mut guard = self.workspaces.lock().await;
+        let found = guard.iter().any(|w| w.could_contain(url));
+        if !found {
+            // Create a workspace that is a single file
+            let mut file_path = url.to_file_path().expect("URL should be a filepath");
+            file_path.pop();
+            let workspace = Workspace::new(WorkspaceFolder {
+                uri: Url::from_file_path(file_path).expect("Valid URL from filepath"), // TODO do i need the parent folder fot that?
+                name: "Single File".into(),
+            });
+            guard.push(workspace);
+        }
+        MutexGuard::map(guard, |f| {
             f.iter_mut()
-                .find(|w| w.document_map.contains_key(url))
-                .unwrap()
+                .find(|w| w.could_contain(url))
+                .expect("The file to be located in a workspace, but it was not.")
         })
     }
 
-    fn resolve_imports(&self, document: &Document, parser: &mut Parser, catalogs: &Vec<Catalog>) {
+    async fn resolve_imports(
+        &self,
+        document: &Document,
+        parser: &mut Parser,
+        catalogs: &Vec<Catalog>,
+    ) {
         for m in query_document(document, &IMPORT_QUERY) {
             for c in m.captures {
                 let iri_text = node_text(&c.node, &document.rope).to_string();
@@ -841,8 +870,7 @@ impl Backend {
                     .expect("valid URL"); //  TODO ignore invalid URL's
 
                 // TODO #8 filepath
-                // if url.path().ends_with(".omn") {
-                if backend.document_map.contains_key(&url) {
+                if self.has_document(&url).await {
                     debug!("This document is already in the backend. URL: {}", url);
                 } else {
                     debug!("Try to resolve URL {}", url);
@@ -861,8 +889,11 @@ impl Backend {
                                 );
                                 let ontology_text = fs::read_to_string(path).unwrap();
                                 let document =
-                                    create_document(url.clone(), -1, ontology_text, parser);
-                                backend.document_map.insert(url.clone(), document);
+                                    Document::new(url.clone(), -1, ontology_text, parser);
+                                self.find_workspace(&url)
+                                    .await
+                                    .document_map
+                                    .insert(url.clone(), document);
                             }
                         }
                     }
@@ -1052,25 +1083,17 @@ fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) -> u32
 
 // Implementations for Structs
 
-fn global_resolve_iri(backend: &Backend, iri: &String) -> String {
-    let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
-    for doc in backend.document_map.iter() {
-        combined_iri_info_map.extend(doc.value().iri_info_map.clone());
-    }
+// fn global_resolve_iri(workspace: &Workspace, iri: &String) -> String {
+//     // let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
+//     // for doc in backend.document_map.iter() {
+//     //     combined_iri_info_map.extend(doc.value().iri_info_map.clone());
+//     // }
 
-    combined_iri_info_map
-        .get(iri)
-        .and_then(|iri_info| iri_info.label())
-        .unwrap_or(iri.clone())
-}
-
-impl FrameInfo {
-    fn label(&self) -> Option<String> {
-        self.annotations
-            .get("rdfs:label")
-            .map(|resolved| resolved.value.clone())
-    }
-}
+//     workspace
+//         .get_frame_info(iri)
+//         .and_then(|iri_info| iri_info.label())
+//         .unwrap_or(iri.clone())
+// }
 
 fn _log_to_client(client: &Client, msg: String) -> task::JoinHandle<()> {
     let c = client.clone();
@@ -1109,61 +1132,6 @@ fn cursor_goto_pos(cursor: &mut TreeCursor, pos: Position) {
     }
 }
 
-fn node_info(node: &Node, doc: &Document, backend: &Backend) -> String {
-    match node.kind() {
-        "class_frame" | "annotation_property_frame" => {
-            let iri = &node
-                .named_child(0)
-                .map(|c| node_text(&c, &doc.rope).to_string());
-
-            if let Some(iri) = iri {
-                iri_info_display(iri, backend)
-            } else {
-                "Class Frame\nNo iri was found".to_string()
-            }
-        }
-        "full_iri" | "simple_iri" | "abbreviated_iri" => {
-            let iri = node_text(node, &doc.rope).to_string();
-            iri_info_display(&iri, backend)
-        }
-        "class_iri" => iri_info_display(&node_text(node, &doc.rope).to_string(), backend),
-
-        _ => format!("generic node named {}", node.kind()),
-    }
-}
-
-fn iri_info_display(iri: &String, backend: &Backend) -> String {
-    let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
-    for doc in backend.document_map.iter() {
-        combined_iri_info_map.extend(doc.value().iri_info_map.clone());
-    }
-
-    // TODO remove this clone of combined_iri_info_map
-    if let Some(info) = combined_iri_info_map.clone().get(iri) {
-        let entity = info.frame_type;
-        let label = info
-            .label()
-            .map(trim_string_value)
-            .unwrap_or("(no label)".to_string());
-
-        let annotations = info
-            .annotations
-            .iter()
-            .map(|(iri, v)| {
-                let label = global_resolve_iri(backend, iri);
-                let label = trim_string_value(label);
-                let v = trim_string_value(v.value.clone());
-                format!("`{label}`: {v}")
-            })
-            .intersperse("  \n".to_string())
-            .collect::<String>();
-
-        format!("{entity} **{label}**\n\n---\n{annotations}")
-    } else {
-        "No info found on iri".to_string()
-    }
-}
-
 fn trim_string_value(value: String) -> String {
     value
         .trim_start_matches('"')
@@ -1187,6 +1155,7 @@ impl Display for FrameType {
             FrameType::AnnotationProperty => "Annotation Property",
             FrameType::Individual => "Named Individual",
             FrameType::Ontology => "Ontology",
+            FrameType::Invalid => "Invalid Frame Type",
         };
         write!(f, "{name}")
     }

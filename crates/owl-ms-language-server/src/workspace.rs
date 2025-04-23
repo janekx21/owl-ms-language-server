@@ -1,9 +1,8 @@
-use std::{collections::HashMap, ops::Deref};
+use std::collections::HashMap;
 
 use dashmap::DashMap;
 use itertools::Itertools;
 use log::{debug, error};
-use quick_xml::Result;
 use ropey::Rope;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Url, WorkspaceFolder};
 use tree_sitter::{Node, Parser, Query, QueryCursor, Tree};
@@ -16,7 +15,7 @@ use crate::{
 #[derive()]
 pub struct Workspace {
     pub document_map: DashMap<Url, Document>,
-    workspace_folder: WorkspaceFolder,
+    pub workspace_folder: WorkspaceFolder,
     pub catalogs: Vec<Catalog>,
 }
 
@@ -29,6 +28,18 @@ impl Workspace {
             workspace_folder,
             catalogs,
         }
+    }
+
+    /// Returns a bool that specifies if the workspace url is a base for the provided url and therefore
+    /// the workspace could contain that url
+    pub fn could_contain(&self, url: &Url) -> bool {
+        let fp_folder = self
+            .workspace_folder
+            .uri
+            .to_file_path()
+            .expect("valid filepath");
+        let fp_file = url.to_file_path().expect("valid filepath");
+        fp_file.starts_with(fp_folder)
     }
 
     pub fn insert_document<'a>(
@@ -58,9 +69,42 @@ impl Workspace {
         self.document_map
             .iter()
             .filter_map(|dm| dm.frame_infos.get(iri).map(|v| v.value().clone()))
-        // TODO merge frame infos
-        // .exactly_one() // there should be only one
-        // .ok()
+            .tree_reduce(|a, b| FrameInfo::merge(a, b))
+    }
+
+    pub fn node_info(&self, node: &Node, doc: &Document) -> String {
+        match node.kind() {
+            "class_frame" | "annotation_property_frame" => {
+                let iri = &node
+                    .named_child(0)
+                    .map(|c| node_text(&c, &doc.rope).to_string());
+
+                if let Some(iri) = iri {
+                    self.get_frame_info(iri)
+                        .map(|fi| fi.info_display(self))
+                        .unwrap_or(iri.clone())
+                    // iri_info_display(iri, self)
+                } else {
+                    "Class Frame\nNo iri was found".to_string()
+                }
+            }
+            "full_iri" | "simple_iri" | "abbreviated_iri" => {
+                let iri = node_text(node, &doc.rope).to_string();
+                self.get_frame_info(&iri)
+                    .map(|fi| fi.info_display(self))
+                    .unwrap_or(iri)
+                // iri_info_display(&iri, backend)
+            }
+            "class_iri" => {
+                // iri_info_display(&node_text(node, &doc.rope).to_string(), backend)
+                let iri = node_text(node, &doc.rope).to_string();
+                self.get_frame_info(&iri)
+                    .map(|fi| fi.info_display(self))
+                    .unwrap_or(iri)
+            }
+
+            _ => format!("generic node named {}", node.kind()),
+        }
     }
 }
 
@@ -101,9 +145,91 @@ impl Document {
 }
 
 #[derive(Clone)]
-struct FrameInfo {
-    annotations: HashMap<Iri, Vec<ResolvedIri>>,
-    frame_type: FrameType,
+pub struct FrameInfo {
+    pub annotations: HashMap<Iri, Vec<ResolvedIri>>,
+    pub frame_type: FrameType,
+}
+
+impl FrameInfo {
+    fn merge(a: FrameInfo, b: FrameInfo) -> FrameInfo {
+        let mut annotations = b.annotations.clone();
+        for (key_a, values_a) in a.annotations {
+            if let Some(values_b) = annotations.get_mut(&key_a) {
+                values_b.extend(values_a);
+            } else {
+                annotations.insert(key_a, values_a);
+            }
+        }
+        FrameInfo {
+            frame_type: if a.frame_type != b.frame_type {
+                a.frame_type
+            } else {
+                FrameType::Invalid
+            },
+            annotations,
+        }
+    }
+
+    pub fn label(&self) -> String {
+        self.annotations
+            .get("rdfs:label")
+            // TODO #20 make this more usable by providing multiple lines with indentation
+            .map(|resolved| {
+                resolved
+                    .iter()
+                    .map(|ri| ri.value.clone())
+                    .map(trim_string_value)
+                    .join(",")
+            })
+            .unwrap_or("(rdfs:label missing)".into())
+    }
+
+    pub fn annoation_display(&self, iri: &Iri) -> Option<String> {
+        self.annotations
+            .get(iri)
+            // TODO #20 make this more usable by providing multiple lines with indentation
+            .map(|resolved| {
+                resolved
+                    .iter()
+                    .map(|ri| ri.value.clone())
+                    .map(trim_string_value)
+                    .join(",")
+            })
+    }
+
+    pub fn info_display(&self, workspace: &Workspace) -> String {
+        let entity = self.frame_type;
+        let label = self.label();
+
+        let annotations = self
+            .annotations
+            .keys()
+            .map(|iri| {
+                let iri_label = workspace
+                    .get_frame_info(iri)
+                    .map(|fi| fi.label())
+                    .unwrap_or("(No frame info found)".into());
+                // TODO #28 use values directly
+                let annoation_display = self.annoation_display(iri).expect("The iri to be valid");
+                format!("`{iri_label}`: {annoation_display}")
+            })
+            .join("  \n");
+
+        format!("{entity} **{label}**\n\n---\n{annotations}")
+    }
+}
+
+fn trim_string_value(value: String) -> String {
+    value
+        .trim_start_matches('"')
+        .trim_end_matches("@en")
+        .trim_end_matches("@de")
+        .trim_end_matches("@pl")
+        .trim_end_matches("^^xsd:string") // typed literal with type string
+        .trim_end_matches('"')
+        .replace("\\\"", "\"")
+        .trim()
+        .to_string()
 }
 
 #[derive(Clone)]
@@ -209,7 +335,7 @@ pub fn gen_iri_info_map(
     infos
 }
 
-fn node_text<'a>(node: &Node, rope: &'a Rope) -> ropey::RopeSlice<'a> {
+pub fn node_text<'a>(node: &Node, rope: &'a Rope) -> ropey::RopeSlice<'a> {
     rope.byte_slice(node.start_byte()..node.end_byte())
 }
 
