@@ -21,7 +21,7 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn new(workspace_folder: WorkspaceFolder) -> Self {
-        let catalogs = Catalog::load_catalogs(workspace_folder.uri.clone());
+        let catalogs = Catalog::load_catalogs_recursive(workspace_folder.uri.clone());
         info!("New workspace at {}", workspace_folder.uri);
         Workspace {
             document_map: DashMap::new(),
@@ -206,9 +206,9 @@ impl FrameInfo {
                 let iri_label = workspace
                     .get_frame_info(iri)
                     .map(|fi| fi.label())
-                    .unwrap_or("(No frame info found)".into());
+                    .unwrap_or(iri.clone());
                 // TODO #28 use values directly
-                let annoation_display = self.annoation_display(iri).expect("The iri to be valid");
+                let annoation_display = self.annoation_display(iri).unwrap_or("(No data)".into());
                 format!("`{iri_label}`: {annoation_display}")
             })
             .join("  \n");

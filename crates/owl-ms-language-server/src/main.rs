@@ -70,11 +70,7 @@ impl Backend {
         Backend {
             client,
             parser: Mutex::new(parser),
-            // document_map: DashMap::new(),
             position_encoding: PositionEncodingKind::UTF16.into(),
-            // workspace_folders: Mutex::new(vec![]),
-            // catalogs: Mutex::new(vec![]),
-            // frame_infos: DashMap::new(),
             workspaces: Mutex::new(vec![]),
         }
     }
@@ -173,12 +169,6 @@ impl LanguageServer for Backend {
             .iter()
             .map(|wf| Workspace::new(wf.clone()))
             .collect();
-
-        // let mut catalogs_guard = self.catalogs.lock().await;
-        // for folder in wf.iter() {
-        //     let read_catalogs = read_catalog(folder.uri.clone());
-        //     catalogs_guard.extend(read_catalogs);
-        // }
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -433,8 +423,6 @@ impl LanguageServer for Backend {
                 cursor.goto_parent();
                 let node_that_has_change = cursor.node();
                 drop(cursor);
-                // while range_overlaps(&ts_range_to_lsp_range(cursor.node().range()), &range) {}
-                // document.diagnostics =
                 let additional_diagnostics = timeit("did_change > gen_diagnostics", || {
                     gen_diagnostics(&node_that_has_change)
                 })
@@ -496,11 +484,6 @@ impl LanguageServer for Backend {
 
         let url = params.text_document.uri;
         let workspace = self.find_workspace(&url).await;
-
-        // let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
-        // for doc in self.document_map.iter() {
-        //     combined_iri_info_map.extend(doc.value().iri_info_map.clone());
-        // }
 
         Ok(workspace.document_map.get(&url).map(|document| {
             let full_iri_query =
@@ -675,10 +658,7 @@ impl LanguageServer for Backend {
         let workspace = self.find_workspace(&url).await;
         let doc = workspace.document_map.get(&url);
         let pos: Position = params.text_document_position.position.into();
-        // let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
-        // for doc in wor.document_map.iter() {
-        //     combined_iri_info_map.extend(doc.value().iri_info_map.clone());
-        // }
+
         Ok(doc.map(|doc| {
             // generate keyword list that can be applied. Note that this is missing some keywords because of limitations in the grammar.
             let mut cursor = doc.tree.walk();
@@ -703,6 +683,7 @@ impl LanguageServer for Backend {
                 });
 
             let mut items = vec![
+                // TODO can this be removed?
                 // CompletionItem {
                 //     label: parent_kind.to_string(),
                 //     ..Default::default()
@@ -756,16 +737,6 @@ impl LanguageServer for Backend {
             let mut tokens = vec![];
             let mut last_start = Point { row: 0, column: 0 };
 
-            // debug!(
-            //     "matches {:?}",
-            //     matches
-            //         .flat_map(|m| m.captures)
-            //         .map(|c| c.index)
-            //         .collect::<Vec<u32>>()
-            // );
-
-            //treesitter_highlight_capture_into_sematic_token_type
-
             let mut nodes = matches
                 .flat_map(|m| m.captures)
                 .map(|c| {
@@ -798,8 +769,6 @@ impl LanguageServer for Backend {
                     token_modifiers_bitset: 0,
                 };
 
-                // debug!("token {:?}", token);
-
                 last_start = node.start_position();
                 tokens.push(token);
             }
@@ -812,6 +781,7 @@ impl LanguageServer for Backend {
         Ok(None)
     }
 
+    // TODO
     // async fn semantic_tokens_full_delta(
     //     &self,
     //     params: SemanticTokensDeltaParams,

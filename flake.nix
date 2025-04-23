@@ -29,14 +29,15 @@
               (rust-bin.stable.latest.default.override {
                 extensions = [ "rust-analyzer" "rust-src" ];
               })
+              clang
             ];
             RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
-              nativeBuildInputs = with pkgs; [
-                cargo
-                clippy
-                rust-analyzer
-                rustc
-              ];
+            nativeBuildInputs = with pkgs; [
+              cargo
+              clippy
+              rust-analyzer
+              rustc
+            ];
           };
         }
       );
