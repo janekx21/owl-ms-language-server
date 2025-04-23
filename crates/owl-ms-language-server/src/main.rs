@@ -9,7 +9,7 @@ mod workspace;
 
 use clap::Parser as ClapParser;
 use dashmap::DashMap;
-use debugging::timeit;
+use debugging::{_log_to_client, timeit};
 use itertools::Itertools;
 use log::{debug, error, info, LevelFilter};
 use once_cell::sync::Lazy;
@@ -19,6 +19,8 @@ use rope_provider::RopeProvider;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::fs::File;
+use std::io::Write;
 use std::path::Path;
 use std::{env, fs};
 use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
@@ -80,6 +82,27 @@ impl Backend {
     }
 }
 
+struct BackendLogger {
+    client: Client,
+    file: Option<File>,
+}
+
+impl Write for BackendLogger {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        _log_to_client(&self.client, String::from_utf8_lossy(buf).into());
+        if let Some(f) = &mut self.file {
+            f.write_all(buf).unwrap_or_else(|err| {
+                _log_to_client(&self.client, format!("Could not log to file. {}", err));
+            });
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 struct StaticNode {
@@ -118,12 +141,12 @@ async fn main() {
     let mut log_file_path = env::temp_dir();
     log_file_path.push("owl-ms-lanugage-server.log");
     let log_file_path = log_file_path.as_path();
-    simple_logging::log_to_file(log_file_path, LevelFilter::Debug).unwrap_or_else(|_| {
-        panic!(
-            "Logging file could not be created at {}",
-            log_file_path.to_str().unwrap_or("[invalid unicode]")
-        )
-    });
+    // simple_logging::log_to_file(log_file_path, LevelFilter::Debug).unwrap_or_else(|_| {
+    //     panic!(
+    //         "Logging file could not be created at {}",
+    //         log_file_path.to_str().unwrap_or("[invalid unicode]")
+    //     )
+    // });
 
     std::panic::set_hook(Box::new(|info| {
         error!("paniced with {}", info);
@@ -133,6 +156,14 @@ async fn main() {
     parser.set_language(*LANGUAGE).unwrap();
 
     let (service, socket) = LspService::new(|client| Backend::new(client, parser));
+
+    simple_logging::log_to(
+        BackendLogger {
+            client: service.inner().client.clone(),
+            file: File::create(log_file_path).ok(),
+        },
+        LevelFilter::Debug,
+    );
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
@@ -288,8 +319,7 @@ impl LanguageServer for Backend {
 
         debug!("Inserted document");
 
-        self.resolve_imports(&document, &workspace, &mut parser_guard)
-            .await;
+        self.resolve_imports(&document, &workspace, &mut parser_guard);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -850,12 +880,7 @@ impl Backend {
         })
     }
 
-    async fn resolve_imports(
-        &self,
-        document: &Document,
-        workspace: &Workspace,
-        parser: &mut Parser,
-    ) {
+    fn resolve_imports(&self, document: &Document, workspace: &Workspace, parser: &mut Parser) {
         let urls = query_document(document, &IMPORT_QUERY)
             .iter()
             .flat_map(|match_| &match_.captures)
@@ -864,8 +889,6 @@ impl Backend {
                 Url::parse(iri_text.trim_end_matches(">").trim_start_matches("<")).ok()
             })
             .collect_vec();
-
-        // let workspace = self.find_workspace(&document.uri).await;
 
         for url in urls {
             // TODO #8 filepath
@@ -926,14 +949,7 @@ static IMPORT_QUERY: Lazy<Query> = Lazy::new(|| {
     .unwrap()
 });
 
-fn query_document<'a>(
-    document: &'a Document,
-    // source: &str,
-    query: &'a Query,
-) -> Vec<UnwrappedQueryMatch<'a>> {
-    // let query = Query::new(*LANGUAGE, source).unwrap();
-    // let query_ref: &'a Query = &query;
-
+fn query_document<'a>(document: &'a Document, query: &'a Query) -> Vec<UnwrappedQueryMatch<'a>> {
     let mut query_cursor = QueryCursor::new();
     let rope_provider: RopeProvider<'a> = RopeProvider::new(&document.rope);
     query_cursor
@@ -981,89 +997,6 @@ fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) -> u32
         "variable" => 8,               //SemanticTokenType::VARIABLE,
         _ => todo!("highlight capture {} not implemented", str),
     }
-}
-
-// fn semantic_token_type_into_index(type_: SemanticTokenType) -> u32 {
-//     match type_ {
-//         SemanticTokenType::NAMESPACE => 0,
-//         SemanticTokenType::TYPE => 1,
-//         SemanticTokenType::CLASS => 2,
-//         SemanticTokenType::ENUM => 3,
-//         SemanticTokenType::INTERFACE => 4,
-//         SemanticTokenType::STRUCT => 5,
-//         SemanticTokenType::TYPE_PARAMETER => 6,
-//         SemanticTokenType::PARAMETER => 7,
-//         SemanticTokenType::VARIABLE => 8,
-//         SemanticTokenType::PROPERTY => 9,
-//         SemanticTokenType::ENUM_MEMBER => 10,
-//         SemanticTokenType::EVENT => 11,
-//         SemanticTokenType::FUNCTION => 12,
-//         SemanticTokenType::METHOD => 13,
-//         SemanticTokenType::MACRO => 14,
-//         SemanticTokenType::KEYWORD => 15,
-//         SemanticTokenType::MODIFIER => 16,
-//         SemanticTokenType::COMMENT => 17,
-//         SemanticTokenType::STRING => 18,
-//         SemanticTokenType::NUMBER => 19,
-//         SemanticTokenType::REGEXP => 20,
-//         SemanticTokenType::OPERATOR => 21,
-//         SemanticTokenType::DECORATOR => 22,
-//     }
-// }
-
-// static SEMANTIC_TOKEN_TYPES: Lazy<HashMap<usize, SemanticTokenType>> = Lazy::new(|| {
-//     let tokens = vec![
-//         SemanticTokenType::NAMESPACE,
-//         SemanticTokenType::TYPE,
-//         SemanticTokenType::CLASS,
-//         SemanticTokenType::ENUM,
-//         SemanticTokenType::INTERFACE,
-//         SemanticTokenType::STRUCT,
-//         SemanticTokenType::TYPE_PARAMETER,
-//         SemanticTokenType::PARAMETER,
-//         SemanticTokenType::VARIABLE,
-//         SemanticTokenType::PROPERTY,
-//         SemanticTokenType::ENUM_MEMBER,
-//         SemanticTokenType::EVENT,
-//         SemanticTokenType::FUNCTION,
-//         SemanticTokenType::METHOD,
-//         SemanticTokenType::MACRO,
-//         SemanticTokenType::KEYWORD,
-//         SemanticTokenType::MODIFIER,
-//         SemanticTokenType::COMMENT,
-//         SemanticTokenType::STRING,
-//         SemanticTokenType::NUMBER,
-//         SemanticTokenType::REGEXP,
-//         SemanticTokenType::OPERATOR,
-//         SemanticTokenType::DECORATOR,
-//     ];
-//     let mut hash_map = HashMap::new();
-
-//     for (index, item) in tokens.iter().enumerate() {
-//         hash_map.insert(index, item);
-//     }
-//     hash_map.shrink_to_fit();
-// });
-
-// Implementations for Structs
-
-// fn global_resolve_iri(workspace: &Workspace, iri: &String) -> String {
-//     // let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
-//     // for doc in backend.document_map.iter() {
-//     //     combined_iri_info_map.extend(doc.value().iri_info_map.clone());
-//     // }
-
-//     workspace
-//         .get_frame_info(iri)
-//         .and_then(|iri_info| iri_info.label())
-//         .unwrap_or(iri.clone())
-// }
-
-fn _log_to_client(client: &Client, msg: String) -> task::JoinHandle<()> {
-    let c = client.clone();
-    task::spawn(async move {
-        c.log_message(MessageType::INFO, msg).await;
-    })
 }
 
 fn deepest_named_node_at_pos(tree: &Tree, pos: Position) -> Node {
