@@ -76,7 +76,6 @@ fn ontology_change_bench(c: &mut Criterion) {
                     let mut parser = Parser::new();
                     parser.set_language(language()).unwrap();
                     let old_tree = parser.parse(source_code.clone(), None).unwrap();
-                    // println!("{}", old_tree.root_node().to_sexp());
 
                     // let edit = InputEdit {
                     //     start_byte: 29usize,
