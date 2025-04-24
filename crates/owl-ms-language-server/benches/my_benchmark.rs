@@ -1,5 +1,7 @@
 // use crate::Backend;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use owl_ms_language_server::rope_provider::RopeProvider;
+use ropey::Rope;
 use tree_sitter::{Parser, Tree};
 use tree_sitter_owl_ms::language;
 
@@ -8,8 +10,14 @@ fn parse_helper(source_code: &String, parser: &mut Parser) {
     parser.parse(source_code, None).unwrap();
 }
 
-fn re_parse_helper(source_code: &String, parser: &mut Parser, old_tree: &Tree) {
-    parser.parse(source_code, Some(old_tree)).unwrap();
+fn re_parse_helper(source_code: &Rope, parser: &mut Parser, old_tree: &Tree) {
+    let rope_provider = RopeProvider::new(source_code);
+    parser
+        .parse_with(
+            &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+            Some(old_tree),
+        )
+        .unwrap();
 }
 
 fn parse_bench(c: &mut Criterion) {
@@ -86,7 +94,8 @@ fn ontology_change_bench(c: &mut Criterion) {
                     //     new_end_position: Point { row: 1, column: 1 },
                     // };
                     // old_tree.edit(&edit);
-                    (source_code.to_string(), parser, old_tree)
+                    let rope_provider = Rope::from_str(source_code.as_str());
+                    (rope_provider, parser, old_tree)
                 },
                 |(source, parser, old_tree)| re_parse_helper(source, parser, old_tree),
                 criterion::BatchSize::SmallInput,

@@ -1,7 +1,6 @@
 use clap::Parser as ClapParser;
-use log::{error, LevelFilter};
+use log::error;
 use owl_ms_language_server::{Backend, LANGUAGE};
-use std::env;
 use tower_lsp::{LspService, Server};
 use tree_sitter::Parser;
 
@@ -17,16 +16,6 @@ struct Args {
 #[tokio::main]
 async fn main() {
     let _ = Args::parse();
-
-    let mut log_file_path = env::temp_dir();
-    log_file_path.push("owl-ms-lanugage-server.log");
-    let log_file_path = log_file_path.as_path();
-    simple_logging::log_to_file(log_file_path, LevelFilter::Debug).unwrap_or_else(|_| {
-        panic!(
-            "Logging file could not be created at {}",
-            log_file_path.to_str().unwrap_or("[invalid unicode]")
-        )
-    });
 
     std::panic::set_hook(Box::new(|info| {
         error!("paniced with {}", info);

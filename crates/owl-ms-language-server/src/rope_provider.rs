@@ -1,9 +1,8 @@
 use ropey::Rope;
-use ropey::RopeSlice;
 use tree_sitter::Node;
 use tree_sitter::TextProvider;
 
-pub struct RopeProvider<'a>(pub RopeSlice<'a>);
+pub struct RopeProvider<'a>(pub &'a Rope);
 
 impl<'a> TextProvider<'a> for RopeProvider<'a> {
     type I = ChunksBytes<'a>;
@@ -17,8 +16,18 @@ impl<'a> TextProvider<'a> for RopeProvider<'a> {
 }
 
 impl<'a> RopeProvider<'a> {
-    pub(crate) fn new(value: &'a Rope) -> Self {
-        RopeProvider(value.slice(..))
+    pub fn new(value: &'a Rope) -> Self {
+        RopeProvider(value)
+    }
+
+    pub fn chunk_callback(&self, byte_idx: usize) -> &str {
+        // TODO Why is reparsing this not O(log n)?
+        if byte_idx > self.0.len_bytes() {
+            return ""; // out of bounds
+        }
+        let (chunk, chunk_byte_idx, _, _) = self.0.chunk_at_byte(byte_idx);
+        let start = byte_idx - chunk_byte_idx;
+        &chunk[start..]
     }
 }
 

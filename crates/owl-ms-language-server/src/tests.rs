@@ -1,4 +1,5 @@
-use pretty_assertions::assert_eq;
+use pretty_assertions::{assert_eq, assert_ne};
+use ropey::Rope;
 use tempdir::{self, TempDir};
 
 use quick_xml::de::from_str;
@@ -276,6 +277,79 @@ fn test_path_segment() {
     assert_eq!(url.as_str(), "file://example.com/this/is/a");
 }
 
+#[test(tokio::test)]
+async fn test_gen_frame_info_removing_infos() {
+    // Arrange
+    let service = arrange_backend(None).await;
+
+    let ontology_url = Url::from_file_path("/tmp/file.omn").unwrap();
+
+    let ontology = r#"Ontology: <http://a.b/multi-file>
+Class: class-in-first-file
+    Annotations: rdfs:label "This class is in the first file"
+"#;
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: ontology_url.clone(),
+                version: 1,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                text: "".into(),
+                range: Some(
+                    Range {
+                        start: Position {
+                            line: 2,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: 2,
+                            character: 61,
+                        },
+                    }
+                    .into(),
+                ),
+                range_length: None,
+            }],
+        })
+        .await;
+
+    // Assert
+
+    let workspaces = service.inner().lock_workspaces().await;
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .document_map
+        .iter()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+    assert_eq!(
+        document.rope.to_string(),
+        r#"Ontology: <http://a.b/multi-file>
+Class: class-in-first-file
+
+"#
+    );
+    let frame = document.frame_infos.get("class-in-first-file").unwrap();
+    assert_eq!(frame.annotations.get("rdfs:label"), None);
+}
+
 // Arrange
 
 #[derive(Debug, Clone)]
@@ -347,8 +421,34 @@ async fn arrange_init_backend(
     service.inner().initialized(InitializedParams {}).await;
 }
 
+async fn arrange_backend(workspace_folder: Option<WorkspaceFolder>) -> LspService<Backend> {
+    let (service, _) = LspService::new(|client| Backend::new(client, arrange_parser()));
+
+    arrange_init_backend(&service, None).await;
+    service
+}
+
 #[test]
 /// This test should initilize all queries and therefore check if they are valid
 fn test_all_queries_valid() {
     let _ = *ALL_QUERIES;
+}
+
+#[test]
+fn test_rope_chunk_callback() {
+    let rope = Rope::from_str("0123456789".repeat(10000).as_str());
+    let rope_provider = RopeProvider::new(&rope);
+
+    let chunk = rope_provider.chunk_callback(5);
+    assert_eq!(chunk.len(), 984 - 5);
+    assert!(chunk.starts_with("5678"));
+}
+
+#[test]
+fn test_rope_chunk_callback_end() {
+    let rope = Rope::from_str("");
+    let rope_provider = RopeProvider::new(&rope);
+
+    let chunk = rope_provider.chunk_callback(1);
+    assert_eq!(chunk.len(), 0);
 }

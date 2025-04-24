@@ -3,7 +3,7 @@ mod debugging;
 mod position;
 mod queries;
 mod range;
-mod rope_provider;
+pub mod rope_provider;
 #[cfg(test)]
 mod tests;
 mod workspace;
@@ -231,6 +231,7 @@ impl LanguageServer for Backend {
                 return; // no change needed
             }
 
+            // This is relative to the *old* document not the new one
             let change_ranges = params
                 .content_changes
                 .iter()
@@ -288,9 +289,19 @@ impl LanguageServer for Backend {
 
             let mut parser_guard = self.parser.lock().await;
             parser_guard.reset();
+            let rope_provider = RopeProvider::new(&document.rope);
             let tree = timeit("parsing", || {
                 parser_guard
-                    .parse(document.rope.to_string(), Some(&document.tree))
+                    .parse_with(
+                        &mut |byte_idx, _| {
+                            rope_provider.chunk_callback(byte_idx)
+                            // let (chunk, chunk_byte_idx, _, _) =
+                            //     document.rope.chunk_at_byte(byte_idx);
+                            // let start = byte_idx - chunk_byte_idx;
+                            // &chunk[start..]
+                        },
+                        Some(&document.tree),
+                    )
                     .expect("language to be set, no timeout to be used, no cancelation flag")
             });
             document.tree = tree;
