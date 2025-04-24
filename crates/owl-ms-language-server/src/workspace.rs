@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use dashmap::DashMap;
 use itertools::Itertools;
@@ -8,8 +8,8 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Url, WorkspaceFolder}
 use tree_sitter::{Node, Parser, Query, QueryCursor, Tree};
 
 use crate::{
-    catalog::Catalog, debugging::timeit, range::Range, rope_provider::RopeProvider, FrameType,
-    LANGUAGE, NODE_TYPES,
+    catalog::Catalog, debugging::timeit, range::Range, rope_provider::RopeProvider, LANGUAGE,
+    NODE_TYPES,
 };
 
 #[derive(Debug)]
@@ -138,14 +138,131 @@ impl Document {
             frame_infos: DashMap::new(),
             diagnostics,
         };
-        document.frame_infos = gen_iri_info_map(&document, None);
+        document.frame_infos = document.gen_frame_infos(None);
         document
     }
+
+    /// Generate an async hash map that resolves IRIs to infos about that IRI
+    pub fn gen_frame_infos(&self, range: Option<&Range>) -> DashMap<Iri, FrameInfo> {
+        debug!("Generating frame infos");
+
+        let tree = &self.tree;
+        let rope = &self.rope;
+
+        // TODO check frame [(datatype_frame) (class_frame) (object_property_frame) (data_property_frame) (annotation_property_frame) (individual_frame)]
+        // the typed literal is for the string type
+        let frame_source = "
+        (_
+            . (_ [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri)
+            (annotation
+                (annotation_property_iri)@iri
+                [
+                    (string_literal_no_language)
+                    (string_literal_with_language)
+                    (typed_literal)
+                ]@literal))
+        
+        (prefix_declaration (prefix_name)@prefix_name (full_iri)@iri)
+        ";
+
+        let frame_query = Query::new(*LANGUAGE, frame_source).expect("valid query expect");
+        let mut query_cursor = QueryCursor::new();
+
+        if let Some(range) = range {
+            query_cursor.set_point_range((*range).into());
+        }
+
+        let matches = query_cursor.matches(&frame_query, tree.root_node(), RopeProvider::new(rope));
+
+        let infos = DashMap::<Iri, FrameInfo>::new();
+
+        for m in matches {
+            match m.pattern_index {
+                0 => {
+                    let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
+                    let frame_iri = capture_texts.next().unwrap().to_string();
+                    let annotation_iri = capture_texts.next().unwrap().to_string();
+                    let literal = capture_texts.next().unwrap().to_string();
+
+                    let parent_node = m.captures[0].node.parent().unwrap();
+
+                    let frame_type = FrameType::parse(parent_node.kind());
+
+                    if !infos.contains_key(&frame_iri) {
+                        infos.insert(
+                            frame_iri.clone(),
+                            FrameInfo {
+                                annotations: HashMap::new(),
+                                frame_type,
+                                definitions: vec![(
+                                    self.uri.clone(),
+                                    // This node should be the total frame
+                                    parent_node.parent().unwrap_or(parent_node).range().into(),
+                                )],
+                            },
+                        );
+                    }
+
+                    let mut info = infos.get_mut(&frame_iri).unwrap();
+
+                    if let Some(vec) = info.annotations.get_mut(&annotation_iri) {
+                        vec.push(literal);
+                    } else {
+                        info.annotations
+                            .insert(annotation_iri.clone(), vec![literal]);
+                    }
+                }
+                1 => {
+                    let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
+                    let prefix_name = capture_texts.next().unwrap().to_string();
+                    let iri = capture_texts.next().unwrap().to_string();
+
+                    // TODO requst prefix url to cache the ontology there
+                    debug!("prefix named {} with iri {}", prefix_name, iri);
+                }
+                i => todo!("pattern index {} not implemented", i),
+            }
+        }
+        infos
+    }
+
+    pub fn query<'a>(&'a self, query: &'a Query) -> Vec<UnwrappedQueryMatch<'a>> {
+        let mut query_cursor = QueryCursor::new();
+        let rope_provider: RopeProvider<'a> = RopeProvider::new(&self.rope);
+        query_cursor
+            .matches(query, self.tree.root_node(), rope_provider)
+            .map(|m| UnwrappedQueryMatch::<'a> {
+                _pattern_index: m.pattern_index,
+                _id: m.id(),
+                captures: m
+                    .captures
+                    .iter()
+                    .map(|c| UnwrappedQueryCapture::<'a> {
+                        node: c.node,
+                        _index: c.index,
+                    })
+                    .collect_vec(),
+            })
+            .collect_vec()
+    }
+}
+
+#[derive(Debug)]
+pub struct UnwrappedQueryMatch<'a> {
+    _pattern_index: usize,
+    pub captures: Vec<UnwrappedQueryCapture<'a>>,
+    _id: u32,
+}
+
+#[derive(Debug)]
+pub struct UnwrappedQueryCapture<'a> {
+    pub node: Node<'a>,
+    _index: u32,
 }
 
 /// This represents informations about a frame.
 /// For example the following frame has information.
-/// ```
+/// ```owl-ms
 /// Class: PizzaThing
 ///     Annotations: rdfs:label "Pizza"
 /// ```
@@ -234,112 +351,8 @@ fn trim_string_value(value: &String) -> String {
         .to_string()
 }
 
-// #[derive(Clone, Debug)]
-// pub struct ResolvedIri {
-//     pub value: String,
-// pub _origin_doucment_range: Range,
-// }
-
+// TODO maybe use Arc<String>
 type Iri = String;
-
-/// Generate an async hash map that resolves IRIs to infos about that IRI
-pub fn gen_iri_info_map(document: &Document, range: Option<&Range>) -> DashMap<Iri, FrameInfo> {
-    debug!("generating iri info map");
-
-    let tree = &document.tree;
-    let rope = &document.rope;
-
-    // TODO check frame [(datatype_frame) (class_frame) (object_property_frame) (data_property_frame) (annotation_property_frame) (individual_frame)]
-    // the typed literal is for the string type
-    let frame_source = "
-        (_
-            . (_ [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri)
-            (annotation
-                (annotation_property_iri)@iri
-                [
-                    (string_literal_no_language)
-                    (string_literal_with_language)
-                    (typed_literal)
-                ]@literal))
-        
-        (prefix_declaration (prefix_name)@prefix_name (full_iri)@iri)
-        ";
-
-    let frame_query = Query::new(*LANGUAGE, frame_source).expect("valid query expect");
-    let mut query_cursor = QueryCursor::new();
-
-    if let Some(range) = range {
-        query_cursor.set_point_range((*range).into());
-    }
-
-    let matches = query_cursor.matches(&frame_query, tree.root_node(), RopeProvider::new(rope));
-
-    let infos = DashMap::<Iri, FrameInfo>::new();
-
-    for m in matches {
-        match m.pattern_index {
-            0 => {
-                let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
-                let frame_iri = capture_texts.next().unwrap().to_string();
-                let annotation_iri = capture_texts.next().unwrap().to_string();
-                let literal = capture_texts.next().unwrap().to_string();
-
-                let parent_node = m.captures[0].node.parent().unwrap();
-                let frame_type = match parent_node.kind() {
-                    "class_iri" => FrameType::Class,
-                    "datatype_iri" => FrameType::DataType,
-                    "annotation_property_iri" => FrameType::AnnotationProperty,
-                    "individual_iri" => FrameType::Individual,
-                    "ontology_iri" => FrameType::Ontology,
-                    "data_property_iri" => FrameType::DataProperty,
-                    "object_property_iri" => FrameType::ObjectProperty,
-                    kind => {
-                        error!("implement {kind}");
-                        FrameType::Class
-                    }
-                };
-
-                if !infos.contains_key(&frame_iri) {
-                    infos.insert(
-                        frame_iri.clone(),
-                        FrameInfo {
-                            annotations: HashMap::new(),
-                            frame_type,
-                            // TODO the range could be wrong. maybe one parent up
-                            definitions: vec![(
-                                document.uri.clone(),
-                                parent_node.parent().unwrap_or(parent_node).range().into(),
-                            )],
-                        },
-                    );
-                }
-
-                let mut info = infos.get_mut(&frame_iri).unwrap();
-                // let resolved_iri = ResolvedIri {
-                //     value: literal.clone(),
-                // _origin_doucment_range: parent_node.range().into(),
-                // };
-
-                if let Some(vec) = info.annotations.get_mut(&annotation_iri) {
-                    vec.push(literal);
-                } else {
-                    info.annotations
-                        .insert(annotation_iri.clone(), vec![literal]);
-                }
-            }
-            1 => {
-                let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
-                let prefix_name = capture_texts.next().unwrap().to_string();
-                let iri = capture_texts.next().unwrap().to_string();
-
-                // TODO requst prefix url to cache the ontology there
-                debug!("prefix named {} with iri {}", prefix_name, iri);
-            }
-            i => todo!("pattern index {} not implemented", i),
-        }
-    }
-    infos
-}
 
 pub fn node_text<'a>(node: &Node, rope: &'a Rope) -> ropey::RopeSlice<'a> {
     rope.byte_slice(node.start_byte()..node.end_byte())
@@ -366,7 +379,7 @@ pub fn gen_diagnostics(node: &Node) -> Vec<Diagnostic> {
                         .children
                         .types
                         .iter()
-                        .map(|sn| node_type_to_string(&sn._type)),
+                        .map(|sn| node_type_to_string(&sn.type_)),
                     ", ".to_string(),
                 )
                 .collect();
@@ -433,5 +446,52 @@ fn capitilize_string(s: &str) -> String {
     match c.next() {
         None => String::new(),
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+    }
+}
+
+/// taken from https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub enum FrameType {
+    Class,
+    DataType,
+    ObjectProperty,
+    DataProperty,
+    AnnotationProperty,
+    Individual,
+    Ontology,
+    Invalid, // The frame type of an IRI that has no valid frame
+}
+
+impl FrameType {
+    pub fn parse(kind: &str) -> FrameType {
+        match kind {
+            "class_iri" => FrameType::Class,
+            "datatype_iri" => FrameType::DataType,
+            "annotation_property_iri" => FrameType::AnnotationProperty,
+            "individual_iri" => FrameType::Individual,
+            "ontology_iri" => FrameType::Ontology,
+            "data_property_iri" => FrameType::DataProperty,
+            "object_property_iri" => FrameType::ObjectProperty,
+            kind => {
+                error!("Implement {kind}");
+                FrameType::Invalid
+            }
+        }
+    }
+}
+
+impl Display for FrameType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            FrameType::Class => "Class",
+            FrameType::DataType => "Data Type",
+            FrameType::ObjectProperty => "Object Property",
+            FrameType::DataProperty => "Data Property",
+            FrameType::AnnotationProperty => "Annotation Property",
+            FrameType::Individual => "Named Individual",
+            FrameType::Ontology => "Ontology",
+            FrameType::Invalid => "Invalid Frame Type",
+        };
+        write!(f, "{name}")
     }
 }

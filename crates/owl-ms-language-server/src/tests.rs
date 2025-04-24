@@ -1,7 +1,4 @@
-use std::{
-    fs::File,
-    io::{BufWriter, Write},
-};
+use pretty_assertions::assert_eq;
 use tempdir::{self, TempDir};
 
 use quick_xml::de::from_str;
@@ -347,4 +344,10 @@ async fn arrange_init_backend(
     assert!(result.is_ok(), "Initialize returned {:#?}", result);
 
     service.inner().initialized(InitializedParams {}).await;
+}
+
+#[test]
+/// This test should initilize all queries and therefore check if they are valid
+fn test_all_queries_valid() {
+    let _ = *ALL_QUERIES;
 }
