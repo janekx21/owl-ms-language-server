@@ -3,6 +3,7 @@ use tempdir::{self, TempDir};
 
 use quick_xml::de::from_str;
 use test_log::test;
+use tower_lsp::LspService;
 
 use crate::{
     catalog::{Catalog, CatalogUri},
