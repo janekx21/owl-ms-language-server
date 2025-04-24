@@ -126,26 +126,35 @@ impl Document {
         });
 
         let rope = Rope::from(text);
-        let frame_infos = gen_iri_info_map(&tree, &rope, None);
         let diagnostics = timeit("create_document / gen_diagnostics", || {
             gen_diagnostics(&tree.root_node())
         });
 
-        Document {
+        let mut document = Document {
             uri,
             version,
             tree,
             rope,
-            frame_infos,
+            frame_infos: DashMap::new(),
             diagnostics,
-        }
+        };
+        document.frame_infos = gen_iri_info_map(&document, None);
+        document
     }
 }
 
+/// This represents informations about a frame.
+/// For example the following frame has information.
+/// ```
+/// Class: PizzaThing
+///     Annotations: rdfs:label "Pizza"
+/// ```
+/// Then the [`FrameInfo`] contains the label "Pizza" and the frame type "Class".
 #[derive(Clone, Debug)]
 pub struct FrameInfo {
-    pub annotations: HashMap<Iri, Vec<ResolvedIri>>,
+    pub annotations: HashMap<Iri, Vec<String>>,
     pub frame_type: FrameType,
+    pub definitions: Vec<(Url, Range)>,
 }
 
 impl FrameInfo {
@@ -158,6 +167,12 @@ impl FrameInfo {
                 annotations.insert(key_a, values_a);
             }
         }
+        let definitions = b
+            .definitions
+            .iter()
+            .chain(a.definitions.iter())
+            .cloned()
+            .collect_vec();
         FrameInfo {
             frame_type: if a.frame_type != b.frame_type {
                 a.frame_type
@@ -165,6 +180,7 @@ impl FrameInfo {
                 FrameType::Invalid
             },
             annotations,
+            definitions,
         }
     }
 
@@ -172,13 +188,7 @@ impl FrameInfo {
         self.annotations
             .get("rdfs:label")
             // TODO #20 make this more usable by providing multiple lines with indentation
-            .map(|resolved| {
-                resolved
-                    .iter()
-                    .map(|ri| ri.value.clone())
-                    .map(trim_string_value)
-                    .join(",")
-            })
+            .map(|resolved| resolved.iter().map(trim_string_value).join(","))
             .unwrap_or("(rdfs:label missing)".into())
     }
 
@@ -186,13 +196,7 @@ impl FrameInfo {
         self.annotations
             .get(iri)
             // TODO #20 make this more usable by providing multiple lines with indentation
-            .map(|resolved| {
-                resolved
-                    .iter()
-                    .map(|ri| ri.value.clone())
-                    .map(trim_string_value)
-                    .join(",")
-            })
+            .map(|resolved| resolved.iter().map(trim_string_value).join(","))
     }
 
     pub fn info_display(&self, workspace: &Workspace) -> String {
@@ -208,7 +212,7 @@ impl FrameInfo {
                     .map(|fi| fi.label())
                     .unwrap_or(iri.clone());
                 // TODO #28 use values directly
-                let annoation_display = self.annoation_display(iri).unwrap_or("(No data)".into());
+                let annoation_display = self.annoation_display(iri).unwrap_or(iri.clone());
                 format!("`{iri_label}`: {annoation_display}")
             })
             .join("  \n");
@@ -217,7 +221,7 @@ impl FrameInfo {
     }
 }
 
-fn trim_string_value(value: String) -> String {
+fn trim_string_value(value: &String) -> String {
     value
         .trim_start_matches('"')
         .trim_end_matches("@en")
@@ -230,21 +234,20 @@ fn trim_string_value(value: String) -> String {
         .to_string()
 }
 
-#[derive(Clone, Debug)]
-pub struct ResolvedIri {
-    pub value: String,
-    pub _origin_doucment_range: Range,
-}
+// #[derive(Clone, Debug)]
+// pub struct ResolvedIri {
+//     pub value: String,
+// pub _origin_doucment_range: Range,
+// }
 
 type Iri = String;
 
-/// Generate an async hash map that resolves iris to infos about that iri
-pub fn gen_iri_info_map(
-    tree: &Tree,
-    rope: &Rope,
-    range: Option<&Range>,
-) -> DashMap<Iri, FrameInfo> {
+/// Generate an async hash map that resolves IRIs to infos about that IRI
+pub fn gen_iri_info_map(document: &Document, range: Option<&Range>) -> DashMap<Iri, FrameInfo> {
     debug!("generating iri info map");
+
+    let tree = &document.tree;
+    let rope = &document.rope;
 
     // TODO check frame [(datatype_frame) (class_frame) (object_property_frame) (data_property_frame) (annotation_property_frame) (individual_frame)]
     // the typed literal is for the string type
@@ -282,7 +285,7 @@ pub fn gen_iri_info_map(
                 let literal = capture_texts.next().unwrap().to_string();
 
                 let parent_node = m.captures[0].node.parent().unwrap();
-                let entity = match parent_node.kind() {
+                let frame_type = match parent_node.kind() {
                     "class_iri" => FrameType::Class,
                     "datatype_iri" => FrameType::DataType,
                     "annotation_property_iri" => FrameType::AnnotationProperty,
@@ -301,22 +304,27 @@ pub fn gen_iri_info_map(
                         frame_iri.clone(),
                         FrameInfo {
                             annotations: HashMap::new(),
-                            frame_type: entity,
+                            frame_type,
+                            // TODO the range could be wrong. maybe one parent up
+                            definitions: vec![(
+                                document.uri.clone(),
+                                parent_node.parent().unwrap_or(parent_node).range().into(),
+                            )],
                         },
                     );
                 }
 
                 let mut info = infos.get_mut(&frame_iri).unwrap();
-                let resolved_iri = ResolvedIri {
-                    value: literal.clone(),
-                    _origin_doucment_range: parent_node.range().into(),
-                };
+                // let resolved_iri = ResolvedIri {
+                //     value: literal.clone(),
+                // _origin_doucment_range: parent_node.range().into(),
+                // };
 
                 if let Some(vec) = info.annotations.get_mut(&annotation_iri) {
-                    vec.push(resolved_iri);
+                    vec.push(literal);
                 } else {
                     info.annotations
-                        .insert(annotation_iri.clone(), vec![resolved_iri]);
+                        .insert(annotation_iri.clone(), vec![literal]);
                 }
             }
             1 => {

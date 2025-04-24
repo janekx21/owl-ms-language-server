@@ -9,7 +9,7 @@ mod workspace;
 
 use clap::Parser as ClapParser;
 use dashmap::DashMap;
-use debugging::{_log_to_client, timeit};
+use debugging::timeit;
 use itertools::Itertools;
 use log::{debug, error, info, LevelFilter};
 use once_cell::sync::Lazy;
@@ -19,8 +19,6 @@ use rope_provider::RopeProvider;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::fs::File;
-use std::io::Write;
 use std::path::Path;
 use std::{env, fs};
 use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
@@ -82,27 +80,6 @@ impl Backend {
     }
 }
 
-struct BackendLogger {
-    client: Client,
-    file: Option<File>,
-}
-
-impl Write for BackendLogger {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        _log_to_client(&self.client, String::from_utf8_lossy(buf).into());
-        if let Some(f) = &mut self.file {
-            f.write_all(buf).unwrap_or_else(|err| {
-                _log_to_client(&self.client, format!("Could not log to file. {}", err));
-            });
-        }
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 struct StaticNode {
@@ -141,12 +118,12 @@ async fn main() {
     let mut log_file_path = env::temp_dir();
     log_file_path.push("owl-ms-lanugage-server.log");
     let log_file_path = log_file_path.as_path();
-    // simple_logging::log_to_file(log_file_path, LevelFilter::Debug).unwrap_or_else(|_| {
-    //     panic!(
-    //         "Logging file could not be created at {}",
-    //         log_file_path.to_str().unwrap_or("[invalid unicode]")
-    //     )
-    // });
+    simple_logging::log_to_file(log_file_path, LevelFilter::Debug).unwrap_or_else(|_| {
+        panic!(
+            "Logging file could not be created at {}",
+            log_file_path.to_str().unwrap_or("[invalid unicode]")
+        )
+    });
 
     std::panic::set_hook(Box::new(|info| {
         error!("paniced with {}", info);
@@ -156,14 +133,6 @@ async fn main() {
     parser.set_language(*LANGUAGE).unwrap();
 
     let (service, socket) = LspService::new(|client| Backend::new(client, parser));
-
-    simple_logging::log_to(
-        BackendLogger {
-            client: service.inner().client.clone(),
-            file: File::create(log_file_path).ok(),
-        },
-        LevelFilter::Debug,
-    );
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
@@ -200,6 +169,12 @@ impl LanguageServer for Backend {
             .iter()
             .map(|wf| Workspace::new(wf.clone()))
             .collect();
+
+        // let mut catalogs_guard = self.catalogs.lock().await;
+        // for folder in wf.iter() {
+        //     let read_catalogs = read_catalog(folder.uri.clone());
+        //     catalogs_guard.extend(read_catalogs);
+        // }
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -319,7 +294,8 @@ impl LanguageServer for Backend {
 
         debug!("Inserted document");
 
-        self.resolve_imports(&document, &workspace, &mut parser_guard);
+        self.resolve_imports(&document, &workspace, &mut parser_guard)
+            .await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -409,7 +385,7 @@ impl LanguageServer for Backend {
 
             let use_full_replace = params.content_changes.len() > FULL_REPLACE_THRESHOLD;
             if use_full_replace {
-                document.frame_infos = gen_iri_info_map(&document.tree, &document.rope, None);
+                document.frame_infos = gen_iri_info_map(&document, None);
 
                 let diagnostics = gen_diagnostics(&document.tree.root_node());
                 document.diagnostics = diagnostics.clone();
@@ -422,7 +398,7 @@ impl LanguageServer for Backend {
 
             for range in change_ranges.iter() {
                 let iri_info_map = timeit("gen_class_iri_label_map", || {
-                    gen_iri_info_map(&document.tree, &document.rope, Some(range))
+                    gen_iri_info_map(&document, Some(range))
                 });
 
                 // TODO prune
@@ -453,6 +429,8 @@ impl LanguageServer for Backend {
                 cursor.goto_parent();
                 let node_that_has_change = cursor.node();
                 drop(cursor);
+                // while range_overlaps(&ts_range_to_lsp_range(cursor.node().range()), &range) {}
+                // document.diagnostics =
                 let additional_diagnostics = timeit("did_change > gen_diagnostics", || {
                     gen_diagnostics(&node_that_has_change)
                 })
@@ -482,8 +460,10 @@ impl LanguageServer for Backend {
                 .last()
                 .unwrap(),
         );
-        let workspace = self.find_workspace(&params.text_document.uri).await;
-        workspace.document_map.remove(&params.text_document.uri);
+        // We do not close yet :> because of refences
+        // TODO should data be deleted if a file is closed?
+        // let workspace = self.find_workspace(&params.text_document.uri).await;
+        // workspace.document_map.remove(&params.text_document.uri);
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -514,6 +494,11 @@ impl LanguageServer for Backend {
 
         let url = params.text_document.uri;
         let workspace = self.find_workspace(&url).await;
+
+        // let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
+        // for doc in self.document_map.iter() {
+        //     combined_iri_info_map.extend(doc.value().iri_info_map.clone());
+        // }
 
         Ok(workspace.document_map.get(&url).map(|document| {
             let full_iri_query =
@@ -572,74 +557,94 @@ impl LanguageServer for Backend {
             let leaf_node = deepest_named_node_at_pos(&doc.tree, pos);
             if ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind()) {
                 let parent_kind = leaf_node.parent().unwrap().kind();
-                let iri = node_text(&leaf_node, &doc.rope);
+                let iri = node_text(&leaf_node, &doc.rope).to_string();
 
-                // TODO other frame types
-                let query = match parent_kind {
-                    "class_iri" => Some(format!(
-                        "(class_frame
-                            . (class_iri)@iri
-                            (#eq? @iri \"{}\")
-                        )@frame",
-                        iri
-                    )),
-                    "annotation_property_iri" => Some(format!(
-                        "(annotation_property_frame
-                            . (annotation_property_iri)@iri
-                            (#eq? @iri \"{}\")
-                        )@frame",
-                        iri
-                    )),
-                    "object_property_iri" => Some(format!(
-                        "(object_property_frame
-                            . (object_property_iri)@iri
-                            (#eq? @iri \"{}\")
-                        )@frame",
-                        iri
-                    )),
-                    "data_property_iri" => Some(format!(
-                        "(data_property_frame
-                            . (data_property_iri)@iri
-                            (#eq? @iri \"{}\")
-                        )@frame",
-                        iri
-                    )),
-                    "individual_iri" => Some(format!(
-                        "(individual_frame
-                            . (individual_iri)@iri
-                            (#eq? @iri \"{}\")
-                        )@frame",
-                        iri
-                    )),
-                    "datatype_iri" => Some(format!(
-                        "(datatype_frame
-                            . (datatype_iri)@iri
-                            (#eq? @iri \"{}\")
-                        )@frame",
-                        iri
-                    )),
-                    _ => None,
-                };
-                debug!("{:?}", query);
+                debug!("Try goto definition of {}", iri);
 
-                Ok(query.and_then(|query_text| {
-                    let definition_query = Query::new(*LANGUAGE, query_text.as_str())
-                        .expect("valid query syntax expect");
+                let frame_info = workspace.get_frame_info(&iri);
 
-                    let root = doc.tree.root_node();
-                    let mut query_cursor = QueryCursor::new();
+                debug!("Found frame info {:#?}", frame_info);
 
-                    let rp = RopeProvider::new(&doc.rope);
-                    let mut matches = query_cursor.matches(&definition_query, root, rp);
-
-                    matches.next().map(|m| {
-                        let range: Range = m.captures[0].node.range().into();
-                        GotoDefinitionResponse::Scalar(Location {
-                            uri,
-                            range: range.into(),
+                if let Some(frame_info) = frame_info {
+                    let locations = frame_info
+                        .definitions
+                        .iter()
+                        .map(|(uri, range)| Location {
+                            uri: uri.clone(),
+                            range: (*range).into(),
                         })
-                    })
-                }))
+                        .collect_vec();
+
+                    return Ok(Some(GotoDefinitionResponse::Array(locations)));
+                }
+                return Ok(None);
+
+                // // TODO other frame types
+                // let query = match parent_kind {
+                //     "class_iri" => Some(format!(
+                //         "(class_frame
+                //             . (class_iri)@iri
+                //             (#eq? @iri \"{}\")
+                //         )@frame",
+                //         iri
+                //     )),
+                //     "annotation_property_iri" => Some(format!(
+                //         "(annotation_property_frame
+                //             . (annotation_property_iri)@iri
+                //             (#eq? @iri \"{}\")
+                //         )@frame",
+                //         iri
+                //     )),
+                //     "object_property_iri" => Some(format!(
+                //         "(object_property_frame
+                //             . (object_property_iri)@iri
+                //             (#eq? @iri \"{}\")
+                //         )@frame",
+                //         iri
+                //     )),
+                //     "data_property_iri" => Some(format!(
+                //         "(data_property_frame
+                //             . (data_property_iri)@iri
+                //             (#eq? @iri \"{}\")
+                //         )@frame",
+                //         iri
+                //     )),
+                //     "individual_iri" => Some(format!(
+                //         "(individual_frame
+                //             . (individual_iri)@iri
+                //             (#eq? @iri \"{}\")
+                //         )@frame",
+                //         iri
+                //     )),
+                //     "datatype_iri" => Some(format!(
+                //         "(datatype_frame
+                //             . (datatype_iri)@iri
+                //             (#eq? @iri \"{}\")
+                //         )@frame",
+                //         iri
+                //     )),
+                //     _ => None,
+                // };
+                // debug!("{:?}", query);
+
+                // Ok(query.and_then(|query_text| {
+                //     let definition_query = Query::new(*LANGUAGE, query_text.as_str())
+                //         .expect("valid query syntax expect");
+
+                //     let root = doc.tree.root_node();
+                //     let mut query_cursor = QueryCursor::new();
+
+                //     let rp = RopeProvider::new(&doc.rope);
+                //     let mut matches = query_cursor.matches(&definition_query, root, rp);
+
+                //     matches.next().map(|m| {
+                //         let range: Range = m.captures[0].node.range().into();
+                //         GotoDefinitionResponse::Scalar(Location {
+                //             uri,
+                //             range: range.into(),
+                //         })
+                //     })
+                // }))
             } else {
                 Ok(None)
             }
@@ -688,7 +693,10 @@ impl LanguageServer for Backend {
         let workspace = self.find_workspace(&url).await;
         let doc = workspace.document_map.get(&url);
         let pos: Position = params.text_document_position.position.into();
-
+        // let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
+        // for doc in wor.document_map.iter() {
+        //     combined_iri_info_map.extend(doc.value().iri_info_map.clone());
+        // }
         Ok(doc.map(|doc| {
             // generate keyword list that can be applied. Note that this is missing some keywords because of limitations in the grammar.
             let mut cursor = doc.tree.walk();
@@ -713,7 +721,6 @@ impl LanguageServer for Backend {
                 });
 
             let mut items = vec![
-                // TODO can this be removed?
                 // CompletionItem {
                 //     label: parent_kind.to_string(),
                 //     ..Default::default()
@@ -767,6 +774,16 @@ impl LanguageServer for Backend {
             let mut tokens = vec![];
             let mut last_start = Point { row: 0, column: 0 };
 
+            // debug!(
+            //     "matches {:?}",
+            //     matches
+            //         .flat_map(|m| m.captures)
+            //         .map(|c| c.index)
+            //         .collect::<Vec<u32>>()
+            // );
+
+            //treesitter_highlight_capture_into_sematic_token_type
+
             let mut nodes = matches
                 .flat_map(|m| m.captures)
                 .map(|c| {
@@ -799,6 +816,8 @@ impl LanguageServer for Backend {
                     token_modifiers_bitset: 0,
                 };
 
+                // debug!("token {:?}", token);
+
                 last_start = node.start_position();
                 tokens.push(token);
             }
@@ -811,7 +830,6 @@ impl LanguageServer for Backend {
         Ok(None)
     }
 
-    // TODO
     // async fn semantic_tokens_full_delta(
     //     &self,
     //     params: SemanticTokensDeltaParams,
@@ -880,7 +898,12 @@ impl Backend {
         })
     }
 
-    fn resolve_imports(&self, document: &Document, workspace: &Workspace, parser: &mut Parser) {
+    async fn resolve_imports(
+        &self,
+        document: &Document,
+        workspace: &Workspace,
+        parser: &mut Parser,
+    ) {
         let urls = query_document(document, &IMPORT_QUERY)
             .iter()
             .flat_map(|match_| &match_.captures)
@@ -889,6 +912,8 @@ impl Backend {
                 Url::parse(iri_text.trim_end_matches(">").trim_start_matches("<")).ok()
             })
             .collect_vec();
+
+        // let workspace = self.find_workspace(&document.uri).await;
 
         for url in urls {
             // TODO #8 filepath
@@ -909,8 +934,13 @@ impl Backend {
                                 u,
                                 path.display()
                             );
-                            let ontology_text = fs::read_to_string(path).unwrap();
-                            let document = Document::new(url.clone(), -1, ontology_text, parser);
+                            let ontology_text = fs::read_to_string(&path).unwrap();
+                            let document = Document::new(
+                                Url::from_file_path(path).unwrap(),
+                                -1,
+                                ontology_text,
+                                parser,
+                            );
                             workspace.insert_document(document);
                         }
                     }
@@ -949,7 +979,14 @@ static IMPORT_QUERY: Lazy<Query> = Lazy::new(|| {
     .unwrap()
 });
 
-fn query_document<'a>(document: &'a Document, query: &'a Query) -> Vec<UnwrappedQueryMatch<'a>> {
+fn query_document<'a>(
+    document: &'a Document,
+    // source: &str,
+    query: &'a Query,
+) -> Vec<UnwrappedQueryMatch<'a>> {
+    // let query = Query::new(*LANGUAGE, source).unwrap();
+    // let query_ref: &'a Query = &query;
+
     let mut query_cursor = QueryCursor::new();
     let rope_provider: RopeProvider<'a> = RopeProvider::new(&document.rope);
     query_cursor
@@ -997,6 +1034,89 @@ fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) -> u32
         "variable" => 8,               //SemanticTokenType::VARIABLE,
         _ => todo!("highlight capture {} not implemented", str),
     }
+}
+
+// fn semantic_token_type_into_index(type_: SemanticTokenType) -> u32 {
+//     match type_ {
+//         SemanticTokenType::NAMESPACE => 0,
+//         SemanticTokenType::TYPE => 1,
+//         SemanticTokenType::CLASS => 2,
+//         SemanticTokenType::ENUM => 3,
+//         SemanticTokenType::INTERFACE => 4,
+//         SemanticTokenType::STRUCT => 5,
+//         SemanticTokenType::TYPE_PARAMETER => 6,
+//         SemanticTokenType::PARAMETER => 7,
+//         SemanticTokenType::VARIABLE => 8,
+//         SemanticTokenType::PROPERTY => 9,
+//         SemanticTokenType::ENUM_MEMBER => 10,
+//         SemanticTokenType::EVENT => 11,
+//         SemanticTokenType::FUNCTION => 12,
+//         SemanticTokenType::METHOD => 13,
+//         SemanticTokenType::MACRO => 14,
+//         SemanticTokenType::KEYWORD => 15,
+//         SemanticTokenType::MODIFIER => 16,
+//         SemanticTokenType::COMMENT => 17,
+//         SemanticTokenType::STRING => 18,
+//         SemanticTokenType::NUMBER => 19,
+//         SemanticTokenType::REGEXP => 20,
+//         SemanticTokenType::OPERATOR => 21,
+//         SemanticTokenType::DECORATOR => 22,
+//     }
+// }
+
+// static SEMANTIC_TOKEN_TYPES: Lazy<HashMap<usize, SemanticTokenType>> = Lazy::new(|| {
+//     let tokens = vec![
+//         SemanticTokenType::NAMESPACE,
+//         SemanticTokenType::TYPE,
+//         SemanticTokenType::CLASS,
+//         SemanticTokenType::ENUM,
+//         SemanticTokenType::INTERFACE,
+//         SemanticTokenType::STRUCT,
+//         SemanticTokenType::TYPE_PARAMETER,
+//         SemanticTokenType::PARAMETER,
+//         SemanticTokenType::VARIABLE,
+//         SemanticTokenType::PROPERTY,
+//         SemanticTokenType::ENUM_MEMBER,
+//         SemanticTokenType::EVENT,
+//         SemanticTokenType::FUNCTION,
+//         SemanticTokenType::METHOD,
+//         SemanticTokenType::MACRO,
+//         SemanticTokenType::KEYWORD,
+//         SemanticTokenType::MODIFIER,
+//         SemanticTokenType::COMMENT,
+//         SemanticTokenType::STRING,
+//         SemanticTokenType::NUMBER,
+//         SemanticTokenType::REGEXP,
+//         SemanticTokenType::OPERATOR,
+//         SemanticTokenType::DECORATOR,
+//     ];
+//     let mut hash_map = HashMap::new();
+
+//     for (index, item) in tokens.iter().enumerate() {
+//         hash_map.insert(index, item);
+//     }
+//     hash_map.shrink_to_fit();
+// });
+
+// Implementations for Structs
+
+// fn global_resolve_iri(workspace: &Workspace, iri: &String) -> String {
+//     // let mut combined_iri_info_map: DashMap<Iri, FrameInfo> = DashMap::new();
+//     // for doc in backend.document_map.iter() {
+//     //     combined_iri_info_map.extend(doc.value().iri_info_map.clone());
+//     // }
+
+//     workspace
+//         .get_frame_info(iri)
+//         .and_then(|iri_info| iri_info.label())
+//         .unwrap_or(iri.clone())
+// }
+
+fn _log_to_client(client: &Client, msg: String) -> task::JoinHandle<()> {
+    let c = client.clone();
+    task::spawn(async move {
+        c.log_message(MessageType::INFO, msg).await;
+    })
 }
 
 fn deepest_named_node_at_pos(tree: &Tree, pos: Position) -> Node {
