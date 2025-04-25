@@ -81,15 +81,7 @@ Ontology: <http://foo.bar>
 #[test(tokio::test)]
 async fn test_language_server_did_change() {
     // Arrange
-    let (service, _) = LspService::new(|client| Backend::new(client, arrange_parser()));
-
-    let result = service
-        .inner()
-        .initialize(InitializeParams {
-            ..Default::default()
-        })
-        .await;
-    assert!(result.is_ok(), "initialize returned {:#?}", result);
+    let service = arrange_backend(None).await;
 
     let url = Url::parse("file:///tmp/foo.omn").expect("valid url");
     //                              ^^^ 2 for the scheme, 1 for the root
@@ -163,6 +155,8 @@ async fn test_language_server_did_change() {
     let doc_content = doc.rope.to_string();
 
     assert_eq!(doc_content, "ABCDEFGHI");
+    // TODO check the parsed tree
+    doc.tree.root_node();
 }
 
 #[test]
@@ -441,7 +435,7 @@ fn test_rope_chunk_callback() {
 
     let chunk = rope_provider.chunk_callback(5);
     assert_eq!(chunk.len(), 984 - 5);
-    assert!(chunk.starts_with("5678"));
+    assert!(chunk.starts_with(b"5678"));
 }
 
 #[test]

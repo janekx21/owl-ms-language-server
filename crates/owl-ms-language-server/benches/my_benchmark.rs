@@ -12,10 +12,9 @@ fn parse_helper(source_code: &String, parser: &mut Parser) {
     parser.parse(source_code, None).unwrap();
 }
 
-fn re_parse_helper(source_code: &Rope, parser: &mut Parser, old_tree: &Tree, range: &Range) {
+fn re_parse_helper(source_code: &Rope, parser: &mut Parser, old_tree: &Tree) {
     let rope_provider = RopeProvider::new(source_code);
     parser.reset();
-    parser.set_included_ranges(&[*range]).unwrap();
     parser
         .parse_with(
             &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
@@ -108,18 +107,9 @@ fn ontology_change_bench(c: &mut Criterion) {
 
                     rope.insert(0, "0123456789");
 
-                    let range = Range {
-                        start_byte: 0,
-                        end_byte: 10,
-                        start_point: Point { row: 0, column: 0 },
-                        end_point: Point { row: 0, column: 10 },
-                    };
-
-                    (rope, parser, old_tree, range)
+                    (rope, parser, old_tree)
                 },
-                |(source, parser, old_tree, range)| {
-                    re_parse_helper(source, parser, old_tree, range)
-                },
+                |(source, parser, old_tree)| re_parse_helper(source, parser, old_tree),
                 criterion::BatchSize::SmallInput,
             )
         });

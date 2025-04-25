@@ -1,5 +1,5 @@
 mod catalog;
-mod debugging;
+pub mod debugging;
 mod position;
 mod queries;
 mod range;
@@ -36,7 +36,7 @@ static FULL_REPLACE_THRESHOLD: usize = 10;
 
 // Model
 pub struct Backend {
-    client: Client,
+    pub client: Client,
     parser: Mutex<Parser>, // stateful because of resume behavior after fail, timeout or cancellation
     position_encoding: Mutex<PositionEncodingKind>,
     workspaces: Mutex<Vec<Workspace>>,
@@ -241,10 +241,11 @@ impl LanguageServer for Backend {
                 panic!("Whole file changes are not supported yet");
             }
 
-            // This is relative to the *old* document not the new one
+            // This range is relative to the *old* document not the new one
             let change_ranges = params
                 .content_changes
                 .iter()
+                .rev() // See https://github.com/helix-editor/helix/blob/0815b52e0959e21ec792ea41d508a050b552f850/helix-core/src/syntax.rs#L1293C1-L1297C26
                 .map(|change| {
                     if let Some(range) = change.range {
                         let old_range: Range = range.into();
@@ -291,34 +292,49 @@ impl LanguageServer for Backend {
 
                         document.version = params.text_document.version;
 
-                        (old_range, edit)
+                        let new_range = Range {
+                            start: edit.start_position.into(),
+                            end: edit.new_end_position.into(),
+                        };
+
+                        (old_range, edit, new_range)
                     } else {
                         unreachable!("Change should have range {:#?}", change);
                     }
                 })
-                .collect::<Vec<(Range, InputEdit)>>();
+                .collect::<Vec<(Range, InputEdit, Range)>>();
 
-            let mut parser_guard = self.parser.lock().await;
-            parser_guard.reset();
-            let parsing_ranges = change_ranges
-                .iter()
-                .map(|(_, edit)| tree_sitter::Range {
-                    start_byte: edit.start_byte,
-                    end_byte: edit.new_end_byte,
-                    start_point: edit.start_position,
-                    end_point: edit.new_end_position,
-                })
-                .collect_vec();
-            parser_guard.set_included_ranges(&parsing_ranges).unwrap();
+            debug!("Change ranges {:#?}", change_ranges);
+
+            // let parsing_ranges = change_ranges
+            //     .iter()
+            //     .map(|(_, edit, _)| tree_sitter::Range {
+            //         start_byte: edit.start_byte,
+            //         end_byte: edit.new_end_byte,
+            //         start_point: edit.start_position,
+            //         end_point: edit.new_end_position,
+            //     })
+            //     .collect_vec();
             let rope_provider = RopeProvider::new(&document.rope);
-            let tree = timeit("parsing", || {
-                parser_guard
-                    .parse_with(
-                        &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
-                        Some(&document.tree),
-                    )
-                    .expect("language to be set, no timeout to be used, no cancelation flag")
-            });
+
+            let tree = {
+                let mut parser_guard = self.parser.lock().await;
+                parser_guard.reset();
+                parser_guard.set_logger(Some(Box::new(|type_, str| match type_ {
+                    tree_sitter::LogType::Parse => debug!(target: "tree-sitter-parse", "{}", str),
+                    tree_sitter::LogType::Lex => debug!(target: "tree-sitter-lex", "{}", str),
+                })));
+                // parser_guard.set_included_ranges(&parsing_ranges).unwrap();
+                timeit("parsing", || {
+                    parser_guard
+                        .parse_with(
+                            &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+                            Some(&document.tree),
+                        )
+                        .expect("language to be set, no timeout to be used, no cancelation flag")
+                })
+            };
+            debug!("New tree {}", tree.root_node().to_sexp());
             document.tree = tree;
 
             // let use_full_replace = params.content_changes.len() > FULL_REPLACE_THRESHOLD;
@@ -334,31 +350,65 @@ impl LanguageServer for Backend {
             //     return;
             // }
 
-            for (range, _) in change_ranges.iter() {
-                let iri_info_map = timeit("gen_class_iri_label_map", || {
-                    document.gen_frame_infos(Some(range))
-                });
-
+            for (old_range, _, new_range) in change_ranges.iter() {
                 // TODO prune
                 // document
-                //     .iri_info_map
+                //     .frame_infos
                 //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
+
+                let iri_info_map = timeit("gen_class_iri_label_map", || {
+                    document.gen_frame_infos(Some(new_range))
+                });
 
                 document.frame_infos.extend(iri_info_map);
             }
 
-            for (range, _) in change_ranges.iter() {
+            //
+            // 1
+            // 2
+            // 3
+            // 4 Diagnostic A
+            // 5 Diagnostic A
+            // 6 Diagnostic A
+            // 7
+            // 8
+            //
+            // Should be converted to
+            //
+            //
+            // 1
+            // 2
+            // 3 Insert Edit
+            // 3+1
+            // 4+1 Diagnostic A
+            // 5+1 Diagnostic A
+            // 6+1 Diagnostic A
+            // 7+1
+            // 8+1
+            //
+
+            for (new_range, edit, old_range) in change_ranges.iter() {
+                // Move diagnostics
+                for diagnostic in &mut document.diagnostics {
+                    if (edit.old_end_position.into() < diagnostic.range.start) {
+                        // TODO move range
+                        diagnostic.range
+                    }
+                }
+            }
+
+            for (new_range, edit, old_range) in change_ranges.iter() {
                 // diagnostics
-                // TODO this does not work correctly
+                // TODO does this work correctly?
                 document
                     .diagnostics
-                    .retain(|d| !range_overlaps(&d.range.into(), range));
+                    .retain(|d| !range_overlaps(&d.range.into(), old_range));
 
                 let mut cursor = document.tree.walk();
 
-                while range_exclusive_inside(range, &cursor.node().range().into()) {
+                while range_exclusive_inside(new_range, &cursor.node().range().into()) {
                     if cursor
-                        .goto_first_child_for_point(range.start.into())
+                        .goto_first_child_for_point(new_range.start.into())
                         .is_none()
                     {
                         break;
@@ -373,7 +423,7 @@ impl LanguageServer for Backend {
                     gen_diagnostics(&node_that_has_change)
                 })
                 .into_iter()
-                .filter(|d| range_overlaps(&d.range.into(), range)); // should be exclusive to other diagnostics
+                .filter(|d| range_overlaps(&d.range.into(), new_range)); // should be exclusive to other diagnostics
 
                 document.diagnostics.extend(additional_diagnostics);
             }

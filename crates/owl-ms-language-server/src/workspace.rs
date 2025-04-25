@@ -188,6 +188,8 @@ impl Document {
 
                     let frame_type = FrameType::parse(parent_node.kind());
 
+                    debug!("Found frame {}", frame_iri);
+
                     if !infos.contains_key(&frame_iri) {
                         infos.insert(
                             frame_iri.clone(),
@@ -218,7 +220,7 @@ impl Document {
                     let iri = capture_texts.next().unwrap().to_string();
 
                     // TODO requst prefix url to cache the ontology there
-                    debug!("prefix named {} with iri {}", prefix_name, iri);
+                    debug!("Prefix named {} with iri {}", prefix_name, iri);
                 }
                 i => todo!("pattern index {} not implemented", i),
             }

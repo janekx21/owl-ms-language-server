@@ -20,14 +20,14 @@ impl<'a> RopeProvider<'a> {
         RopeProvider(value)
     }
 
-    pub fn chunk_callback(&self, byte_idx: usize) -> &str {
+    pub fn chunk_callback(&self, byte_idx: usize) -> &[u8] {
         // TODO Why is reparsing this not O(log n)?
         if byte_idx > self.0.len_bytes() {
-            return ""; // out of bounds
+            return b""; // out of bounds
         }
         let (chunk, chunk_byte_idx, _, _) = self.0.chunk_at_byte(byte_idx);
         let start = byte_idx - chunk_byte_idx;
-        &chunk[start..]
+        &chunk.as_bytes()[start..]
     }
 }
 
