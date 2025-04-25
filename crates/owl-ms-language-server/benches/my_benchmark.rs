@@ -1,8 +1,10 @@
+use std::time::Duration;
+
 // use crate::Backend;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use owl_ms_language_server::rope_provider::RopeProvider;
 use ropey::Rope;
-use tree_sitter::{Parser, Tree};
+use tree_sitter::{InputEdit, Parser, Point, Range, Tree};
 use tree_sitter_owl_ms::language;
 
 fn parse_helper(source_code: &String, parser: &mut Parser) {
@@ -10,8 +12,10 @@ fn parse_helper(source_code: &String, parser: &mut Parser) {
     parser.parse(source_code, None).unwrap();
 }
 
-fn re_parse_helper(source_code: &Rope, parser: &mut Parser, old_tree: &Tree) {
+fn re_parse_helper(source_code: &Rope, parser: &mut Parser, old_tree: &Tree, range: &Range) {
     let rope_provider = RopeProvider::new(source_code);
+    parser.reset();
+    parser.set_included_ranges(&[*range]).unwrap();
     parser
         .parse_with(
             &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
@@ -69,8 +73,11 @@ fn ontology_size_bench(c: &mut Criterion) {
 
 fn ontology_change_bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("ontology_change_bench");
-    for size in (1..10).map(|i| i * 1000) {
+    for size in (1..100).map(|i| i * 100) {
         group.throughput(Throughput::Elements(size as u64));
+        group.sample_size(1000);
+        group.warm_up_time(Duration::from_millis(100));
+        // group.measurement_time(Duration::from_millis(5000));
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
             b.iter_batched_ref(
                 || {
@@ -83,21 +90,36 @@ fn ontology_change_bench(c: &mut Criterion) {
 
                     let mut parser = Parser::new();
                     parser.set_language(language()).unwrap();
-                    let old_tree = parser.parse(source_code.clone(), None).unwrap();
+                    let mut rope = Rope::from_str(source_code.as_str());
+                    let rope_provider = RopeProvider::new(&rope);
+                    let mut old_tree = parser
+                        .parse_with(&mut |i, _| rope_provider.chunk_callback(i), None)
+                        .unwrap();
 
-                    // let edit = InputEdit {
-                    //     start_byte: 29usize,
-                    //     old_end_byte: 30usize,
-                    //     new_end_byte: 30usize,
-                    //     start_position: Point { row: 1, column: 0 },
-                    //     old_end_position: Point { row: 1, column: 1 },
-                    //     new_end_position: Point { row: 1, column: 1 },
-                    // };
-                    // old_tree.edit(&edit);
-                    let rope_provider = Rope::from_str(source_code.as_str());
-                    (rope_provider, parser, old_tree)
+                    let edit = InputEdit {
+                        start_byte: 0,
+                        old_end_byte: 0,
+                        new_end_byte: 10,
+                        start_position: Point { row: 0, column: 0 },
+                        old_end_position: Point { row: 0, column: 0 },
+                        new_end_position: Point { row: 10, column: 0 },
+                    };
+                    old_tree.edit(&edit);
+
+                    rope.insert(0, "0123456789");
+
+                    let range = Range {
+                        start_byte: 0,
+                        end_byte: 10,
+                        start_point: Point { row: 0, column: 0 },
+                        end_point: Point { row: 0, column: 10 },
+                    };
+
+                    (rope, parser, old_tree, range)
                 },
-                |(source, parser, old_tree)| re_parse_helper(source, parser, old_tree),
+                |(source, parser, old_tree, range)| {
+                    re_parse_helper(source, parser, old_tree, range)
+                },
                 criterion::BatchSize::SmallInput,
             )
         });

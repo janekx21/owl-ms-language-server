@@ -338,7 +338,7 @@ Class: class-in-first-file
         .document_map
         .iter()
         .exactly_one()
-        .unwrap_or_else(|_| panic!("Multiple documents"));
+        .unwrap_or_else(|_| self::panic!("Multiple documents"));
     assert_eq!(
         document.rope.to_string(),
         r#"Ontology: <http://a.b/multi-file>

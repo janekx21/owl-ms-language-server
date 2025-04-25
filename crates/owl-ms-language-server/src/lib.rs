@@ -8,6 +8,7 @@ pub mod rope_provider;
 mod tests;
 mod workspace;
 
+use core::panic;
 use debugging::timeit;
 use itertools::Itertools;
 use log::{debug, info};
@@ -231,24 +232,33 @@ impl LanguageServer for Backend {
                 return; // no change needed
             }
 
+            if params
+                .content_changes
+                .iter()
+                .any(|change| change.range.is_none())
+            {
+                // Change the whole file
+                panic!("Whole file changes are not supported yet");
+            }
+
             // This is relative to the *old* document not the new one
             let change_ranges = params
                 .content_changes
                 .iter()
                 .map(|change| {
                     if let Some(range) = change.range {
-                        let range: Range = range.into();
+                        let old_range: Range = range.into();
                         let start_char = document
                             .rope
-                            .try_line_to_char(range.start.line as usize)
+                            .try_line_to_char(old_range.start.line as usize)
                             .expect("line_idx out of bounds")
-                            + (range.start.character as usize);
+                            + (old_range.start.character as usize);
 
                         let old_end_char = document
                             .rope
-                            .try_line_to_char(range.end.line as usize)
+                            .try_line_to_char(old_range.end.line as usize)
                             .expect("line_idx out of bounds")
-                            + (range.end.character as usize); // exclusive
+                            + (old_range.end.character as usize); // exclusive
 
                         // must come before the rope is changed!
                         let old_end_byte = document.rope.char_to_byte(old_end_char);
@@ -270,8 +280,8 @@ impl LanguageServer for Backend {
                             start_byte,
                             old_end_byte,
                             new_end_byte: start_byte + change.text.len(),
-                            start_position: range.start.into(),
-                            old_end_position: range.end.into(),
+                            start_position: old_range.start.into(),
+                            old_end_position: old_range.end.into(),
                             new_end_position: Point {
                                 row: new_end_line,
                                 column: new_end_character,
@@ -280,46 +290,51 @@ impl LanguageServer for Backend {
                         timeit("tree edit", || document.tree.edit(&edit));
 
                         document.version = params.text_document.version;
-                        range
+
+                        (old_range, edit)
                     } else {
-                        document.tree.root_node().range().into()
+                        unreachable!("Change should have range {:#?}", change);
                     }
                 })
-                .collect::<Vec<Range>>();
+                .collect::<Vec<(Range, InputEdit)>>();
 
             let mut parser_guard = self.parser.lock().await;
             parser_guard.reset();
+            let parsing_ranges = change_ranges
+                .iter()
+                .map(|(_, edit)| tree_sitter::Range {
+                    start_byte: edit.start_byte,
+                    end_byte: edit.new_end_byte,
+                    start_point: edit.start_position,
+                    end_point: edit.new_end_position,
+                })
+                .collect_vec();
+            parser_guard.set_included_ranges(&parsing_ranges).unwrap();
             let rope_provider = RopeProvider::new(&document.rope);
             let tree = timeit("parsing", || {
                 parser_guard
                     .parse_with(
-                        &mut |byte_idx, _| {
-                            rope_provider.chunk_callback(byte_idx)
-                            // let (chunk, chunk_byte_idx, _, _) =
-                            //     document.rope.chunk_at_byte(byte_idx);
-                            // let start = byte_idx - chunk_byte_idx;
-                            // &chunk[start..]
-                        },
+                        &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
                         Some(&document.tree),
                     )
                     .expect("language to be set, no timeout to be used, no cancelation flag")
             });
             document.tree = tree;
 
-            let use_full_replace = params.content_changes.len() > FULL_REPLACE_THRESHOLD;
-            if use_full_replace {
-                document.frame_infos = document.gen_frame_infos(None);
+            // let use_full_replace = params.content_changes.len() > FULL_REPLACE_THRESHOLD;
+            // if use_full_replace {
+            //     document.frame_infos = document.gen_frame_infos(None);
 
-                let diagnostics = gen_diagnostics(&document.tree.root_node());
-                document.diagnostics = diagnostics.clone();
+            //     let diagnostics = gen_diagnostics(&document.tree.root_node());
+            //     document.diagnostics = diagnostics.clone();
 
-                self.client
-                    .publish_diagnostics(params.text_document.uri, diagnostics, None)
-                    .await;
-                return;
-            }
+            //     self.client
+            //         .publish_diagnostics(params.text_document.uri, diagnostics, None)
+            //         .await;
+            //     return;
+            // }
 
-            for range in change_ranges.iter() {
+            for (range, _) in change_ranges.iter() {
                 let iri_info_map = timeit("gen_class_iri_label_map", || {
                     document.gen_frame_infos(Some(range))
                 });
@@ -332,7 +347,7 @@ impl LanguageServer for Backend {
                 document.frame_infos.extend(iri_info_map);
             }
 
-            for range in change_ranges.iter() {
+            for (range, _) in change_ranges.iter() {
                 // diagnostics
                 // TODO this does not work correctly
                 document
