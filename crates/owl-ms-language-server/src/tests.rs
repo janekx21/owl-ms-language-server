@@ -1,4 +1,4 @@
-use pretty_assertions::{assert_eq, assert_ne};
+use pretty_assertions::assert_eq;
 use ropey::Rope;
 use tempdir::{self, TempDir};
 
@@ -415,7 +415,9 @@ async fn arrange_init_backend(
     service.inner().initialized(InitializedParams {}).await;
 }
 
-async fn arrange_backend(workspace_folder: Option<WorkspaceFolder>) -> LspService<Backend> {
+async fn arrange_backend(_workspace_folder: Option<WorkspaceFolder>) -> LspService<Backend> {
+    // TODO support workspace folder
+    let _ = _workspace_folder;
     let (service, _) = LspService::new(|client| Backend::new(client, arrange_parser()));
 
     arrange_init_backend(&service, None).await;

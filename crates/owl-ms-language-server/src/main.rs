@@ -1,7 +1,7 @@
 use std::{env, fs::File};
 
 use clap::Parser as ClapParser;
-use log::{error, LevelFilter};
+use log::{error, trace, LevelFilter};
 use owl_ms_language_server::{debugging::BackendLogger, Backend, LANGUAGE};
 use tower_lsp::{LspService, Server};
 use tree_sitter::Parser;
@@ -23,8 +23,16 @@ async fn main() {
     log_file_path.push("owl-ms-lanugage-server.log");
     let log_file_path = log_file_path.as_path();
 
+    std::panic::set_hook(Box::new(|info| {
+        error!("paniced with {}", info);
+    }));
+
     let mut parser = Parser::new();
     parser.set_language(*LANGUAGE).unwrap();
+    parser.set_logger(Some(Box::new(|type_, str| match type_ {
+        tree_sitter::LogType::Parse => trace!(target: "tree-sitter-parse", "{}", str),
+        tree_sitter::LogType::Lex => trace!(target: "tree-sitter-lex", "{}", str),
+    })));
 
     let (service, socket) = LspService::new(|client| Backend::new(client, parser));
 
@@ -35,10 +43,6 @@ async fn main() {
         },
         LevelFilter::Debug,
     );
-
-    std::panic::set_hook(Box::new(|info| {
-        error!("paniced with {}", info);
-    }));
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();

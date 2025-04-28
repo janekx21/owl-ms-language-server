@@ -15,7 +15,7 @@ use log::{debug, info};
 use once_cell::sync::Lazy;
 use position::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
-use range::{range_exclusive_inside, range_overlaps, Range};
+use range::Range;
 use rope_provider::RopeProvider;
 use std::collections::HashMap;
 use std::fs;
@@ -32,7 +32,6 @@ use workspace::{gen_diagnostics, node_text, Document, Workspace};
 // Constants
 
 pub static LANGUAGE: Lazy<Language> = Lazy::new(language);
-static FULL_REPLACE_THRESHOLD: usize = 10;
 
 // Model
 pub struct Backend {
@@ -306,25 +305,15 @@ impl LanguageServer for Backend {
 
             debug!("Change ranges {:#?}", change_ranges);
 
-            // let parsing_ranges = change_ranges
-            //     .iter()
-            //     .map(|(_, edit, _)| tree_sitter::Range {
-            //         start_byte: edit.start_byte,
-            //         end_byte: edit.new_end_byte,
-            //         start_point: edit.start_position,
-            //         end_point: edit.new_end_position,
-            //     })
-            //     .collect_vec();
             let rope_provider = RopeProvider::new(&document.rope);
 
             let tree = {
                 let mut parser_guard = self.parser.lock().await;
-                parser_guard.reset();
+                // parser_guard.reset();
                 parser_guard.set_logger(Some(Box::new(|type_, str| match type_ {
                     tree_sitter::LogType::Parse => debug!(target: "tree-sitter-parse", "{}", str),
                     tree_sitter::LogType::Lex => debug!(target: "tree-sitter-lex", "{}", str),
                 })));
-                // parser_guard.set_included_ranges(&parsing_ranges).unwrap();
                 timeit("parsing", || {
                     parser_guard
                         .parse_with(
@@ -337,21 +326,8 @@ impl LanguageServer for Backend {
             debug!("New tree {}", tree.root_node().to_sexp());
             document.tree = tree;
 
-            // let use_full_replace = params.content_changes.len() > FULL_REPLACE_THRESHOLD;
-            // if use_full_replace {
-            //     document.frame_infos = document.gen_frame_infos(None);
-
-            //     let diagnostics = gen_diagnostics(&document.tree.root_node());
-            //     document.diagnostics = diagnostics.clone();
-
-            //     self.client
-            //         .publish_diagnostics(params.text_document.uri, diagnostics, None)
-            //         .await;
-            //     return;
-            // }
-
-            for (old_range, _, new_range) in change_ranges.iter() {
-                // TODO prune
+            for (_, _, new_range) in change_ranges.iter() {
+                // TODO #30 prune
                 // document
                 //     .frame_infos
                 //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
@@ -363,76 +339,66 @@ impl LanguageServer for Backend {
                 document.frame_infos.extend(iri_info_map);
             }
 
-            //
-            // 1
-            // 2
-            // 3
-            // 4 Diagnostic A
-            // 5 Diagnostic A
-            // 6 Diagnostic A
-            // 7
-            // 8
-            //
-            // Should be converted to
-            //
-            //
-            // 1
-            // 2
-            // 3 Insert Edit
-            // 3+1
-            // 4+1 Diagnostic A
-            // 5+1 Diagnostic A
-            // 6+1 Diagnostic A
-            // 7+1
-            // 8+1
-            //
+            // TODO #30 prune
+            // Remove all old diagnostics with an overlapping range. They will need to be recreated
+            // for (_, _, old_range) in change_ranges.iter() {
+            //     document
+            //         .diagnostics
+            //         .retain(|d| !lines_overlap(&d.range.into(), old_range));
+            // }
+            // Move all other diagnostics
+            // for diagnostic in &mut document.diagnostics {
+            //     for (new_range, edit, old_range) in change_ranges.iter() {
+            //         let mut range_to_end = *old_range;
+            //         range_to_end.end = Position {
+            //             line: u32::MAX,
+            //             character: u32::MAX,
+            //         };
+            //         if lines_overlap(&diagnostic.range.into(), &range_to_end) {
+            //             debug!("old {} -> new {}", old_range, new_range);
+            //             let delta = new_range.end.line as i32 - old_range.end.line as i32;
+            //             diagnostic.range.start.line =
+            //                 (diagnostic.range.start.line as i32 + delta) as u32;
+            //             diagnostic.range.start.line =
+            //                 (diagnostic.range.end.line as i32 + delta) as u32;
+            //         }
+            //     }
+            // }
+            // for (_, _, _) in change_ranges.iter() {
+            //     let cursor = document.tree.walk();
+            //     // TODO #30
+            //     // while range_exclusive_inside(new_range, &cursor.node().range().into()) {
+            //     //     if cursor
+            //     //         .goto_first_child_for_point(new_range.start.into())
+            //     //         .is_none()
+            //     //     {
+            //     //         break;
+            //     //     }
+            //     // }
+            //     // cursor.goto_parent();
+            //     let node_that_has_change = cursor.node();
+            //     drop(cursor);
+            //     // while range_overlaps(&ts_range_to_lsp_range(cursor.node().range()), &range) {}
+            //     // document.diagnostics =
+            //     let additional_diagnostics = timeit("did_change > gen_diagnostics", || {
+            //         gen_diagnostics(&node_that_has_change)
+            //     })
+            //     .into_iter();
+            //     // .filter(|d| lines_overlap(&d.range.into(), new_range)); // should be exclusive to other diagnostics
+            //     document.diagnostics.extend(additional_diagnostics);
+            // }
 
-            for (new_range, edit, old_range) in change_ranges.iter() {
-                // Move diagnostics
-                for diagnostic in &mut document.diagnostics {
-                    if (edit.old_end_position.into() < diagnostic.range.start) {
-                        // TODO move range
-                        diagnostic.range
-                    }
-                }
-            }
-
-            for (new_range, edit, old_range) in change_ranges.iter() {
-                // diagnostics
-                // TODO does this work correctly?
-                document
-                    .diagnostics
-                    .retain(|d| !range_overlaps(&d.range.into(), old_range));
-
-                let mut cursor = document.tree.walk();
-
-                while range_exclusive_inside(new_range, &cursor.node().range().into()) {
-                    if cursor
-                        .goto_first_child_for_point(new_range.start.into())
-                        .is_none()
-                    {
-                        break;
-                    }
-                }
-                cursor.goto_parent();
-                let node_that_has_change = cursor.node();
-                drop(cursor);
-                // while range_overlaps(&ts_range_to_lsp_range(cursor.node().range()), &range) {}
-                // document.diagnostics =
-                let additional_diagnostics = timeit("did_change > gen_diagnostics", || {
-                    gen_diagnostics(&node_that_has_change)
-                })
-                .into_iter()
-                .filter(|d| range_overlaps(&d.range.into(), new_range)); // should be exclusive to other diagnostics
-
-                document.diagnostics.extend(additional_diagnostics);
-            }
+            // TODO #30 replace with above
+            document.diagnostics = timeit("did_change > gen_diagnostics", || {
+                gen_diagnostics(&document.tree.root_node())
+            });
 
             let uri = params.text_document.uri.clone();
-            let d = document.diagnostics.clone();
-            let c = self.client.clone();
+            let diagnostics = document.diagnostics.clone();
+            let client = self.client.clone();
+            let version = Some(document.version);
             task::spawn(async move {
-                c.publish_diagnostics(uri, d, None).await;
+                client.publish_diagnostics(uri, diagnostics, version).await;
             });
         };
     }
