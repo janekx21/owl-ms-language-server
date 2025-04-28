@@ -102,6 +102,7 @@ To integrate the language server into an editor not listed above use the documen
 ### Where can i find logs?
 Logs can be found under `<tempdir>/owl-ms-lanugage-server.log`. On Windows `<tempdir>` is most likely `C:\Users\<username>\AppData\Local\Temp`, on Linux `/tmp` and on MacOS `/private/var/tmp`.
 
+
 ## Roadmap
 
 - [x] Basic Grammar
@@ -112,6 +113,17 @@ Logs can be found under `<tempdir>/owl-ms-lanugage-server.log`. On Windows `<tem
 ## Contributing
 
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+
+## Development
+
+You cant checkout this repository and create a debug build using the following command.
+```
+cargo build
+```
+
+Configure your editor to use the created binary at `target/debug/owl-ms-language-server` or use the VS-Code run script.
+
+To use the local language server with VS-Code either install the binary using `cargo install --path crates/owl-ms-language-server` or set the environment variable `_OWL_MS_LSP_SERVER_DEBUG` to the location of your owl-ms-language-server binary. Then with VS-Code open the `editor/code` folder and run the project (press F5). A second VS-Code editor should open that has the plugin installed and that uses the local language server installation.
 
 ## License
 
