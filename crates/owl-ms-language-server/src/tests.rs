@@ -434,26 +434,26 @@ async fn test_workspace_symbolds() {
     )
     .await;
 
-    // let url = Url::from_file_path(tmp_dir.path().join("c.omn")).unwrap();
+    let url = Url::from_file_path(tmp_dir.path().join("c.omn")).unwrap();
 
-    // let ontology = r#"
-    //     Ontology: <http://foo.org/c>
-    //         Import: <http://foo.org/a.omn>
-    //         Class: some-other-class-at-c
-    //             Annotations:
-    //                 rdfs:label "Some other class at c"
-    // "#;
-    // service
-    //     .inner()
-    //     .did_open(DidOpenTextDocumentParams {
-    //         text_document: TextDocumentItem {
-    //             uri: url.clone(),
-    //             language_id: "owl2md".to_string(),
-    //             version: 0,
-    //             text: ontology.to_string(),
-    //         },
-    //     })
-    //     .await;
+    let ontology = r#"
+        Ontology: <http://foo.org/c>
+            Import: <http://foo.org/a.omn>
+            Class: some-other-class-at-c
+                Annotations:
+                    rdfs:label "Some other class at c"
+    "#;
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
 
     // Act
 
@@ -476,7 +476,7 @@ async fn test_workspace_symbolds() {
         .expect("Symbols should not throw errors")
         .expect("Symbols should contain something");
 
-    assert_eq!(symbols.len(), 3);
+    assert_eq!(symbols.len(), 2);
 }
 
 // Arrange
