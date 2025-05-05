@@ -129,11 +129,11 @@ async fn test_language_server_did_change() {
                         Range {
                             start: (Position {
                                 line: 0,
-                                character: 6,
+                                character: 3,
                             }),
                             end: Position {
                                 line: 0,
-                                character: 6,
+                                character: 3,
                             },
                         }
                         .into(),
