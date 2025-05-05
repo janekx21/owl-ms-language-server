@@ -309,7 +309,6 @@ impl LanguageServer for Backend {
 
             let tree = {
                 let mut parser_guard = self.parser.lock().await;
-                // parser_guard.reset();
                 parser_guard.set_logger(Some(Box::new(|type_, str| match type_ {
                     tree_sitter::LogType::Parse => debug!(target: "tree-sitter-parse", "{}", str),
                     tree_sitter::LogType::Lex => debug!(target: "tree-sitter-lex", "{}", str),
@@ -327,7 +326,7 @@ impl LanguageServer for Backend {
             document.tree = tree;
 
             for (_, _, new_range) in change_ranges.iter() {
-                // TODO #30 prune
+                // TODO #32 prune
                 // document
                 //     .frame_infos
                 //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
