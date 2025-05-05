@@ -384,6 +384,101 @@ Class: class-in-first-file
     // TODO #32 assert_eq!(frame.annotations.get("rdfs:label"), None);
 }
 
+#[test(tokio::test)]
+async fn test_workspace_symbolds() {
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![
+            WorkspaceMember::CatalogFile(Catalog {
+                uri: vec![CatalogUri {
+                    _id: "Testing".into(),
+                    name: "http://foo.org/a.omn".into(),
+                    uri: "a.omn".to_string(),
+                }],
+                locaton: dir.join("catalog.xml").to_str().unwrap().to_string(),
+            }),
+            WorkspaceMember::OmnFile {
+                name: "a.omn".into(),
+                content: r#"
+                Ontology: <http://foo.org/a>
+                    Class: some-class
+                        Annotations:
+                            rdfs:label "Some class"
+                "#
+                .into(),
+            },
+            WorkspaceMember::OmnFile {
+                name: "b.omn".into(),
+                content: r#"
+                Ontology: <http://foo.org/b>
+                    Import: <http://foo.org/a.omn>
+                    Class: some-other-class
+                        Annotations:
+                            rdfs:label "Some other class"
+                "#
+                .into(),
+            },
+        ]
+    });
+
+    let parser = arrange_parser();
+    let (service, _) = LspService::new(|client| Backend::new(client, parser));
+
+    arrange_init_backend(
+        &service,
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "foo".into(),
+        }),
+    )
+    .await;
+
+    // let url = Url::from_file_path(tmp_dir.path().join("c.omn")).unwrap();
+
+    // let ontology = r#"
+    //     Ontology: <http://foo.org/c>
+    //         Import: <http://foo.org/a.omn>
+    //         Class: some-other-class-at-c
+    //             Annotations:
+    //                 rdfs:label "Some other class at c"
+    // "#;
+    // service
+    //     .inner()
+    //     .did_open(DidOpenTextDocumentParams {
+    //         text_document: TextDocumentItem {
+    //             uri: url.clone(),
+    //             language_id: "owl2md".to_string(),
+    //             version: 0,
+    //             text: ontology.to_string(),
+    //         },
+    //     })
+    //     .await;
+
+    // Act
+
+    let result = service
+        .inner()
+        .symbol(WorkspaceSymbolParams {
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            query: "some".to_string(),
+        })
+        .await;
+
+    // Assert
+
+    let symbols = result
+        .expect("Symbols should not throw errors")
+        .expect("Symbols should contain something");
+
+    assert_eq!(symbols.len(), 3);
+}
+
 // Arrange
 
 #[derive(Debug, Clone)]
