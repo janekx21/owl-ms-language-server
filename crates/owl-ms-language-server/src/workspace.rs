@@ -248,13 +248,18 @@ impl Document {
                         infos.insert(
                             frame_iri.clone(),
                             FrameInfo {
+                                iri: frame_iri.clone(),
                                 annotations: HashMap::new(),
                                 frame_type,
-                                definitions: vec![(
-                                    self.uri.clone(),
+                                definitions: vec![Location {
+                                    uri: self.uri.clone(),
                                     // This node should be the total frame
-                                    parent_node.parent().unwrap_or(parent_node).range().into(),
-                                )],
+                                    range: parent_node
+                                        .parent()
+                                        .unwrap_or(parent_node)
+                                        .range()
+                                        .into(),
+                                }],
                             },
                         );
                     }
@@ -423,9 +428,34 @@ impl UnwrappedNode {
 /// Then the [`FrameInfo`] contains the label "Pizza" and the frame type "Class".
 #[derive(Clone, Debug)]
 pub struct FrameInfo {
+    pub iri: Iri,
     pub annotations: HashMap<Iri, Vec<String>>,
     pub frame_type: FrameType,
-    pub definitions: Vec<(Url, Range)>,
+    pub definitions: Vec<Location>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Location {
+    uri: Url,
+    range: Range,
+}
+
+impl Into<tower_lsp::lsp_types::Location> for Location {
+    fn into(self) -> tower_lsp::lsp_types::Location {
+        tower_lsp::lsp_types::Location {
+            uri: self.uri,
+            range: self.range.into(),
+        }
+    }
+}
+
+impl From<tower_lsp::lsp_types::Location> for Location {
+    fn from(value: tower_lsp::lsp_types::Location) -> Self {
+        Location {
+            uri: value.uri,
+            range: value.range.into(),
+        }
+    }
 }
 
 impl FrameInfo {
@@ -445,7 +475,8 @@ impl FrameInfo {
             .cloned()
             .collect_vec();
         FrameInfo {
-            frame_type: if a.frame_type != b.frame_type {
+            iri: a.iri,
+            frame_type: if a.frame_type == b.frame_type {
                 a.frame_type
             } else {
                 FrameType::Invalid

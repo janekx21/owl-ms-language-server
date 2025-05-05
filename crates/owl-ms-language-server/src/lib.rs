@@ -139,6 +139,12 @@ impl LanguageServer for Backend {
                         },
                     ),
                 ),
+                workspace_symbol_provider: Some(OneOf::Right(WorkspaceSymbolOptions {
+                    work_done_progress_options: WorkDoneProgressOptions {
+                        work_done_progress: Some(false),
+                    },
+                    resolve_provider: Some(false),
+                })),
                 ..Default::default()
             },
         })
@@ -537,10 +543,7 @@ impl LanguageServer for Backend {
                     let locations = frame_info
                         .definitions
                         .iter()
-                        .map(|(uri, range)| Location {
-                            uri: uri.clone(),
-                            range: (*range).into(),
-                        })
+                        .map(|l| l.clone().into())
                         .collect_vec();
 
                     return Ok(Some(GotoDefinitionResponse::Array(locations)));
@@ -709,6 +712,45 @@ impl LanguageServer for Backend {
             })));
         }
         Ok(None)
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        let query = params.query;
+        info!("symbol with query:{query}");
+        let workspaces = self.workspaces.lock().await;
+        let c = workspaces
+            .iter()
+            .flat_map(|w| {
+                w.document_map.iter()
+                // .map(|d| d.value().clone())
+                // .flat_map(|d| d.frame_infos.iter().map(|i| i.value())) //.iter().map(|i| i.value()))
+            })
+            .collect_vec();
+        let d = c.iter().flat_map(|a| a.frame_infos.iter()).collect_vec();
+
+        info!(
+            "All frame infos: {:#?}",
+            d.iter().map(|v| v.value()).collect_vec()
+        );
+
+        let symbols = d
+            .iter()
+            .filter(|i| i.iri.contains(query.as_str()))
+            .map(|fi| SymbolInformation {
+                name: fi.iri.clone(),
+                kind: SymbolKind::CLASS,
+                tags: None,
+                deprecated: None,
+                location: fi.definitions.first().unwrap().clone().into(),
+                container_name: None,
+            })
+            .collect_vec();
+
+        // .flat_map(|d| d.value().frame_infos.iter());
+        Ok(Some(symbols))
     }
 
     async fn shutdown(&self) -> Result<()> {
