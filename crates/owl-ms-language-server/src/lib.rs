@@ -331,11 +331,11 @@ impl LanguageServer for Backend {
                 //     .frame_infos
                 //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
 
-                let iri_info_map = timeit("gen_class_iri_label_map", || {
+                let frame_infos = timeit("gen_class_iri_label_map", || {
                     document.gen_frame_infos(Some(new_range))
                 });
 
-                document.frame_infos.extend(iri_info_map);
+                document.frame_infos.extend(frame_infos);
             }
 
             // TODO #30 prune
@@ -739,13 +739,15 @@ impl LanguageServer for Backend {
         let symbols = d
             .iter()
             .filter(|i| i.iri.contains(query.as_str()))
-            .map(|fi| SymbolInformation {
-                name: fi.iri.clone(),
-                kind: SymbolKind::CLASS,
-                tags: None,
-                deprecated: None,
-                location: fi.definitions.first().unwrap().clone().into(),
-                container_name: None,
+            .flat_map(|fi| {
+                fi.definitions.iter().map(|definition| SymbolInformation {
+                    name: fi.iri.clone(),
+                    kind: fi.frame_type.into(),
+                    tags: None,
+                    deprecated: None,
+                    location: definition.clone().into(),
+                    container_name: None,
+                })
             })
             .collect_vec();
 

@@ -396,6 +396,7 @@ async fn test_workspace_symbolds() {
                     name: "http://foo.org/a.omn".into(),
                     uri: "a.omn".to_string(),
                 }],
+                group: vec![],
                 locaton: dir.join("catalog.xml").to_str().unwrap().to_string(),
             }),
             WorkspaceMember::OmnFile {

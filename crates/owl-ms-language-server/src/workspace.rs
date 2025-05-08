@@ -9,7 +9,7 @@ use dashmap::DashMap;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use ropey::Rope;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Url, WorkspaceFolder};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, SymbolKind, Url, WorkspaceFolder};
 use tree_sitter::{Node, Parser, Query, QueryCursor, Tree};
 
 use crate::{
@@ -203,34 +203,22 @@ impl Document {
         let tree = &self.tree;
         let rope = &self.rope;
 
-        // TODO check frame [(datatype_frame) (class_frame) (object_property_frame) (data_property_frame) (annotation_property_frame) (individual_frame)]
-        // the typed literal is for the string type
-        let frame_source = "
-        (_
-            . (_ [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri)
-            (annotation
-                (annotation_property_iri)@iri
-                [
-                    (string_literal_no_language)
-                    (string_literal_with_language)
-                    (typed_literal)
-                ]@literal))
-        
-        (prefix_declaration (prefix_name)@prefix_name (full_iri)@iri)
-        ";
-
-        let frame_query = Query::new(*LANGUAGE, frame_source).expect("valid query expect");
         let mut query_cursor = QueryCursor::new();
 
-        if let Some(range) = range {
-            query_cursor.set_point_range((*range).into());
-        }
+        // if let Some(range) = range {
+        //     query_cursor.set_point_range((*range).into());
+        // }
 
-        let matches = query_cursor.matches(&frame_query, tree.root_node(), RopeProvider::new(rope));
+        let matches = query_cursor.matches(
+            &ALL_QUERIES.frame_info_query,
+            tree.root_node(),
+            RopeProvider::new(rope),
+        );
 
         let infos = DashMap::<Iri, FrameInfo>::new();
 
         for m in matches {
+            info!("Found match {:#?}", m);
             match m.pattern_index {
                 0 => {
                     let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
@@ -280,6 +268,32 @@ impl Document {
 
                     // TODO requst prefix url to cache the ontology there
                     debug!("Prefix named {} with iri {}", prefix_name, iri);
+                }
+                2 => {
+                    let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
+                    let frame_iri = capture_texts.next().unwrap().to_string();
+
+                    let specific_iri_node = m.captures[0].node.parent().unwrap();
+
+                    let frame_type = FrameType::parse(specific_iri_node.kind());
+
+                    let frame_node = m.captures[1].node;
+
+                    debug!("Found frame {}", frame_iri);
+                    if !infos.contains_key(&frame_iri) {
+                        infos.insert(
+                            frame_iri.clone(),
+                            FrameInfo {
+                                iri: frame_iri.clone(),
+                                annotations: HashMap::new(),
+                                frame_type,
+                                definitions: vec![Location {
+                                    uri: self.uri.clone(),
+                                    range: frame_node.range().into(),
+                                }],
+                            },
+                        );
+                    }
                 }
                 i => todo!("pattern index {} not implemented", i),
             }
@@ -661,6 +675,21 @@ impl FrameType {
                 error!("Implement {kind}");
                 FrameType::Invalid
             }
+        }
+    }
+}
+
+impl From<FrameType> for tower_lsp::lsp_types::SymbolKind {
+    fn from(val: FrameType) -> Self {
+        match val {
+            FrameType::Class => SymbolKind::CLASS,
+            FrameType::DataType => SymbolKind::STRUCT,
+            FrameType::ObjectProperty => SymbolKind::PROPERTY,
+            FrameType::DataProperty => SymbolKind::PROPERTY,
+            FrameType::AnnotationProperty => SymbolKind::PROPERTY,
+            FrameType::Individual => SymbolKind::OBJECT,
+            FrameType::Ontology => SymbolKind::MODULE,
+            FrameType::Invalid => SymbolKind::NULL,
         }
     }
 }
