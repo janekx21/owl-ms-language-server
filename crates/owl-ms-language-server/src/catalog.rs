@@ -1,4 +1,4 @@
-use std::fs::read_to_string;
+use std::{fs::read_to_string, path::Path};
 
 use itertools::Itertools;
 use log::info;
@@ -13,18 +13,24 @@ pub struct Catalog {
     pub uri: Vec<CatalogUri>,
 
     #[serde(skip)]
+    /// Warning! This is the path to the catalog file NOT its parent folder.
     pub locaton: String,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct CatalogUri {
+    /// Non unique name of item
     #[serde(rename = "@id")]
-    pub _id: String, // Non unique name of item
+    pub _id: String,
+
+    /// Full URL of the ontology. This will be used in OMN import statements
     #[serde(rename = "@name")]
-    pub name: String, // Full URL of the ontology. This will be used in OMN import statements
+    pub name: String,
+
+    /// Relative file path of the backing ontology file
     #[serde(rename = "@uri")]
-    pub uri: String, // Relative file path of the backing ontology file
+    pub uri: String,
 }
 
 impl Catalog {
@@ -45,5 +51,9 @@ impl Catalog {
                 catalog
             })
             .collect_vec()
+    }
+
+    pub fn parent_folder(&self) -> &Path {
+        Path::new(self.locaton.as_str()).parent().unwrap()
     }
 }

@@ -11,7 +11,7 @@ mod workspace;
 use core::panic;
 use debugging::timeit;
 use itertools::Itertools;
-use log::{debug, info};
+use log::{debug, info, warn};
 use once_cell::sync::Lazy;
 use position::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
@@ -19,6 +19,7 @@ use range::Range;
 use rope_provider::RopeProvider;
 use std::collections::HashMap;
 use std::fs;
+use std::ops::DerefMut;
 use std::path::Path;
 use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
 use tokio::task::{self};
@@ -309,10 +310,6 @@ impl LanguageServer for Backend {
 
             let tree = {
                 let mut parser_guard = self.parser.lock().await;
-                parser_guard.set_logger(Some(Box::new(|type_, str| match type_ {
-                    tree_sitter::LogType::Parse => debug!(target: "tree-sitter-parse", "{}", str),
-                    tree_sitter::LogType::Lex => debug!(target: "tree-sitter-lex", "{}", str),
-                })));
                 timeit("parsing", || {
                     parser_guard
                         .parse_with(
@@ -426,8 +423,6 @@ impl LanguageServer for Backend {
             params.text_document_position_params.position, &url
         );
 
-        self.client.log_message(MessageType::INFO, "hover").await;
-
         let workspace = self.find_workspace(&url).await;
 
         Ok(workspace.document_map.get(&url).map(|document| {
@@ -443,49 +438,78 @@ impl LanguageServer for Backend {
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
-        debug!("inlay_hint at {}", params.text_document.uri);
-
         let url = params.text_document.uri;
+        let range = params.range.into();
+
+        let mut parser = self.parser.lock().await;
+
+        debug!(
+            "inlay_hint at {}:{range}",
+            url.path_segments().unwrap().last().unwrap()
+        );
+
         let workspace = self.find_workspace(&url).await;
+        let document = if let Some(doc) = workspace.document_map.get(&url) {
+            doc
+        } else {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "Document with that URL not found",
+            ));
+        };
 
-        Ok(workspace.document_map.get(&url).map(|document| {
-            let full_iri_query =
-                Query::new(*LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri").unwrap();
+        let annotations =
+            document.query_with_imports(&ALL_QUERIES.annotation_query, &workspace, &mut parser);
 
-            let range: Range = params.range.into();
+        let matches = document.query_range(&ALL_QUERIES.iri_query, range);
+        let hints = matches
+            .into_iter()
+            .flat_map(|match_| match_.captures)
+            .filter_map(|capture| {
+                let iri = capture.node.text;
 
-            let mut query_cursor = QueryCursor::new();
-            query_cursor.set_point_range(range.into());
-            query_cursor
-                .matches(
-                    &full_iri_query,
-                    document.tree.root_node(),
-                    RopeProvider::new(&document.rope),
-                )
-                .map(|match_| match_.captures[0])
-                .filter_map(|capture| {
-                    let iri = &node_text(&capture.node, &document.rope).to_string();
-                    workspace.get_frame_info(iri).map(|info| {
-                        let node = capture.node;
-                        // inlay hints are at the end of the iri
-                        let end: Position = node.end_position().into();
-
-                        // TODO write a tooltip
-                        let label = info.label();
-                        InlayHint {
-                            position: end.into(),
-                            label: InlayHintLabel::String(label),
-                            kind: None,
-                            text_edits: None,
-                            tooltip: None,
-                            padding_left: Some(true),
-                            padding_right: None,
-                            data: None,
+                let label = annotations
+                    .iter()
+                    .filter_map(|m| match &m.captures[..] {
+                        [frame_iri, annoation_iri, literal] => {
+                            if frame_iri.node.text == iri && annoation_iri.node.text == "rdfs:label"
+                            {
+                                Some(literal.node.text.clone())
+                            } else {
+                                None
+                            }
                         }
+                        _ => unreachable!(),
                     })
-                })
-                .collect::<Vec<InlayHint>>()
-        }))
+                    .join(", ");
+
+                if label.is_empty() {
+                    None
+                } else {
+                    Some(InlayHint {
+                        position: capture.node.range.end.into(),
+                        label: InlayHintLabel::String(label),
+                        kind: None,
+                        text_edits: None,
+                        tooltip: None,
+                        padding_left: Some(true),
+                        padding_right: None,
+                        data: None,
+                    })
+                }
+
+                // workspace.get_frame_info(&iri).map(|fi| InlayHint {
+                //     position: capture.node.range.end.into(),
+                //     label: InlayHintLabel::String(fi.label()),
+                //     kind: None,
+                //     text_edits: None,
+                //     tooltip: None,
+                //     padding_left: Some(true),
+                //     padding_right: None,
+                //     data: None,
+                // })
+            })
+            .collect_vec();
+        Ok(Some(hints))
     }
 
     async fn goto_definition(
@@ -705,9 +729,32 @@ impl Backend {
     }
 
     async fn find_workspace<'a>(&'a self, url: &Url) -> MappedMutexGuard<'a, Workspace> {
-        let mut guard = self.workspaces.lock().await;
-        let found = guard.iter().any(|w| w.could_contain(url));
-        if !found {
+        let mut workspaces = self.workspaces.lock().await;
+
+        let maybe_workspace = workspaces.iter().find(|workspace| {
+            workspace.document_map.contains_key(url)
+                || workspace.catalogs.iter().any(|catalog| {
+                    catalog.uri.iter().any(|uri| {
+                        let catalog_item_path = Path::new(catalog.locaton.as_str())
+                            .parent()
+                            .unwrap()
+                            .join(&uri.uri);
+
+                        let url_path = url.to_file_path().unwrap();
+
+                        info!(
+                            "Comparing {} with {}",
+                            catalog_item_path.display(),
+                            url_path.display()
+                        );
+
+                        catalog_item_path == url_path
+                    })
+                })
+        });
+
+        if maybe_workspace.is_none() {
+            info!("Workspace for {url} could not be found. Creating a new one.");
             // Create a workspace that is a single file
             let mut file_path = url.to_file_path().expect("URL should be a filepath");
             file_path.pop();
@@ -715,9 +762,10 @@ impl Backend {
                 uri: Url::from_file_path(file_path.clone()).expect("Valid URL from filepath"), // TODO do i need the parent folder fot that?
                 name: "Single File".into(),
             });
-            guard.push(workspace);
+            workspaces.push(workspace);
         }
-        MutexGuard::map(guard, |f| {
+
+        MutexGuard::map(workspaces, |f| {
             f.iter_mut()
                 .find(|w| w.could_contain(url))
                 .expect("The file to be located in a workspace, but it was not.")
@@ -733,66 +781,70 @@ impl Backend {
         let urls = document
             .query(&ALL_QUERIES.import_query)
             .iter()
-            .flat_map(|match_| &match_.captures)
-            .map(|capture| node_text(&capture.node, &document.rope).to_string())
-            .filter_map(|iri_text| {
-                Url::parse(iri_text.trim_end_matches(">").trim_start_matches("<")).ok()
+            .filter_map(|match_| match &match_.captures[..] {
+                [iri] => {
+                    Url::parse(iri.node.text.trim_end_matches(">").trim_start_matches("<")).ok()
+                }
+                _ => unimplemented!(),
             })
             .collect_vec();
 
         for url in urls {
-            // TODO #8 filepath
-            if workspace.document_map.contains_key(&url) {
-                debug!("This document is already in the backend. URL: {}", url);
-            } else {
-                debug!("Try to resolve URL {}", url);
-                // Find uri in catalog
-                debug!("{:?}", workspace.catalogs);
-                for c in &workspace.catalogs {
-                    for u in &c.uri {
-                        debug!("url {}  u.name {}", url, u.name);
-                        if u.name == url.to_string() {
-                            // This is an import of a local file!
-                            let path = Path::new(&c.locaton).parent().unwrap().join(&u.uri);
-                            debug!(
-                                "Found matching local file {:?} loading from path {}",
-                                u,
-                                path.display()
-                            );
-                            let ontology_text = fs::read_to_string(&path).unwrap();
-                            let document = Document::new(
-                                Url::from_file_path(path).unwrap(),
-                                -1,
-                                ontology_text,
-                                parser,
-                            );
-                            workspace.insert_document(document);
-                        }
-                    }
-                }
+            info!("Resolving url {url}");
+            workspace.resolve_url_to_document(&url, parser);
 
-                // debug!("Resolving import of {}", url.clone());
-                // TODO #10
-                // let ontology_text = ureq::get(url.to_string())
-                //     .call()
-                //     .unwrap()
-                //     .body_mut()
-                //     .read_to_string()
-                //     .unwrap();
+            //     // TODO #8 filepath
+            //     if workspace.document_map.contains_key(&url) {
+            //         debug!("This document is already in the backend. URL: {}", url);
+            //     } else {
+            //         debug!("Try to resolve URL {}", url);
+            //         // Find uri in catalog
+            //         debug!("{:?}", workspace.catalogs);
+            //         for c in &workspace.catalogs {
+            //             for u in &c.uri {
+            //                 debug!("url {}  u.name {}", url, u.name);
+            //                 if u.name == url.to_string() {
+            //                     // This is an import of a local file!
+            //                     let path = Path::new(&c.locaton).parent().unwrap().join(&u.uri);
+            //                     debug!(
+            //                         "Found matching local file {:?} loading from path {}",
+            //                         u,
+            //                         path.display()
+            //                     );
+            //                     let ontology_text = fs::read_to_string(&path).unwrap();
+            //                     let document = Document::new(
+            //                         Url::from_file_path(path).unwrap(),
+            //                         -1,
+            //                         ontology_text,
+            //                         parser,
+            //                     );
+            //                     workspace.insert_document(document);
+            //                 }
+            //             }
+            //         }
 
-                // debug!(
-                //     "Inserted imported document URL: {}, number of iris: {}, number of diagnostics: {}",
-                //     url,
-                //     document.iri_info_map.iter().count(),
-                //     document.diagnostics.len()
-                // );
-                // }
-                // } else {
-                // warn!("The imported URL type is not supported. URL: {}", url);
-                // }
+            //         // debug!("Resolving import of {}", url.clone());
+            //         // TODO #10
+            //         // let ontology_text = ureq::get(url.to_string())
+            //         //     .call()
+            //         //     .unwrap()
+            //         //     .body_mut()
+            //         //     .read_to_string()
+            //         //     .unwrap();
 
-                // debug!("Resolved import {} to\n{}", url, resolved_import);
-            }
+            //         // debug!(
+            //         //     "Inserted imported document URL: {}, number of iris: {}, number of diagnostics: {}",
+            //         //     url,
+            //         //     document.iri_info_map.iter().count(),
+            //         //     document.diagnostics.len()
+            //         // );
+            //         // }
+            //         // } else {
+            //         // warn!("The imported URL type is not supported. URL: {}", url);
+            //         // }
+
+            //         // debug!("Resolved import {} to\n{}", url, resolved_import);
+            //     }
         }
     }
 }

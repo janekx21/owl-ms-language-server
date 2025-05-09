@@ -197,14 +197,20 @@ async fn test_import_resolve() {
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|dir| {
-        let file_path = dir.join("foobaronto.omn");
         vec![
             WorkspaceMember::CatalogFile(Catalog {
-                uri: vec![CatalogUri {
-                    _id: "Testing".into(),
-                    name: "http://external.org/shared.omn".into(),
-                    uri: file_path.file_name().unwrap().to_str().unwrap().to_string(),
-                }],
+                uri: vec![
+                    CatalogUri {
+                        _id: "Testing".to_string(),
+                        name: "http://external.org/shared.omn".to_string(),
+                        uri: "foobaronto.omn".to_string(),
+                    },
+                    CatalogUri {
+                        _id: "Testing".to_string(),
+                        name: "http://foobar.org/ontology/".to_string(),
+                        uri: "foo.omn".to_string(),
+                    },
+                ],
                 locaton: dir.join("catalog.xml").to_str().unwrap().to_string(),
             }),
             WorkspaceMember::OmnFile {
@@ -226,8 +232,7 @@ async fn test_import_resolve() {
     )
     .await;
 
-    let url = Url::from_file_path(tmp_dir.path().join("foo.omn")).expect("valid url");
-
+    let file_url = Url::from_file_path(tmp_dir.path().join("foo.omn")).expect("valid url");
     let ontology = r#"
         Ontology: <http://foobar.org/ontology/> <http://foobar.org/ontology.omn>
         Import: <http://external.org/shared.omn>
@@ -238,7 +243,7 @@ async fn test_import_resolve() {
         .inner()
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
-                uri: url.clone(),
+                uri: file_url.clone(),
                 language_id: "owl2md".to_string(),
                 version: 0,
                 text: ontology.to_string(),

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, fs, iter::once, path::Path};
 
 use dashmap::DashMap;
 use itertools::Itertools;
@@ -8,8 +8,8 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Url, WorkspaceFolder}
 use tree_sitter::{Node, Parser, Query, QueryCursor, Tree};
 
 use crate::{
-    catalog::Catalog, debugging::timeit, range::Range, rope_provider::RopeProvider, LANGUAGE,
-    NODE_TYPES,
+    catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
+    rope_provider::RopeProvider, LANGUAGE, NODE_TYPES,
 };
 
 #[derive(Debug)]
@@ -103,6 +103,50 @@ impl Workspace {
             _ => format!("generic node named {}", node.kind()),
         }
     }
+
+    pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
+        self.document_map
+            .iter()
+            .flat_map(|doc| doc.query(query))
+            .collect_vec()
+    }
+
+    pub fn resolve_url_to_document(
+        &self,
+        url: &Url,
+        parser: &mut Parser,
+    ) -> Option<dashmap::mapref::one::Ref<'_, Url, Document>> {
+        for catalog in &self.catalogs {
+            for catalog_uri in &catalog.uri {
+                if catalog_uri.name == url.to_string() {
+                    // Found a valid import
+
+                    return if let Some(doc) = self.document_map.get(url) {
+                        // Load from document_map
+                        Some(doc)
+                    } else {
+                        // Load doc from disk
+                        let path = catalog.parent_folder().join(&catalog_uri.uri);
+                        if let Ok(ontology_text) = fs::read_to_string(&path) {
+                            let document = Document::new(
+                                Url::from_file_path(&path).unwrap(),
+                                -1,
+                                ontology_text,
+                                parser,
+                            );
+                            info!("Loaded file from disk at {}", path.display());
+                            Some(self.insert_document(document))
+                        } else {
+                            error!("File could not be loaded at {}", path.display());
+                            None
+                        }
+                    };
+                }
+            }
+        }
+        error!("The document at {url} could not be found in the workspace");
+        None
+    }
 }
 
 #[derive(Debug)]
@@ -117,8 +161,6 @@ pub struct Document {
 
 impl Document {
     pub fn new(uri: Url, version: i32, text: String, parser: &mut Parser) -> Document {
-        parser.reset();
-
         let tree = timeit("create_document / parse", || {
             parser
                 .parse(&text, None)
@@ -228,19 +270,60 @@ impl Document {
         infos
     }
 
-    pub fn query<'a>(&'a self, query: &'a Query) -> Vec<UnwrappedQueryMatch<'a>> {
+    pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
+        self.query_helper(query, None)
+    }
+
+    pub fn query_range(&self, query: &Query, range: Range) -> Vec<UnwrappedQueryMatch> {
+        self.query_helper(query, Some(range))
+    }
+
+    pub fn query_with_imports(
+        &self,
+        query: &Query,
+        workspace: &Workspace,
+        parser: &mut Parser,
+    ) -> Vec<UnwrappedQueryMatch> {
+        // Resolve the documents that are imported here (not recursive yet)
+        let docs = self
+            .query_helper(&ALL_QUERIES.import_query, None)
+            .iter()
+            .filter_map(|m| match &m.captures[..] {
+                [iri] => Url::parse(iri.node.text.trim_end_matches(">").trim_start_matches("<"))
+                    .ok()
+                    .and_then(|url| workspace.resolve_url_to_document(&url, parser)),
+                _ => unimplemented!(),
+            })
+            .collect_vec();
+
+        docs.iter()
+            .flat_map(|doc| doc.query(query))
+            .chain(self.query(query))
+            .collect_vec()
+    }
+
+    pub fn query_helper(&self, query: &Query, range: Option<Range>) -> Vec<UnwrappedQueryMatch> {
         let mut query_cursor = QueryCursor::new();
-        let rope_provider: RopeProvider<'a> = RopeProvider::new(&self.rope);
+        if let Some(range) = range {
+            query_cursor.set_point_range(range.into());
+        }
+        let rope_provider = RopeProvider::new(&self.rope);
+
         query_cursor
             .matches(query, self.tree.root_node(), rope_provider)
-            .map(|m| UnwrappedQueryMatch::<'a> {
+            .map(|m| UnwrappedQueryMatch {
                 _pattern_index: m.pattern_index,
                 _id: m.id(),
                 captures: m
                     .captures
                     .iter()
-                    .map(|c| UnwrappedQueryCapture::<'a> {
-                        node: c.node,
+                    .map(|c| UnwrappedQueryCapture {
+                        node: UnwrappedNode {
+                            id: c.node.id(),
+                            text: node_text(&c.node, &self.rope).to_string(),
+                            range: c.node.range().into(),
+                            kind: c.node.kind().into(),
+                        },
                         _index: c.index,
                     })
                     .collect_vec(),
@@ -249,17 +332,31 @@ impl Document {
     }
 }
 
-#[derive(Debug)]
-pub struct UnwrappedQueryMatch<'a> {
+/// This is a version of a query match that has no reference to the tree or cursor
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct UnwrappedQueryMatch {
     _pattern_index: usize,
-    pub captures: Vec<UnwrappedQueryCapture<'a>>,
+    pub captures: Vec<UnwrappedQueryCapture>,
     _id: u32,
 }
 
-#[derive(Debug)]
-pub struct UnwrappedQueryCapture<'a> {
-    pub node: Node<'a>,
+/// This is a version of a query capture that has no reference to the tree or cursor
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct UnwrappedQueryCapture {
+    pub node: UnwrappedNode,
     _index: u32,
+}
+
+/// This is a version of a node that has no reference to the tree
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct UnwrappedNode {
+    /// Id's of a changed tree stay the same. So you can search for up to date information that way
+    pub id: usize,
+    /// This informtion can be outdated
+    pub text: String,
+    /// This informtion can be outdated
+    pub range: Range,
+    pub kind: String,
 }
 
 /// This represents informations about a frame.

@@ -36,12 +36,29 @@ pub struct StaticNodeChildren {
 
 pub struct AllQueries {
     pub import_query: Query,
+    pub iri_query: Query,
+    pub annotation_query: Query,
 }
 
 pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
     import_query: Query::new(
         *LANGUAGE,
         "(import [(full_iri) (simple_iri) (abbreviated_iri)]@iri)",
+    )
+    .unwrap(),
+    iri_query: Query::new(*LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri").unwrap(),
+    annotation_query: Query::new(
+        *LANGUAGE,
+        "
+        (_ . (_ . [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri)
+            (annotation
+                (annotation_property_iri)@iri
+                [
+                    (string_literal_no_language)
+                    (string_literal_with_language)
+                    (typed_literal)
+                ]@literal))
+        ",
     )
     .unwrap(),
 });

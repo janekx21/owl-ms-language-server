@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use crate::position::Position;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // Range like selection therefore endposition is exclusive
 pub struct Range {
     pub start: Position,
