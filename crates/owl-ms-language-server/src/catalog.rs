@@ -1,5 +1,9 @@
-use std::{fs::read_to_string, path::Path};
+use std::{
+    fs::read_to_string,
+    path::{Path, PathBuf},
+};
 
+use dashmap::iter_set::Iter;
 use itertools::Itertools;
 use log::info;
 use quick_xml::de::from_str;
@@ -11,6 +15,7 @@ use walkdir::WalkDir;
 #[serde(rename_all = "kebab-case")]
 pub struct Catalog {
     pub uri: Vec<CatalogUri>,
+    pub group: Vec<CatalogGroup>,
 
     #[serde(skip)]
     /// Warning! This is the path to the catalog file NOT its parent folder.
@@ -33,6 +38,12 @@ pub struct CatalogUri {
     pub uri: String,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(rename_all = "kebab-case")]
+pub struct CatalogGroup {
+    pub uri: Vec<CatalogUri>,
+}
+
 impl Catalog {
     pub fn load_catalogs_recursive(uri: Url) -> Vec<Catalog> {
         let path = uri
@@ -51,6 +62,22 @@ impl Catalog {
                 catalog
             })
             .collect_vec()
+    }
+
+    pub fn all_catalog_uris(&self) -> impl Iterator<Item = &CatalogUri> {
+        self.uri
+            .iter()
+            .chain(self.group.iter().flat_map(|g| &g.uri))
+    }
+
+    pub fn map_url(&self, url: &Url) -> Option<PathBuf> {
+        for catalog_uri in self.all_catalog_uris() {
+            if catalog_uri.name == url.to_string() {
+                let path = self.parent_folder().join(&catalog_uri.uri);
+                return Some(path);
+            }
+        }
+        None
     }
 
     pub fn parent_folder(&self) -> &Path {

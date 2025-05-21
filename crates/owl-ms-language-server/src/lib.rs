@@ -473,7 +473,7 @@ impl LanguageServer for Backend {
                         [frame_iri, annoation_iri, literal] => {
                             if frame_iri.node.text == iri && annoation_iri.node.text == "rdfs:label"
                             {
-                                Some(literal.node.text.clone())
+                                Some(literal.node.text_trimmed())
                             } else {
                                 None
                             }
@@ -733,24 +733,10 @@ impl Backend {
 
         let maybe_workspace = workspaces.iter().find(|workspace| {
             workspace.document_map.contains_key(url)
-                || workspace.catalogs.iter().any(|catalog| {
-                    catalog.uri.iter().any(|uri| {
-                        let catalog_item_path = Path::new(catalog.locaton.as_str())
-                            .parent()
-                            .unwrap()
-                            .join(&uri.uri);
-
-                        let url_path = url.to_file_path().unwrap();
-
-                        info!(
-                            "Comparing {} with {}",
-                            catalog_item_path.display(),
-                            url_path.display()
-                        );
-
-                        catalog_item_path == url_path
-                    })
-                })
+                || workspace
+                    .catalogs
+                    .iter()
+                    .any(|catalog| catalog.map_url(url).is_some())
         });
 
         if maybe_workspace.is_none() {
@@ -914,7 +900,7 @@ fn node_type_to_keyword(_type: &str) -> Option<String> {
         "sub_class_of" => Some("SubClassOf:".to_string()),
         "equavalent_to" => Some("EquivalentTo:".to_string()),
         "disjoint_with" => Some("DisjointWith:".to_string()),
-        "disjoint_union_of" => Some("DisjointUnionOf".to_string()),
+        "disjoint_union_of" => Some("DisjointUnionOf:".to_string()),
         "has_key" => Some("HasKey:".to_string()),
         _ => None,
     }
