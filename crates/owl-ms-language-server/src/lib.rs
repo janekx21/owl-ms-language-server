@@ -736,7 +736,7 @@ impl Backend {
                 || workspace
                     .catalogs
                     .iter()
-                    .any(|catalog| catalog.map_url(url).is_some())
+                    .any(|catalog| catalog.contains(&url.to_file_path().unwrap()))
         });
 
         if maybe_workspace.is_none() {

@@ -29,7 +29,10 @@ pub struct Workspace {
 impl Workspace {
     pub fn new(workspace_folder: WorkspaceFolder) -> Self {
         let catalogs = Catalog::load_catalogs_recursive(workspace_folder.uri.clone());
-        info!("New workspace at {}", workspace_folder.uri);
+        info!(
+            "New workspace at {} with catalogs {:?}",
+            workspace_folder.uri, catalogs
+        );
         Workspace {
             document_map: DashMap::new(),
             workspace_folder,

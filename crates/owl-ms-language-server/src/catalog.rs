@@ -3,9 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use dashmap::iter_set::Iter;
 use itertools::Itertools;
-use log::info;
+use log::{debug, info};
 use quick_xml::de::from_str;
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Url;
@@ -14,11 +13,13 @@ use walkdir::WalkDir;
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct Catalog {
+    #[serde(default)]
     pub uri: Vec<CatalogUri>,
+    #[serde(default)]
     pub group: Vec<CatalogGroup>,
 
-    #[serde(skip)]
     /// Warning! This is the path to the catalog file NOT its parent folder.
+    #[serde(skip)]
     pub locaton: String,
 }
 
@@ -70,14 +71,15 @@ impl Catalog {
             .chain(self.group.iter().flat_map(|g| &g.uri))
     }
 
-    pub fn map_url(&self, url: &Url) -> Option<PathBuf> {
+    /// Takes a path to a document and determins if the item is inside this catalog
+    pub fn contains(&self, path: &PathBuf) -> bool {
         for catalog_uri in self.all_catalog_uris() {
-            if catalog_uri.name == url.to_string() {
-                let path = self.parent_folder().join(&catalog_uri.uri);
-                return Some(path);
+            let catalog_item_path = self.parent_folder().join(&catalog_uri.uri);
+            if &catalog_item_path == path {
+                return true;
             }
         }
-        None
+        false
     }
 
     pub fn parent_folder(&self) -> &Path {
