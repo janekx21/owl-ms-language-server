@@ -142,6 +142,12 @@ impl LanguageServer for Backend {
                         },
                     ),
                 ),
+                workspace_symbol_provider: Some(OneOf::Right(WorkspaceSymbolOptions {
+                    work_done_progress_options: WorkDoneProgressOptions {
+                        work_done_progress: Some(false),
+                    },
+                    resolve_provider: Some(false),
+                })),
                 ..Default::default()
             },
         })
@@ -328,11 +334,11 @@ impl LanguageServer for Backend {
                 //     .frame_infos
                 //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
 
-                let iri_info_map = timeit("gen_class_iri_label_map", || {
+                let frame_infos = timeit("gen_class_iri_label_map", || {
                     document.gen_frame_infos(Some(new_range))
                 });
 
-                document.frame_infos.extend(iri_info_map);
+                document.frame_infos.extend(frame_infos);
             }
 
             // TODO #30 prune
@@ -473,7 +479,7 @@ impl LanguageServer for Backend {
                         [frame_iri, annoation_iri, literal] => {
                             if frame_iri.node.text == iri && annoation_iri.node.text == "rdfs:label"
                             {
-                                Some(literal.node.text.clone())
+                                Some(literal.node.text_trimmed())
                             } else {
                                 None
                             }
@@ -540,10 +546,7 @@ impl LanguageServer for Backend {
                     let locations = frame_info
                         .definitions
                         .iter()
-                        .map(|(uri, range)| Location {
-                            uri: uri.clone(),
-                            range: (*range).into(),
-                        })
+                        .map(|l| l.clone().into())
                         .collect_vec();
 
                     return Ok(Some(GotoDefinitionResponse::Array(locations)));
@@ -714,6 +717,47 @@ impl LanguageServer for Backend {
         Ok(None)
     }
 
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        let query = params.query;
+        info!("symbol with query:{query}");
+        let workspaces = self.workspaces.lock().await;
+        let c = workspaces
+            .iter()
+            .flat_map(|w| {
+                w.document_map.iter()
+                // .map(|d| d.value().clone())
+                // .flat_map(|d| d.frame_infos.iter().map(|i| i.value())) //.iter().map(|i| i.value()))
+            })
+            .collect_vec();
+        let d = c.iter().flat_map(|a| a.frame_infos.iter()).collect_vec();
+
+        info!(
+            "All frame infos: {:#?}",
+            d.iter().map(|v| v.value()).collect_vec()
+        );
+
+        let symbols = d
+            .iter()
+            .filter(|i| i.iri.contains(query.as_str()))
+            .flat_map(|fi| {
+                fi.definitions.iter().map(|definition| SymbolInformation {
+                    name: fi.iri.clone(),
+                    kind: fi.frame_type.into(),
+                    tags: None,
+                    deprecated: None,
+                    location: definition.clone().into(),
+                    container_name: None,
+                })
+            })
+            .collect_vec();
+
+        // .flat_map(|d| d.value().frame_infos.iter());
+        Ok(Some(symbols))
+    }
+
     async fn shutdown(&self) -> Result<()> {
         info!("Shutdown");
         Ok(())
@@ -733,24 +777,10 @@ impl Backend {
 
         let maybe_workspace = workspaces.iter().find(|workspace| {
             workspace.document_map.contains_key(url)
-                || workspace.catalogs.iter().any(|catalog| {
-                    catalog.uri.iter().any(|uri| {
-                        let catalog_item_path = Path::new(catalog.locaton.as_str())
-                            .parent()
-                            .unwrap()
-                            .join(&uri.uri);
-
-                        let url_path = url.to_file_path().unwrap();
-
-                        info!(
-                            "Comparing {} with {}",
-                            catalog_item_path.display(),
-                            url_path.display()
-                        );
-
-                        catalog_item_path == url_path
-                    })
-                })
+                || workspace
+                    .catalogs
+                    .iter()
+                    .any(|catalog| catalog.contains(&url.to_file_path().unwrap()))
         });
 
         if maybe_workspace.is_none() {
@@ -914,7 +944,7 @@ fn node_type_to_keyword(_type: &str) -> Option<String> {
         "sub_class_of" => Some("SubClassOf:".to_string()),
         "equavalent_to" => Some("EquivalentTo:".to_string()),
         "disjoint_with" => Some("DisjointWith:".to_string()),
-        "disjoint_union_of" => Some("DisjointUnionOf".to_string()),
+        "disjoint_union_of" => Some("DisjointUnionOf:".to_string()),
         "has_key" => Some("HasKey:".to_string()),
         _ => None,
     }

@@ -160,36 +160,86 @@ async fn test_language_server_did_change() {
 }
 
 #[test]
-fn test_parsing_catalog() {
+fn test_deserialize_catalog() {
     let xml = r#"
         <?xml version="1.0" encoding="UTF-8" standalone="no"?>
         <catalog prefer="public" xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
-            <uri id="User Entered Import Resolution" name="http://openenergy-platform.org/ontology/oeo/dev/imports/cco-extracted.owl" uri="imports/cco-extracted.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/" uri="oeo.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-physical.omn" uri="edits/oeo-physical.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-physical-axioms.owl" uri="edits/oeo-physical-axioms.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-sector.omn" uri="edits/oeo-sector.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-social.omn" uri="edits/oeo-social.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-model.omn" uri="edits/oeo-model.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-import-edits.owl" uri="edits/oeo-import-edits.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-shared.omn" uri="edits/oeo-shared.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-shared-axioms.omn" uri="edits/oeo-shared-axioms.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/iao-annotation-module.owl" uri="imports/iao-annotation-module.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/iao-extracted.owl" uri="imports/iao-extracted.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/iao-minimal-module.owl" uri="imports/iao-minimal-module.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/omo-extracted.owl" uri="imports/omo-extracted.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/ro-extracted.owl" uri="imports/ro-extracted.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/uo-extracted.owl" uri="imports/uo-extracted.owl"/>
-        	<uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/stato-extracted.owl" uri="imports/stato-extracted.owl"/>
-        	<uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/meno-extracted.owl" uri="imports/meno-extracted.owl"/>
-            <uri id="Imports Wizard Entry" name="http://purl.obolibrary.org/obo/bfo/2.0/bfo.owl" uri="http://purl.obolibrary.org/obo/bfo.owl"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-import-edits.owl" uri="oeo-import-edits.owl"/>
+            <uri id="Imports Wizard Entry" name="http://purl.obolibrary.org/obo/bfo/2.0/bfo.owl" uri="https://raw.githubusercontent.com/BFO-ontology/BFO/v2.0/bfo.owl"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-model.omn" uri="oeo-model.omn"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-physical.omn" uri="oeo-physical.omn"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-sector.omn" uri="oeo-sector.omn"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-social.omn" uri="oeo-social.omn"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-shared.omn" uri="oeo-shared.omn"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/iao-extracted.owl" uri="../imports/iao-extracted.owl"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/ro-extracted.owl" uri="../imports/ro-extracted.owl"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/uo-extracted.owl" uri="../imports/uo-extracted.owl"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/stato-extracted.owl" uri="../imports/stato-extracted.owl"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/cco-extracted.owl" uri="../imports/cco-extracted.owl"/>                                      
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/meno-extracted.owl" uri="../imports/meno-extracted.owl"/>
+            <group id="Folder Repository, directory=, recursive=true, Auto-Update=true, version=2" prefer="public" xml:base="">
+                <uri id="Automatically generated entry, Timestamp=1740265509439" name="http://openenergy-platform.org/ontology/oeo/oeo-import-edits.owl" uri="oeo-import-edits.owl"/>
+                <uri id="Automatically generated entry, Timestamp=1740265509439" name="http://openenergy-platform.org/ontology/oeo/oeo-physical-axioms/" uri="oeo-physical-axioms.owl"/>
+            </group>
         </catalog>
     "#;
 
     let catalog: Catalog = from_str(xml).unwrap();
 
-    assert_eq!(catalog.uri.len(), 19);
-    assert_eq!(catalog.uri[0].uri, "imports/cco-extracted.owl".to_string());
+    assert_eq!(catalog.all_catalog_uris().count(), 15);
+    assert_eq!(
+        catalog.all_catalog_uris().next().unwrap().uri,
+        "oeo-import-edits.owl".to_string()
+    );
+    assert_eq!(
+        catalog.all_catalog_uris().last().unwrap().uri,
+        "oeo-physical-axioms.owl".to_string()
+    );
+}
+
+#[test]
+fn test_deserialize_catalog_without_group() {
+    // Arrange
+    let xml = r#"
+        <?xml version="1.0" encoding="UTF-8" standalone="no"?>
+        <catalog prefer="public" xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-import-edits.owl" uri="oeo-import-edits.owl"/>
+            <uri id="Imports Wizard Entry" name="http://purl.obolibrary.org/obo/bfo/2.0/bfo.owl" uri="https://raw.githubusercontent.com/BFO-ontology/BFO/v2.0/bfo.owl"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-model.omn" uri="oeo-model.omn"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-physical.omn" uri="oeo-physical.omn"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-sector.omn" uri="oeo-sector.omn"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-social.omn" uri="oeo-social.omn"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-shared.omn" uri="oeo-shared.omn"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/iao-extracted.owl" uri="../imports/iao-extracted.owl"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/ro-extracted.owl" uri="../imports/ro-extracted.owl"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/uo-extracted.owl" uri="../imports/uo-extracted.owl"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/stato-extracted.owl" uri="../imports/stato-extracted.owl"/>
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/cco-extracted.owl" uri="../imports/cco-extracted.owl"/>                                      
+            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/meno-extracted.owl" uri="../imports/meno-extracted.owl"/>
+        </catalog>
+    "#;
+
+    // Act
+    let catalog: Catalog = from_str(xml).unwrap();
+
+    // Assert
+    assert_eq!(catalog.all_catalog_uris().count(), 13);
+}
+
+#[test]
+fn test_serialize_catalog() {
+    // Arrange
+    let value = Catalog {
+        uri: vec![],
+        group: vec![],
+        locaton: "".into(),
+    };
+
+    // Act
+    let xml = quick_xml::se::to_string(&value).unwrap();
+
+    //Assert
+    assert_eq!(xml, "<Catalog/>");
 }
 
 #[test(tokio::test)]
@@ -211,7 +261,8 @@ async fn test_import_resolve() {
                         uri: "foo.omn".to_string(),
                     },
                 ],
-                locaton: dir.join("catalog.xml").to_str().unwrap().to_string(),
+                locaton: dir.join("catalog-v001.xml").to_str().unwrap().to_string(),
+                group: vec![],
             }),
             WorkspaceMember::OmnFile {
                 name: "foobaronto.omn".into(),
@@ -227,14 +278,14 @@ async fn test_import_resolve() {
         &service,
         Some(WorkspaceFolder {
             uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
-            name: "bar".into(),
+            name: "test workspace".into(),
         }),
     )
     .await;
 
     let file_url = Url::from_file_path(tmp_dir.path().join("foo.omn")).expect("valid url");
     let ontology = r#"
-        Ontology: <http://foobar.org/ontology/> <http://foobar.org/ontology.omn>
+        Ontology: <http://foobar.org/ontology/>
         Import: <http://external.org/shared.omn>
     "#;
 
@@ -254,7 +305,7 @@ async fn test_import_resolve() {
     // Assert
 
     let workspaces = service.inner().lock_workspaces().await;
-    assert_eq!(workspaces.len(), 1);
+    assert_eq!(workspaces.len(), 1, "all files should be in one workspace");
     let workspace = workspaces.first().unwrap();
     info!(" Workspace documents {:#?}", workspace.document_map);
     let document_count = workspace.document_map.iter().count();
@@ -347,6 +398,102 @@ Class: class-in-first-file
     );
     let frame = document.frame_infos.get("class-in-first-file").unwrap();
     // TODO #32 assert_eq!(frame.annotations.get("rdfs:label"), None);
+}
+
+#[test(tokio::test)]
+async fn test_workspace_symbolds() {
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![
+            WorkspaceMember::CatalogFile(Catalog {
+                uri: vec![CatalogUri {
+                    _id: "Testing".into(),
+                    name: "http://foo.org/a.omn".into(),
+                    uri: "a.omn".to_string(),
+                }],
+                group: vec![],
+                locaton: dir.join("catalog.xml").to_str().unwrap().to_string(),
+            }),
+            WorkspaceMember::OmnFile {
+                name: "a.omn".into(),
+                content: r#"
+                Ontology: <http://foo.org/a>
+                    Class: some-class
+                        Annotations:
+                            rdfs:label "Some class"
+                "#
+                .into(),
+            },
+            WorkspaceMember::OmnFile {
+                name: "b.omn".into(),
+                content: r#"
+                Ontology: <http://foo.org/b>
+                    Import: <http://foo.org/a.omn>
+                    Class: some-other-class
+                        Annotations:
+                            rdfs:label "Some other class"
+                "#
+                .into(),
+            },
+        ]
+    });
+
+    let parser = arrange_parser();
+    let (service, _) = LspService::new(|client| Backend::new(client, parser));
+
+    arrange_init_backend(
+        &service,
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "foo".into(),
+        }),
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("c.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://foo.org/c>
+            Import: <http://foo.org/a.omn>
+            Class: some-other-class-at-c
+                Annotations:
+                    rdfs:label "Some other class at c"
+    "#;
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    let result = service
+        .inner()
+        .symbol(WorkspaceSymbolParams {
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            query: "some".to_string(),
+        })
+        .await;
+
+    // Assert
+
+    let symbols = result
+        .expect("Symbols should not throw errors")
+        .expect("Symbols should contain something");
+
+    assert_eq!(symbols.len(), 2);
 }
 
 // Arrange

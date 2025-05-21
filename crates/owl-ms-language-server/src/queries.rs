@@ -38,6 +38,7 @@ pub struct AllQueries {
     pub import_query: Query,
     pub iri_query: Query,
     pub annotation_query: Query,
+    pub frame_info_query: Query,
 }
 
 pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
@@ -58,6 +59,33 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
                     (string_literal_with_language)
                     (typed_literal)
                 ]@literal))
+        ",
+    )
+    .unwrap(),
+    // TODO check frame [(datatype_frame) (class_frame) (object_property_frame) (data_property_frame) (annotation_property_frame) (individual_frame)]
+    // the typed literal is for the string type
+    frame_info_query: Query::new(
+        *LANGUAGE,
+        "
+        (_ . (_ . [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri)
+            (annotation
+                (annotation_property_iri)@iri
+                [
+                    (string_literal_no_language)
+                    (string_literal_with_language)
+                    (typed_literal)
+                ]@literal))
+
+        (prefix_declaration (prefix_name)@prefix_name (full_iri)@iri)
+
+        ([
+            (datatype_frame)
+            (class_frame)
+            (object_property_frame)
+            (data_property_frame)
+            (annotation_property_frame)
+            (individual_frame)
+        ] . (_ [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri))@frame
         ",
     )
     .unwrap(),

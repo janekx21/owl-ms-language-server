@@ -1,10 +1,17 @@
-use std::{collections::HashMap, fmt::Display, fs, iter::once, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    ffi::OsStr,
+    fmt::Display,
+    fs,
+    iter::once,
+    path::Path,
+};
 
 use dashmap::DashMap;
 use itertools::Itertools;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use ropey::Rope;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Url, WorkspaceFolder};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, SymbolKind, Url, WorkspaceFolder};
 use tree_sitter::{Node, Parser, Query, QueryCursor, Tree};
 
 use crate::{
@@ -22,7 +29,10 @@ pub struct Workspace {
 impl Workspace {
     pub fn new(workspace_folder: WorkspaceFolder) -> Self {
         let catalogs = Catalog::load_catalogs_recursive(workspace_folder.uri.clone());
-        info!("New workspace at {}", workspace_folder.uri);
+        info!(
+            "New workspace at {} with catalogs {:?}",
+            workspace_folder.uri, catalogs
+        );
         Workspace {
             document_map: DashMap::new(),
             workspace_folder,
@@ -116,30 +126,34 @@ impl Workspace {
         url: &Url,
         parser: &mut Parser,
     ) -> Option<dashmap::mapref::one::Ref<'_, Url, Document>> {
+        if let Some(doc) = self.document_map.get(url) {
+            // Document is loaded already
+            return Some(doc);
+        }
+
         for catalog in &self.catalogs {
             for catalog_uri in &catalog.uri {
                 if catalog_uri.name == url.to_string() {
-                    // Found a valid import
+                    // Load document from disk
+                    let path = catalog.parent_folder().join(&catalog_uri.uri);
 
-                    return if let Some(doc) = self.document_map.get(url) {
-                        // Load from document_map
-                        Some(doc)
+                    if path.extension() != Some(OsStr::new("omn")) {
+                        warn!("Non omn files can not be loaded. path {}", path.display());
+                        return None;
+                    }
+
+                    return if let Ok(ontology_text) = fs::read_to_string(&path) {
+                        let document = Document::new(
+                            Url::from_file_path(&path).unwrap(),
+                            -1,
+                            ontology_text,
+                            parser,
+                        );
+                        info!("Loaded file from disk at {}", path.display());
+                        Some(self.insert_document(document))
                     } else {
-                        // Load doc from disk
-                        let path = catalog.parent_folder().join(&catalog_uri.uri);
-                        if let Ok(ontology_text) = fs::read_to_string(&path) {
-                            let document = Document::new(
-                                Url::from_file_path(&path).unwrap(),
-                                -1,
-                                ontology_text,
-                                parser,
-                            );
-                            info!("Loaded file from disk at {}", path.display());
-                            Some(self.insert_document(document))
-                        } else {
-                            error!("File could not be loaded at {}", path.display());
-                            None
-                        }
+                        error!("File could not be loaded at {}", path.display());
+                        None
                     };
                 }
             }
@@ -191,34 +205,22 @@ impl Document {
         let tree = &self.tree;
         let rope = &self.rope;
 
-        // TODO check frame [(datatype_frame) (class_frame) (object_property_frame) (data_property_frame) (annotation_property_frame) (individual_frame)]
-        // the typed literal is for the string type
-        let frame_source = "
-        (_
-            . (_ [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri)
-            (annotation
-                (annotation_property_iri)@iri
-                [
-                    (string_literal_no_language)
-                    (string_literal_with_language)
-                    (typed_literal)
-                ]@literal))
-        
-        (prefix_declaration (prefix_name)@prefix_name (full_iri)@iri)
-        ";
-
-        let frame_query = Query::new(*LANGUAGE, frame_source).expect("valid query expect");
         let mut query_cursor = QueryCursor::new();
 
-        if let Some(range) = range {
-            query_cursor.set_point_range((*range).into());
-        }
+        // if let Some(range) = range {
+        //     query_cursor.set_point_range((*range).into());
+        // }
 
-        let matches = query_cursor.matches(&frame_query, tree.root_node(), RopeProvider::new(rope));
+        let matches = query_cursor.matches(
+            &ALL_QUERIES.frame_info_query,
+            tree.root_node(),
+            RopeProvider::new(rope),
+        );
 
         let infos = DashMap::<Iri, FrameInfo>::new();
 
         for m in matches {
+            info!("Found match {:#?}", m);
             match m.pattern_index {
                 0 => {
                     let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
@@ -236,13 +238,18 @@ impl Document {
                         infos.insert(
                             frame_iri.clone(),
                             FrameInfo {
+                                iri: frame_iri.clone(),
                                 annotations: HashMap::new(),
                                 frame_type,
-                                definitions: vec![(
-                                    self.uri.clone(),
+                                definitions: vec![Location {
+                                    uri: self.uri.clone(),
                                     // This node should be the total frame
-                                    parent_node.parent().unwrap_or(parent_node).range().into(),
-                                )],
+                                    range: parent_node
+                                        .parent()
+                                        .unwrap_or(parent_node)
+                                        .range()
+                                        .into(),
+                                }],
                             },
                         );
                     }
@@ -264,6 +271,32 @@ impl Document {
                     // TODO requst prefix url to cache the ontology there
                     debug!("Prefix named {} with iri {}", prefix_name, iri);
                 }
+                2 => {
+                    let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
+                    let frame_iri = capture_texts.next().unwrap().to_string();
+
+                    let specific_iri_node = m.captures[0].node.parent().unwrap();
+
+                    let frame_type = FrameType::parse(specific_iri_node.kind());
+
+                    let frame_node = m.captures[1].node;
+
+                    debug!("Found frame {}", frame_iri);
+                    if !infos.contains_key(&frame_iri) {
+                        infos.insert(
+                            frame_iri.clone(),
+                            FrameInfo {
+                                iri: frame_iri.clone(),
+                                annotations: HashMap::new(),
+                                frame_type,
+                                definitions: vec![Location {
+                                    uri: self.uri.clone(),
+                                    range: frame_node.range().into(),
+                                }],
+                            },
+                        );
+                    }
+                }
                 i => todo!("pattern index {} not implemented", i),
             }
         }
@@ -284,21 +317,58 @@ impl Document {
         workspace: &Workspace,
         parser: &mut Parser,
     ) -> Vec<UnwrappedQueryMatch> {
-        // Resolve the documents that are imported here (not recursive yet)
+        // Resolve the documents that are imported here
+        // This also contains itself!
         let docs = self
-            .query_helper(&ALL_QUERIES.import_query, None)
+            .reachable_docs_recusive(workspace, parser)
             .iter()
-            .filter_map(|m| match &m.captures[..] {
-                [iri] => Url::parse(iri.node.text.trim_end_matches(">").trim_start_matches("<"))
-                    .ok()
-                    .and_then(|url| workspace.resolve_url_to_document(&url, parser)),
-                _ => unimplemented!(),
-            })
+            .filter_map(|url| workspace.resolve_url_to_document(url, parser))
             .collect_vec();
 
-        docs.iter()
-            .flat_map(|doc| doc.query(query))
-            .chain(self.query(query))
+        info!("Query in documents with additional {}", docs.len());
+
+        docs.iter().flat_map(|doc| doc.query(query)).collect_vec()
+    }
+
+    fn reachable_docs_recusive(&self, workspace: &Workspace, parser: &mut Parser) -> Vec<Url> {
+        let mut set: HashSet<Url> = HashSet::new();
+        self.reachable_docs_recursive_helper(workspace, parser, &mut set);
+        set.into_iter().collect_vec()
+    }
+
+    fn reachable_docs_recursive_helper(
+        &self,
+        workspace: &Workspace,
+        parser: &mut Parser,
+        result: &mut HashSet<Url>,
+    ) {
+        if result.contains(&self.uri) {
+            // Do nothing
+            return;
+        }
+
+        result.insert(self.uri.clone());
+
+        let docs = self
+            .reachable_documents()
+            .iter()
+            .filter_map(|url| workspace.resolve_url_to_document(url, parser))
+            .collect_vec();
+
+        for doc in docs {
+            doc.reachable_docs_recursive_helper(workspace, parser, result);
+        }
+    }
+
+    fn reachable_documents(&self) -> Vec<Url> {
+        self.query(&ALL_QUERIES.import_query)
+            .iter()
+            .filter_map(|m| match &m.captures[..] {
+                [iri] => {
+                    Url::parse(iri.node.text.trim_end_matches(">").trim_start_matches("<")).ok()
+                }
+                _ => unimplemented!(),
+            })
             .collect_vec()
     }
 
@@ -359,6 +429,12 @@ pub struct UnwrappedNode {
     pub kind: String,
 }
 
+impl UnwrappedNode {
+    pub fn text_trimmed(&self) -> String {
+        trim_string_value(&self.text)
+    }
+}
+
 /// This represents informations about a frame.
 /// For example the following frame has information.
 /// ```owl-ms
@@ -368,9 +444,34 @@ pub struct UnwrappedNode {
 /// Then the [`FrameInfo`] contains the label "Pizza" and the frame type "Class".
 #[derive(Clone, Debug)]
 pub struct FrameInfo {
+    pub iri: Iri,
     pub annotations: HashMap<Iri, Vec<String>>,
     pub frame_type: FrameType,
-    pub definitions: Vec<(Url, Range)>,
+    pub definitions: Vec<Location>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Location {
+    uri: Url,
+    range: Range,
+}
+
+impl Into<tower_lsp::lsp_types::Location> for Location {
+    fn into(self) -> tower_lsp::lsp_types::Location {
+        tower_lsp::lsp_types::Location {
+            uri: self.uri,
+            range: self.range.into(),
+        }
+    }
+}
+
+impl From<tower_lsp::lsp_types::Location> for Location {
+    fn from(value: tower_lsp::lsp_types::Location) -> Self {
+        Location {
+            uri: value.uri,
+            range: value.range.into(),
+        }
+    }
 }
 
 impl FrameInfo {
@@ -390,7 +491,8 @@ impl FrameInfo {
             .cloned()
             .collect_vec();
         FrameInfo {
-            frame_type: if a.frame_type != b.frame_type {
+            iri: a.iri,
+            frame_type: if a.frame_type == b.frame_type {
                 a.frame_type
             } else {
                 FrameType::Invalid
@@ -442,7 +544,7 @@ fn trim_string_value(value: &String) -> String {
         .trim_start_matches('"')
         .trim_end_matches("@en")
         .trim_end_matches("@de")
-        .trim_end_matches("@pl")
+        .trim_end_matches("@pt")
         .trim_end_matches("^^xsd:string") // typed literal with type string
         .trim_end_matches('"')
         .replace("\\\"", "\"")
@@ -575,6 +677,21 @@ impl FrameType {
                 error!("Implement {kind}");
                 FrameType::Invalid
             }
+        }
+    }
+}
+
+impl From<FrameType> for tower_lsp::lsp_types::SymbolKind {
+    fn from(val: FrameType) -> Self {
+        match val {
+            FrameType::Class => SymbolKind::CLASS,
+            FrameType::DataType => SymbolKind::STRUCT,
+            FrameType::ObjectProperty => SymbolKind::PROPERTY,
+            FrameType::DataProperty => SymbolKind::PROPERTY,
+            FrameType::AnnotationProperty => SymbolKind::PROPERTY,
+            FrameType::Individual => SymbolKind::OBJECT,
+            FrameType::Ontology => SymbolKind::MODULE,
+            FrameType::Invalid => SymbolKind::NULL,
         }
     }
 }
