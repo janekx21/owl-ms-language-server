@@ -1,0 +1,6 @@
+Ontology:
+
+# Import: <https://example.com/a.omn> # Do not import here
+
+Class: A
+    Annotations: rdfs:label "A (b.omn)"

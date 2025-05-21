@@ -2,7 +2,6 @@
 /node_modules
 /client/node_modules
 .idea
-.vscode
 dist
 *.log
 perf.data
@@ -11,3 +10,4 @@ examples/oeo-full.omn
 **/.tui-test/cache
 **/node_modules
 **/*.bck
+.direnv

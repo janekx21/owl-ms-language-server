@@ -1,14 +1,11 @@
+use std::{hint::black_box, time::Duration};
+
 // use crate::Backend;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use dashmap::DashMap;
-use std::{sync::Mutex, time::Duration};
-use tower_lsp::{
-    lsp_types::{
-        DidOpenTextDocumentParams, InitializeParams, PositionEncodingKind, TextDocumentItem, Url,
-    },
-    LspService,
-};
-use tree_sitter::{InputEdit, Parser, Point, Tree};
+use itertools::Itertools;
+use owl_ms_language_server::rope_provider::RopeProvider;
+use ropey::Rope;
+use tree_sitter::{InputEdit, Parser, Point, Query, QueryCursor, Tree};
 use tree_sitter_owl_ms::language;
 
 fn parse_helper(source_code: &String, parser: &mut Parser) {
@@ -16,8 +13,15 @@ fn parse_helper(source_code: &String, parser: &mut Parser) {
     parser.parse(source_code, None).unwrap();
 }
 
-fn re_parse_helper(source_code: &String, parser: &mut Parser, old_tree: &Tree) {
-    parser.parse(source_code, Some(old_tree)).unwrap();
+fn re_parse_helper(source_code: &Rope, parser: &mut Parser, old_tree: &Tree) {
+    let rope_provider = RopeProvider::new(source_code);
+    parser.reset();
+    parser
+        .parse_with(
+            &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+            Some(old_tree),
+        )
+        .unwrap();
 }
 
 fn parse_bench(c: &mut Criterion) {
@@ -69,8 +73,11 @@ fn ontology_size_bench(c: &mut Criterion) {
 
 fn ontology_change_bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("ontology_change_bench");
-    for size in (1..10).map(|i| i * 1000) {
+    for size in (1..100).map(|i| i * 100) {
         group.throughput(Throughput::Elements(size as u64));
+        group.sample_size(1000);
+        group.warm_up_time(Duration::from_millis(100));
+        // group.measurement_time(Duration::from_millis(5000));
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
             b.iter_batched_ref(
                 || {
@@ -83,21 +90,73 @@ fn ontology_change_bench(c: &mut Criterion) {
 
                     let mut parser = Parser::new();
                     parser.set_language(language()).unwrap();
-                    let mut old_tree = parser.parse(source_code.clone(), None).unwrap();
-                    // println!("{}", old_tree.root_node().to_sexp());
+                    let mut rope = Rope::from_str(source_code.as_str());
+                    let rope_provider = RopeProvider::new(&rope);
+                    let mut old_tree = parser
+                        .parse_with(&mut |i, _| rope_provider.chunk_callback(i), None)
+                        .unwrap();
 
-                    // let edit = InputEdit {
-                    //     start_byte: 29usize,
-                    //     old_end_byte: 30usize,
-                    //     new_end_byte: 30usize,
-                    //     start_position: Point { row: 1, column: 0 },
-                    //     old_end_position: Point { row: 1, column: 1 },
-                    //     new_end_position: Point { row: 1, column: 1 },
-                    // };
-                    // old_tree.edit(&edit);
-                    (source_code.to_string(), parser, old_tree)
+                    let edit = InputEdit {
+                        start_byte: 0,
+                        old_end_byte: 0,
+                        new_end_byte: 10,
+                        start_position: Point { row: 0, column: 0 },
+                        old_end_position: Point { row: 0, column: 0 },
+                        new_end_position: Point { row: 10, column: 0 },
+                    };
+                    old_tree.edit(&edit);
+
+                    rope.insert(0, "0123456789");
+
+                    (rope, parser, old_tree)
                 },
                 |(source, parser, old_tree)| re_parse_helper(source, parser, old_tree),
+                criterion::BatchSize::SmallInput,
+            )
+        });
+    }
+    group.finish();
+}
+
+fn ontology_query_bench(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ontology_query_bench");
+    for size in (1..10).map(|i| i * 100) {
+        group.throughput(Throughput::Elements(size as u64));
+        group.sample_size(10);
+        group.warm_up_time(Duration::from_millis(10));
+        group.measurement_time(Duration::from_millis(100));
+
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+            b.iter_batched_ref(
+                || {
+                    let mut source_code = "Ontology: <http://foo.bar>\n".to_string();
+                    source_code.push_str(
+                        "Class: <http://foo.bar/0>\nAnnotations: rdfs:label \"Fizz\"\n"
+                            .repeat(size)
+                            .as_str(),
+                    );
+
+                    let mut parser = Parser::new();
+                    parser.set_language(language()).unwrap();
+                    let rope = Rope::from_str(source_code.as_str());
+                    let rope_provider = RopeProvider::new(&rope);
+                    let tree = parser
+                        .parse_with(&mut |i, _| rope_provider.chunk_callback(i), None)
+                        .unwrap();
+
+                    let qc = QueryCursor::new();
+                    let query = Query::new(
+                        language(),
+                        "[(full_iri) (simple_iri) (abbreviated_iri)]@iri",
+                    )
+                    .unwrap();
+                    (rope, tree, query, qc)
+                },
+                |(rope, tree, query, qc)| {
+                    let matches = qc.matches(query, tree.root_node(), RopeProvider::new(rope));
+                    matches.map(black_box).count();
+                    // matches.collect_vec();
+                },
                 criterion::BatchSize::SmallInput,
             )
         });
@@ -114,6 +173,7 @@ criterion_group!(
     benches,
     parse_bench,
     ontology_change_bench,
-    ontology_size_bench
+    ontology_size_bench,
+    ontology_query_bench
 );
 criterion_main!(benches); //, long_bench

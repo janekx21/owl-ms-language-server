@@ -724,3 +724,21 @@ Ontology: # Comment
     (individual_frame
       (individual_iri
         (simple_iri)))))
+
+====================
+Imports
+====================
+
+Ontology: <http://foobar.org/ontology/> <http://foobar.org/ontology.omn>
+Import: <http://external.org/shared.omn>
+
+---
+
+(source_file
+  (ontology
+    (ontology_iri
+      (full_iri))
+    (version_iri
+      (full_iri))
+    (import
+      (full_iri))))

@@ -1,0 +1,4 @@
+Ontology: <http://a.b/multi-file/other>
+
+Class: class-in-other-file
+    Annotations: rdfs:label "This class is in the other file"
