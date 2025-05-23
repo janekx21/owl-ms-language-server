@@ -11,6 +11,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+anyhow = "1.0.98"
 clap = { version = "4.5.16", features = ["derive"] }
 dashmap = "5.5.3"
 itertools = "0.14.0"

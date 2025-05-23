@@ -11,7 +11,7 @@ mod workspace;
 use core::panic;
 use debugging::timeit;
 use itertools::Itertools;
-use log::{debug, info};
+use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
 use position::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
@@ -818,7 +818,10 @@ impl Backend {
 
         for url in urls {
             info!("Resolving url {url}");
-            workspace.resolve_url_to_document(&url, parser);
+            workspace
+                .resolve_url_to_document(&url, parser)
+                .inspect_err(|e| error!("{e}"))
+                .ok();
 
             //     // TODO #8 filepath
             //     if workspace.document_map.contains_key(&url) {
