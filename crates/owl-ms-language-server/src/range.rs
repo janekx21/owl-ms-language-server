@@ -73,6 +73,29 @@ pub fn range_overlaps(a: &Range, b: &Range) -> bool {
     true
 }
 
+// Function that checks if two ranges share any lines.
+// It returns true if the ranges have at least one line in common,
+// regardless of character positions.
+pub fn lines_overlap(a: &Range, b: &Range) -> bool {
+    // If range a ends before range b starts (line-wise)
+    if a.end.line < b.start.line {
+        return false;
+    }
+
+    // If range b ends before range a starts (line-wise)
+    if b.end.line < a.start.line {
+        return false;
+    }
+
+    // Otherwise, they share at least one line
+    true
+}
+
+/// is one range "inner" inside the range "outer"
+pub fn range_exclusive_inside(inner: &Range, outer: &Range) -> bool {
+    inner.start.line > outer.start.line && inner.end.line < outer.end.line
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,27 +229,4 @@ mod tests {
         assert!(!range_overlaps(&a, &b));
         assert!(!range_overlaps(&b, &a)); // Symmetry check
     }
-}
-
-// Function that checks if two ranges share any lines.
-// It returns true if the ranges have at least one line in common,
-// regardless of character positions.
-pub fn lines_overlap(a: &Range, b: &Range) -> bool {
-    // If range a ends before range b starts (line-wise)
-    if a.end.line < b.start.line {
-        return false;
-    }
-
-    // If range b ends before range a starts (line-wise)
-    if b.end.line < a.start.line {
-        return false;
-    }
-
-    // Otherwise, they share at least one line
-    true
-}
-
-/// is one range "inner" inside the range "outer"
-pub fn range_exclusive_inside(inner: &Range, outer: &Range) -> bool {
-    inner.start.line > outer.start.line && inner.end.line < outer.end.line
 }

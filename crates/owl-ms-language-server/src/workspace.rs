@@ -198,8 +198,8 @@ fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
 
 #[derive(Debug)]
 pub enum Document {
-    Internal(InternalDocument),
-    External(ExternalDocument),
+    Internal(Box<InternalDocument>),
+    External(Box<ExternalDocument>),
 }
 #[derive(Debug, PartialEq, Eq)]
 pub enum OwlDialect {
@@ -590,11 +590,11 @@ pub struct Location {
     range: Range,
 }
 
-impl Into<tower_lsp::lsp_types::Location> for Location {
-    fn into(self) -> tower_lsp::lsp_types::Location {
+impl From<Location> for tower_lsp::lsp_types::Location {
+    fn from(val: Location) -> Self {
         tower_lsp::lsp_types::Location {
-            uri: self.uri,
-            range: self.range.into(),
+            uri: val.uri,
+            range: val.range.into(),
         }
     }
 }

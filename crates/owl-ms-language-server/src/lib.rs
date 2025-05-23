@@ -50,6 +50,7 @@ impl Backend {
         }
     }
 
+    #[cfg(test)]
     async fn lock_workspaces(&self) -> MappedMutexGuard<Vec<Workspace>> {
         MutexGuard::map(self.workspaces.lock().await, |w| w)
     }
@@ -765,15 +766,6 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
-    /// LSP clients can open multiple workspaces at a time. To find the one that a particular file is located in
-    /// this functions searches in all openend workspaces.
-    async fn has_document(&self, url: &Url) -> bool {
-        let workspaces = self.lock_workspaces().await;
-        workspaces
-            .iter()
-            .any(|w| w.internal_document_map.contains_key(url))
-    }
-
     async fn find_workspace<'a>(&'a self, url: &Url) -> MappedMutexGuard<'a, Workspace> {
         let mut workspaces = self.workspaces.lock().await;
 
