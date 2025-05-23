@@ -48,3 +48,28 @@ impl<'a> Iterator for ChunksBytes<'a> {
         self.chunks.next().map(str::as_bytes)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_log::test;
+
+    #[test]
+    fn test_rope_chunk_callback() {
+        let rope = Rope::from_str("0123456789".repeat(10000).as_str());
+        let rope_provider = RopeProvider::new(&rope);
+
+        let chunk = rope_provider.chunk_callback(5);
+        assert_eq!(chunk.len(), 984 - 5);
+        assert!(chunk.starts_with(b"5678"));
+    }
+
+    #[test]
+    fn test_rope_chunk_callback_end() {
+        let rope = Rope::from_str("");
+        let rope_provider = RopeProvider::new(&rope);
+
+        let chunk = rope_provider.chunk_callback(1);
+        assert_eq!(chunk.len(), 0);
+    }
+}
