@@ -1,7 +1,6 @@
 use std::{fs, path::Path};
 
 use pretty_assertions::assert_eq;
-use ropey::Rope;
 use tempdir::{self, TempDir};
 
 use quick_xml::de::from_str;
@@ -148,7 +147,7 @@ async fn test_language_server_did_change() {
     let workspace = service.inner().find_workspace(&url).await;
 
     let doc = workspace
-        .document_map
+        .internal_document_map
         .get(&url.clone())
         .expect("found the document");
     let doc_content = doc.rope.to_string();
@@ -291,8 +290,11 @@ async fn test_import_resolve() {
     let workspaces = service.inner().lock_workspaces().await;
     assert_eq!(workspaces.len(), 1, "all files should be in one workspace");
     let workspace = workspaces.first().unwrap();
-    info!(" Workspace documents {:#?}", workspace.document_map);
-    let document_count = workspace.document_map.iter().count();
+    info!(
+        " Workspace documents {:#?}",
+        workspace.internal_document_map
+    );
+    let document_count = workspace.internal_document_map.iter().count();
     assert_eq!(document_count, 2);
 }
 
@@ -369,7 +371,7 @@ Class: class-in-first-file
     let workspaces = service.inner().lock_workspaces().await;
     let workspace = workspaces.iter().exactly_one().unwrap();
     let document = workspace
-        .document_map
+        .internal_document_map
         .iter()
         .exactly_one()
         .unwrap_or_else(|_| self::panic!("Multiple documents"));
@@ -564,23 +566,4 @@ async fn arrange_backend(_workspace_folder: Option<WorkspaceFolder>) -> LspServi
 /// This test should initilize all queries and therefore check if they are valid
 fn test_all_queries_valid() {
     let _ = *ALL_QUERIES;
-}
-
-#[test]
-fn test_rope_chunk_callback() {
-    let rope = Rope::from_str("0123456789".repeat(10000).as_str());
-    let rope_provider = RopeProvider::new(&rope);
-
-    let chunk = rope_provider.chunk_callback(5);
-    assert_eq!(chunk.len(), 984 - 5);
-    assert!(chunk.starts_with(b"5678"));
-}
-
-#[test]
-fn test_rope_chunk_callback_end() {
-    let rope = Rope::from_str("");
-    let rope_provider = RopeProvider::new(&rope);
-
-    let chunk = rope_provider.chunk_callback(1);
-    assert_eq!(chunk.len(), 0);
 }

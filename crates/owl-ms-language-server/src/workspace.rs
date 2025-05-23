@@ -3,13 +3,15 @@ use std::{
     ffi::OsStr,
     fmt::Display,
     fs,
-    path::{Path, PathBuf},
+    ops::Deref,
+    path::PathBuf,
 };
 
 use anyhow::anyhow;
 use anyhow::Result;
 use dashmap::DashMap;
-use itertools::{Itertools, Tuples};
+use horned_owl::{curie::PrefixMapping, ontology::set::SetOntology};
+use itertools::Itertools;
 use log::{debug, error, info, warn};
 use ropey::Rope;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, SymbolKind, Url, WorkspaceFolder};
@@ -17,12 +19,13 @@ use tree_sitter::{Node, Parser, Query, QueryCursor, Tree};
 
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
-    rope_provider::RopeProvider, LANGUAGE, NODE_TYPES,
+    rope_provider::RopeProvider, NODE_TYPES,
 };
 
 #[derive(Debug)]
 pub struct Workspace {
-    pub document_map: DashMap<Url, Document>,
+    pub internal_document_map: DashMap<Url, InternalDocument>,
+    pub external_document_map: DashMap<Url, ExternalDocument>,
     pub workspace_folder: WorkspaceFolder,
     pub catalogs: Vec<Catalog>,
 }
@@ -35,7 +38,8 @@ impl Workspace {
             workspace_folder.uri, catalogs
         );
         Workspace {
-            document_map: DashMap::new(),
+            internal_document_map: DashMap::new(),
+            external_document_map: DashMap::new(),
             workspace_folder,
             catalogs,
         }
@@ -53,15 +57,18 @@ impl Workspace {
         fp_file.starts_with(fp_folder)
     }
 
-    pub fn insert_document(&self, document: Document) -> dashmap::mapref::one::Ref<Url, Document> {
+    pub fn insert_document(
+        &self,
+        document: InternalDocument,
+    ) -> dashmap::mapref::one::Ref<Url, InternalDocument> {
         let uri = document.uri.clone();
-        self.document_map.insert(uri.clone(), document);
-        self.document_map.get(&uri).unwrap()
+        self.internal_document_map.insert(uri.clone(), document);
+        self.internal_document_map.get(&uri).unwrap()
     }
 
     // TODO #28 maybe return a reference?
     pub fn search_frame(&self, partial_text: &str) -> Vec<(Iri, FrameInfo)> {
-        self.document_map
+        self.internal_document_map
             .iter()
             .flat_map(|dm| {
                 dm.frame_infos
@@ -74,13 +81,13 @@ impl Workspace {
     }
 
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
-        self.document_map
+        self.internal_document_map
             .iter()
             .filter_map(|dm| dm.frame_infos.get(iri).map(|v| v.value().clone()))
             .tree_reduce(FrameInfo::merge)
     }
 
-    pub fn node_info(&self, node: &Node, doc: &Document) -> String {
+    pub fn node_info(&self, node: &Node, doc: &InternalDocument) -> String {
         match node.kind() {
             "class_frame" | "annotation_property_frame" => {
                 let iri = &node
@@ -116,7 +123,7 @@ impl Workspace {
     }
 
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
-        self.document_map
+        self.internal_document_map
             .iter()
             .flat_map(|doc| doc.query(query))
             .collect_vec()
@@ -126,8 +133,8 @@ impl Workspace {
         &self,
         url: &Url,
         parser: &mut Parser,
-    ) -> Result<dashmap::mapref::one::Ref<'_, Url, Document>> {
-        if let Some(doc) = self.document_map.get(url) {
+    ) -> Result<dashmap::mapref::one::Ref<'_, Url, InternalDocument>> {
+        if let Some(doc) = self.internal_document_map.get(url) {
             // Document is loaded already
             return Ok(doc);
         }
@@ -161,7 +168,7 @@ impl Workspace {
                         }
                     };
 
-                    let document = Document::new(document_url, -1, document_text, parser);
+                    let document = InternalDocument::new(document_url, -1, document_text, parser);
                     return Ok(self.insert_document(document));
                 }
             }
@@ -190,7 +197,19 @@ fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
 }
 
 #[derive(Debug)]
-pub struct Document {
+pub enum Document {
+    Internal(InternalDocument),
+    External(ExternalDocument),
+}
+#[derive(Debug, PartialEq, Eq)]
+pub enum OwlDialect {
+    Unknown,
+    Omn,
+    Owl,
+}
+
+#[derive(Debug)]
+pub struct InternalDocument {
     pub uri: Url,
     pub tree: Tree,
     pub rope: Rope,
@@ -202,15 +221,8 @@ pub struct Document {
     pub owl_dialect: OwlDialect,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum OwlDialect {
-    Unknown,
-    Omn,
-    Owl,
-}
-
-impl Document {
-    pub fn new(uri: Url, version: i32, text: String, parser: &mut Parser) -> Document {
+impl InternalDocument {
+    pub fn new(uri: Url, version: i32, text: String, parser: &mut Parser) -> InternalDocument {
         let owl_dialect = match &uri.path() {
             x if x.ends_with(".owl") => OwlDialect::Owl,
             x if x.ends_with(".omn") => OwlDialect::Omn,
@@ -228,7 +240,7 @@ impl Document {
             let diagnostics = timeit("create_document / gen_diagnostics", || {
                 gen_diagnostics(&tree.root_node())
             });
-            let mut document = Document {
+            let mut document = InternalDocument {
                 owl_dialect,
                 uri,
                 version,
@@ -241,7 +253,7 @@ impl Document {
             document
         } else {
             warn!("Only omn files are supported");
-            Document {
+            InternalDocument {
                 owl_dialect,
                 uri,
                 version,
@@ -470,6 +482,56 @@ impl Document {
                     })
                     .collect_vec(),
             })
+            .collect_vec()
+    }
+}
+
+#[derive(Debug)]
+pub struct ExternalDocument {
+    pub uri: Url,
+    pub text: String,
+    pub ontology: (SetOntology<String>, PrefixMapping),
+    /// This can differ from the url file extention, so we need to track it
+    pub owl_dialect: OwlDialect,
+}
+
+impl ExternalDocument {
+    pub fn new(text: String, url: Url) -> Result<ExternalDocument> {
+        let b = horned_owl::model::Build::new_string();
+        let mut buffer = text.as_bytes();
+        let ontology =
+            horned_owl::io::owx::reader::read_with_build(&mut buffer, &b).map_err(|e| match e {
+                horned_owl::error::HornedError::IOError(error) => {
+                    anyhow!("IO Error: {error}")
+                }
+                horned_owl::error::HornedError::ParserError(error, location) => {
+                    anyhow!("Parsing Error: {error} {location}")
+                }
+                horned_owl::error::HornedError::ValidityError(msg, location) => {
+                    anyhow!("Validity Error: {msg} at {location}")
+                }
+                horned_owl::error::HornedError::CommandError(msg) => {
+                    anyhow!("Command Error: {msg}")
+                }
+            })?;
+
+        Ok(ExternalDocument {
+            uri: url,
+            text,
+            ontology,
+            owl_dialect: OwlDialect::Unknown,
+        })
+    }
+
+    fn reachable_documents(&self) -> Vec<Url> {
+        self.ontology
+            .0
+            .iter()
+            .filter_map(|ac| match &ac.component {
+                horned_owl::model::Component::Import(import) => Some(Url::parse(import.0.deref())),
+                _ => None,
+            })
+            .filter_map(|r| r.ok())
             .collect_vec()
     }
 }
@@ -781,5 +843,78 @@ impl Display for FrameType {
             FrameType::Invalid => "Invalid Frame Type",
         };
         write!(f, "{name}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_log::test;
+
+    #[test]
+    fn external_document_new_given_text_does_parse_ontology() {
+        // Arrange
+        let ontology_text = r#"
+        <?xml version="1.0"?>
+        <Ontology xmlns="http://www.w3.org/2002/07/owl#" xml:base="http://www.example.com/iri" ontologyIRI="http://www.example.com/iri">
+            <Declaration>
+                <Class IRI="https://www.example.com/o1"/>
+            </Declaration>
+        </Ontology>
+        "#
+        .to_string();
+
+        // Act
+        let external_doc = ExternalDocument::new(
+            ontology_text.clone(),
+            Url::parse("https://example.com/onto").unwrap(),
+        );
+
+        // Assert
+        let doc = external_doc.unwrap();
+        assert_eq!(doc.text, ontology_text);
+        let set_onto = &doc.ontology.0;
+        assert_eq!(
+            set_onto
+                .i()
+                .the_ontology_id_or_default()
+                .iri
+                .unwrap()
+                .deref(),
+            "http://www.example.com/iri"
+        );
+    }
+
+    #[test]
+    fn external_document_reachable_documents_given_imports_does_return_imports() {
+        // Arrange
+        let ontology_text = r#"
+        <?xml version="1.0"?>
+        <Ontology xmlns="http://www.w3.org/2002/07/owl#" xml:base="http://www.example.com/iri" ontologyIRI="http://www.example.com/iri">
+            <Import>file:///abosulte/file</Import>
+            <Import>http://www.example.com/other-property</Import>
+            <Declaration>
+                <Class IRI="https://www.example.com/o9"/>
+            </Declaration>
+        </Ontology>
+        "#
+    .to_string();
+        let external_doc = ExternalDocument::new(
+            ontology_text.clone(),
+            Url::parse("https://example.com/onto").unwrap(),
+        )
+        .unwrap();
+
+        // Act
+        let urls = external_doc.reachable_documents();
+
+        // Assert
+        assert_eq!(
+            urls,
+            vec![
+                Url::parse("http://www.example.com/other-property").unwrap(),
+                Url::parse("file:///abosulte/file").unwrap()
+            ]
+        );
     }
 }

@@ -11,7 +11,7 @@ mod workspace;
 use core::panic;
 use debugging::timeit;
 use itertools::Itertools;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use once_cell::sync::Lazy;
 use position::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
@@ -25,7 +25,7 @@ use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
 use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree, TreeCursor};
 use tree_sitter_owl_ms::language;
-use workspace::{gen_diagnostics, node_text, Document, Workspace};
+use workspace::{gen_diagnostics, node_text, InternalDocument, Workspace};
 
 // Constants
 
@@ -191,7 +191,7 @@ impl LanguageServer for Backend {
 
         let mut parser_guard = self.parser.lock().await;
 
-        let document = Document::new(
+        let document = InternalDocument::new(
             url.clone(),
             params.text_document.version,
             params.text_document.text,
@@ -230,7 +230,10 @@ impl LanguageServer for Backend {
         let url = &params.text_document.uri;
         let workspace = self.find_workspace(url).await;
 
-        if let Some(mut document) = workspace.document_map.get_mut(&params.text_document.uri) {
+        if let Some(mut document) = workspace
+            .internal_document_map
+            .get_mut(&params.text_document.uri)
+        {
             if document.version >= params.text_document.version {
                 return; // no change needed
             }
@@ -428,7 +431,7 @@ impl LanguageServer for Backend {
 
         let workspace = self.find_workspace(&url).await;
 
-        Ok(workspace.document_map.get(&url).map(|document| {
+        Ok(workspace.internal_document_map.get(&url).map(|document| {
             let pos = params.text_document_position_params.position.into();
             let node = deepest_named_node_at_pos(&document.tree, pos);
             let info = workspace.node_info(&node, &document);
@@ -452,7 +455,7 @@ impl LanguageServer for Backend {
         );
 
         let workspace = self.find_workspace(&url).await;
-        let document = if let Some(doc) = workspace.document_map.get(&url) {
+        let document = if let Some(doc) = workspace.internal_document_map.get(&url) {
             doc
         } else {
             return Err(tower_lsp::jsonrpc::Error::invalid_params(
@@ -525,7 +528,7 @@ impl LanguageServer for Backend {
         );
         let uri = params.text_document_position_params.text_document.uri;
         let workspace = self.find_workspace(&uri).await;
-        let maybe_doc = workspace.document_map.get(&uri);
+        let maybe_doc = workspace.internal_document_map.get(&uri);
         if let Some(doc) = maybe_doc {
             let pos: Position = params.text_document_position_params.position.into();
 
@@ -563,7 +566,7 @@ impl LanguageServer for Backend {
         debug!("code_action at {}", params.text_document.uri);
         let url = params.text_document.uri;
         let workspace = self.find_workspace(&url).await;
-        let doc = workspace.document_map.get(&url).unwrap();
+        let doc = workspace.internal_document_map.get(&url).unwrap();
         let end: Position = doc.tree.root_node().range().end_point.into();
 
         Ok(Some(vec![CodeActionOrCommand::CodeAction(CodeAction {
@@ -595,7 +598,7 @@ impl LanguageServer for Backend {
         );
         let url = params.text_document_position.text_document.uri;
         let workspace = self.find_workspace(&url).await;
-        let doc = workspace.document_map.get(&url);
+        let doc = workspace.internal_document_map.get(&url);
         let pos: Position = params.text_document_position.position.into();
 
         Ok(doc.map(|doc| {
@@ -659,7 +662,7 @@ impl LanguageServer for Backend {
         debug!("semantic_tokens_full at {}", params.text_document.uri);
         let uri = params.text_document.uri;
         let workspace = self.find_workspace(&uri).await;
-        if let Some(doc) = workspace.document_map.get(&uri) {
+        if let Some(doc) = workspace.internal_document_map.get(&uri) {
             let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
 
             let query = Query::new(*LANGUAGE, query_source).expect("valid query expect");
@@ -724,7 +727,7 @@ impl LanguageServer for Backend {
         let c = workspaces
             .iter()
             .flat_map(|w| {
-                w.document_map.iter()
+                w.internal_document_map.iter()
                 // .map(|d| d.value().clone())
                 // .flat_map(|d| d.frame_infos.iter().map(|i| i.value())) //.iter().map(|i| i.value()))
             })
@@ -766,14 +769,16 @@ impl Backend {
     /// this functions searches in all openend workspaces.
     async fn has_document(&self, url: &Url) -> bool {
         let workspaces = self.lock_workspaces().await;
-        workspaces.iter().any(|w| w.document_map.contains_key(url))
+        workspaces
+            .iter()
+            .any(|w| w.internal_document_map.contains_key(url))
     }
 
     async fn find_workspace<'a>(&'a self, url: &Url) -> MappedMutexGuard<'a, Workspace> {
         let mut workspaces = self.workspaces.lock().await;
 
         let maybe_workspace = workspaces.iter().find(|workspace| {
-            workspace.document_map.contains_key(url)
+            workspace.internal_document_map.contains_key(url)
                 || workspace
                     .catalogs
                     .iter()
@@ -801,7 +806,7 @@ impl Backend {
 
     async fn resolve_imports(
         &self,
-        document: &Document,
+        document: &InternalDocument,
         workspace: &Workspace,
         parser: &mut Parser,
     ) {
