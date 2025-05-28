@@ -10,6 +10,10 @@ use tower_lsp::LspService;
 
 use crate::{catalog::Catalog, *};
 
+/// This file contains unit tests and integration tests.
+/// The tests are written in a arrange-act-assert style.
+/// Functions starting with "arrange_" are utility for arraning testing environments.
+
 #[test]
 fn test_parse() {
     let mut parser = arrange_parser();

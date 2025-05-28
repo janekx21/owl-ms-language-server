@@ -11,7 +11,7 @@ mod workspace;
 use core::panic;
 use debugging::timeit;
 use itertools::Itertools;
-use log::{debug, info};
+use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
 use position::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
@@ -751,7 +751,7 @@ impl LanguageServer for Backend {
                 fi.definitions.iter().map(|definition| SymbolInformation {
                     name: fi.iri.clone(),
                     kind: fi.frame_type.into(),
-                    tags: None,
+                    tags: Some(vec![]), // TODO #38 add support for depricated entities
                     deprecated: None,
                     location: definition.clone().into(),
                     container_name: None,
@@ -826,60 +826,9 @@ impl Backend {
 
         for url in urls {
             info!("Resolving url {url}");
-            workspace.resolve_url_to_document(&url, parser);
-
-            //     // TODO #8 filepath
-            //     if workspace.document_map.contains_key(&url) {
-            //         debug!("This document is already in the backend. URL: {}", url);
-            //     } else {
-            //         debug!("Try to resolve URL {}", url);
-            //         // Find uri in catalog
-            //         debug!("{:?}", workspace.catalogs);
-            //         for c in &workspace.catalogs {
-            //             for u in &c.uri {
-            //                 debug!("url {}  u.name {}", url, u.name);
-            //                 if u.name == url.to_string() {
-            //                     // This is an import of a local file!
-            //                     let path = Path::new(&c.locaton).parent().unwrap().join(&u.uri);
-            //                     debug!(
-            //                         "Found matching local file {:?} loading from path {}",
-            //                         u,
-            //                         path.display()
-            //                     );
-            //                     let ontology_text = fs::read_to_string(&path).unwrap();
-            //                     let document = Document::new(
-            //                         Url::from_file_path(path).unwrap(),
-            //                         -1,
-            //                         ontology_text,
-            //                         parser,
-            //                     );
-            //                     workspace.insert_document(document);
-            //                 }
-            //             }
-            //         }
-
-            //         // debug!("Resolving import of {}", url.clone());
-            //         // TODO #10
-            //         // let ontology_text = ureq::get(url.to_string())
-            //         //     .call()
-            //         //     .unwrap()
-            //         //     .body_mut()
-            //         //     .read_to_string()
-            //         //     .unwrap();
-
-            //         // debug!(
-            //         //     "Inserted imported document URL: {}, number of iris: {}, number of diagnostics: {}",
-            //         //     url,
-            //         //     document.iri_info_map.iter().count(),
-            //         //     document.diagnostics.len()
-            //         // );
-            //         // }
-            //         // } else {
-            //         // warn!("The imported URL type is not supported. URL: {}", url);
-            //         // }
-
-            //         // debug!("Resolved import {} to\n{}", url, resolved_import);
-            //     }
+            let _ = workspace
+                .resolve_url_to_document(&url, parser)
+                .inspect_err(|e| error!("Error while resolving imports: {e}"));
         }
     }
 }

@@ -3,12 +3,13 @@ use std::{
     ffi::OsStr,
     fmt::Display,
     fs,
+    path::{Path, PathBuf},
 };
 
 use anyhow::anyhow;
 use anyhow::Result;
 use dashmap::DashMap;
-use itertools::Itertools;
+use itertools::{Itertools, Tuples};
 use log::{debug, error, info, warn};
 use ropey::Rope;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, SymbolKind, Url, WorkspaceFolder};
@@ -20,7 +21,7 @@ use crate::{
     queries::ALL_QUERIES,
     range::Range,
     rope_provider::RopeProvider,
-    NODE_TYPES,
+    LANGUAGE, NODE_TYPES,
 };
 
 #[derive(Debug)]
@@ -56,7 +57,6 @@ impl Workspace {
             }
         }
     }
-
     fn load_catalog_uri(
         &self,
         catalog: &Catalog,
@@ -65,9 +65,7 @@ impl Workspace {
     ) -> Result<()> {
         let path = catalog.parent_folder().join(catalog_uri.uri.clone());
         let file_url = Url::from_file_path(path).map_err(|_| anyhow!("Path is not absolute"))?;
-        self.resolve_url_to_document(&file_url, parser)
-            .ok_or(anyhow!("Could not resolve to document"))?;
-
+        self.resolve_url_to_document(&file_url, parser)?;
         Ok(())
     }
 
@@ -156,42 +154,79 @@ impl Workspace {
         &self,
         url: &Url,
         parser: &mut Parser,
-    ) -> Option<dashmap::mapref::one::Ref<'_, Url, Document>> {
+    ) -> Result<dashmap::mapref::one::Ref<'_, Url, Document>> {
+        debug!("Try loading {url} at {}", self.workspace_folder.uri);
         if let Some(doc) = self.document_map.get(url) {
             // Document is loaded already
-            return Some(doc);
+            return Ok(doc);
         }
 
         for catalog in &self.catalogs {
             for catalog_uri in catalog.all_catalog_uris() {
+                // Try loading files based on the catalog target
                 if catalog_uri.name == url.to_string() {
-                    // Load document from disk
-                    let path = catalog.parent_folder().join(&catalog_uri.uri);
+                    let file_or_external_url = Url::parse(&catalog_uri.name);
 
-                    if path.extension() != Some(OsStr::new("omn")) {
-                        warn!("Non omn files can not be loaded. path {}", path.display());
-                        return None;
-                    }
+                    let (document_text, document_url) = match file_or_external_url {
+                        Ok(url) => match url.to_file_path() {
+                            Ok(path) => {
+                                // This is an abolute file path url
+                                load_file_from_disk(path)?
+                            }
+                            Err(_) => {
+                                // This is an external url
+                                let text = ureq::get(url.to_string())
+                                    .call()?
+                                    .body_mut()
+                                    .read_to_string()?;
+                                (text, url)
+                            }
+                        },
+                        Err(_) => {
+                            // This is a relative file path
+                            let path = catalog.parent_folder().join(&catalog_uri.uri);
 
-                    return if let Ok(ontology_text) = fs::read_to_string(&path) {
-                        let document = Document::new(
-                            Url::from_file_path(&path).unwrap(),
-                            -1,
-                            ontology_text,
-                            parser,
-                        );
-                        info!("Loaded file from disk at {}", path.display());
-                        Some(self.insert_document(document))
-                    } else {
-                        error!("File could not be loaded at {}", path.display());
-                        None
+                            info!("Loaded file from disk at {}", path.display());
+                            load_file_from_disk(path)?
+                        }
                     };
+
+                    let document = Document::new(document_url, -1, document_text, parser);
+                    return Ok(self.insert_document(document));
+                }
+
+                // Try loading files based on the catalog source
+                let file_path = url
+                    .to_file_path()
+                    .map_err(|_| anyhow!("Url not an absoulte file path"))?;
+                if catalog.parent_folder().join(&catalog_uri.uri) == file_path {
+                    let (document_text, document_url) = load_file_from_disk(file_path)?;
+                    let document = Document::new(document_url, -1, document_text, parser);
+                    return Ok(self.insert_document(document));
                 }
             }
         }
-        error!("The document at {url} could not be found in the workspace");
-        None
+        Err(anyhow!(
+            "The document at {url} could not be found in the workspace"
+        ))
     }
+}
+
+fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
+    if path.extension() != Some(OsStr::new("omn")) {
+        warn!("Non omn files can not be loaded. path {}", path.display());
+        return Err(anyhow!(
+            "Non omn files can not be loaded. path {}",
+            path.display()
+        ));
+    }
+
+    info!("Loading file from disk {}", path.display());
+
+    Ok((
+        fs::read_to_string(&path)?,
+        Url::from_file_path(&path).map_err(|_| anyhow!("Url is not a file path"))?,
+    ))
 }
 
 #[derive(Debug)]
@@ -202,37 +237,71 @@ pub struct Document {
     pub version: i32,
     pub diagnostics: Vec<Diagnostic>,
     pub frame_infos: DashMap<Iri, FrameInfo>,
+
+    /// This can differ from the url file extention, so we need to track it
+    pub owl_dialect: OwlDialect,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum OwlDialect {
+    Unknown,
+    Omn,
+    Owl,
 }
 
 impl Document {
-    /// Arguments:
-    /// - `uri` This must be a file url
     pub fn new(uri: Url, version: i32, text: String, parser: &mut Parser) -> Document {
-        let tree = timeit("create_document / parse", || {
-            parser
-                .parse(&text, None)
-                .expect("language to be set, no timeout to be used, no cancelation flag")
-        });
-
-        let rope = Rope::from(text);
-        let diagnostics = timeit("create_document / gen_diagnostics", || {
-            gen_diagnostics(&tree.root_node())
-        });
-
-        let mut document = Document {
-            uri,
-            version,
-            tree,
-            rope,
-            frame_infos: DashMap::new(),
-            diagnostics,
+        let owl_dialect = match &uri.path() {
+            x if x.ends_with(".owl") => OwlDialect::Owl,
+            x if x.ends_with(".omn") => OwlDialect::Omn,
+            _ => OwlDialect::Unknown,
         };
-        document.frame_infos = document.gen_frame_infos(None);
-        document
+
+        if owl_dialect == OwlDialect::Omn {
+            let tree = timeit("create_document / parse", || {
+                parser
+                    .parse(&text, None)
+                    .expect("language to be set, no timeout to be used, no cancelation flag")
+            });
+
+            let rope = Rope::from(text);
+            let diagnostics = timeit("create_document / gen_diagnostics", || {
+                gen_diagnostics(&tree.root_node())
+            });
+            let mut document = Document {
+                owl_dialect,
+                uri,
+                version,
+                tree,
+                rope,
+                frame_infos: DashMap::new(),
+                diagnostics,
+            };
+            document.frame_infos = document.gen_frame_infos(None);
+            document
+        } else {
+            warn!("Only omn files are supported");
+            Document {
+                owl_dialect,
+                uri,
+                version,
+                tree: parser
+                    .parse(&text, None)
+                    .expect("language to be set, no timeout to be used, no cancelation flag"),
+                rope: Rope::from(text),
+
+                frame_infos: DashMap::new(),
+                diagnostics: vec![],
+            }
+        }
     }
 
     /// Generate an async hash map that resolves IRIs to infos about that IRI
     pub fn gen_frame_infos(&self, range: Option<&Range>) -> DashMap<Iri, FrameInfo> {
+        if self.owl_dialect != OwlDialect::Omn {
+            error!("Only omn files are supported for frame infos");
+            return DashMap::new();
+        }
         debug!("Generating frame infos");
 
         let tree = &self.tree;
@@ -355,7 +424,12 @@ impl Document {
         let docs = self
             .reachable_docs_recusive(workspace, parser)
             .iter()
-            .filter_map(|url| workspace.resolve_url_to_document(url, parser))
+            .filter_map(|url| {
+                workspace
+                    .resolve_url_to_document(url, parser)
+                    .inspect_err(|e| error!("{e}"))
+                    .ok()
+            })
             .collect_vec();
 
         info!("Query in documents with additional {}", docs.len());
@@ -385,7 +459,12 @@ impl Document {
         let docs = self
             .reachable_documents()
             .iter()
-            .filter_map(|url| workspace.resolve_url_to_document(url, parser))
+            .filter_map(|url| {
+                workspace
+                    .resolve_url_to_document(url, parser)
+                    .inspect_err(|e| error!("{e}"))
+                    .ok()
+            })
             .collect_vec();
 
         for doc in docs {
