@@ -14,13 +14,35 @@ use walkdir::WalkDir;
 #[serde(rename_all = "kebab-case")]
 pub struct Catalog {
     #[serde(default)]
-    pub uri: Vec<CatalogUri>,
+    uri: Vec<CatalogUri>,
     #[serde(default)]
-    pub group: Vec<CatalogGroup>,
+    group: Vec<CatalogGroup>,
 
     /// Warning! This is the path to the catalog file NOT its parent folder.
     #[serde(skip)]
-    pub locaton: String,
+    locaton: String,
+}
+
+impl Catalog {
+    #[cfg(test)]
+    pub fn new(location: &str) -> Catalog {
+        Catalog {
+            uri: vec![],
+            group: vec![],
+            locaton: location.into(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_uri(self, name: &str, uri: &str) -> Catalog {
+        let mut c = self.clone();
+        c.uri.push(CatalogUri {
+            _id: "Constructed in a builder".into(),
+            name: name.into(),
+            uri: uri.into(),
+        });
+        c
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

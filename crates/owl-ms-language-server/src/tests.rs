@@ -229,11 +229,7 @@ fn test_deserialize_catalog_without_group() {
 #[test]
 fn test_serialize_catalog() {
     // Arrange
-    let value = Catalog {
-        uri: vec![],
-        group: vec![],
-        locaton: "".into(),
-    };
+    let value = Catalog::new("testing");
 
     // Act
     let xml = quick_xml::se::to_string(&value).unwrap();
@@ -248,22 +244,11 @@ async fn test_import_resolve() {
 
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![
-            WorkspaceMember::CatalogFile(Catalog {
-                uri: vec![
-                    CatalogUri {
-                        _id: "Testing".to_string(),
-                        name: "http://external.org/shared.omn".to_string(),
-                        uri: "foobaronto.omn".to_string(),
-                    },
-                    CatalogUri {
-                        _id: "Testing".to_string(),
-                        name: "http://foobar.org/ontology/".to_string(),
-                        uri: "foo.omn".to_string(),
-                    },
-                ],
-                locaton: dir.join("catalog-v001.xml").to_str().unwrap().to_string(),
-                group: vec![],
-            }),
+            WorkspaceMember::CatalogFile(
+                Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
+                    .with_uri("http://external.org/shared.omn", "foobaronto.omn")
+                    .with_uri("http://foobar.org/ontology/", "foo.omn"),
+            ),
             WorkspaceMember::OmnFile {
                 name: "foobaronto.omn".into(),
                 content: "".into(),

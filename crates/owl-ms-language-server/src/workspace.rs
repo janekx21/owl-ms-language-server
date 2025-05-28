@@ -132,7 +132,7 @@ impl Workspace {
         }
 
         for catalog in &self.catalogs {
-            for catalog_uri in &catalog.uri {
+            for catalog_uri in catalog.all_catalog_uris() {
                 if catalog_uri.name == url.to_string() {
                     // Load document from disk
                     let path = catalog.parent_folder().join(&catalog_uri.uri);

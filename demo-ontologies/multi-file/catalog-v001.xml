@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <catalog prefer="public" xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
-    <uri id="Imports Wizard Entry" name="http://a.b/multi-file/other" uri="other.omn"/>
+    <group>
+        <uri id="Imports Wizard Entry" name="http://a.b/multi-file/other" uri="other.omn"/>
+    </group>
 </catalog>
