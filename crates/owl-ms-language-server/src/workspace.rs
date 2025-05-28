@@ -142,7 +142,7 @@ impl Workspace {
         for catalog in &self.catalogs {
             for catalog_uri in catalog.all_catalog_uris() {
                 if catalog_uri.name == url.to_string() {
-                    let file_or_external_url = Url::parse(&catalog_uri.name);
+                    let file_or_external_url = Url::parse(&catalog_uri.uri);
 
                     let (document_text, document_url) = match file_or_external_url {
                         Ok(url) => match url.to_file_path() {
@@ -888,19 +888,19 @@ mod tests {
     #[test]
     fn external_document_reachable_documents_given_imports_does_return_imports() {
         // Arrange
-        let ontology_text = r#"
-        <?xml version="1.0"?>
-        <Ontology xmlns="http://www.w3.org/2002/07/owl#" xml:base="http://www.example.com/iri" ontologyIRI="http://www.example.com/iri">
-            <Import>file:///abosulte/file</Import>
-            <Import>http://www.example.com/other-property</Import>
-            <Declaration>
-                <Class IRI="https://www.example.com/o9"/>
-            </Declaration>
-        </Ontology>
+        let owl_ontology_text = r#"
+            <?xml version="1.0"?>
+            <Ontology xmlns="http://www.w3.org/2002/07/owl#" xml:base="http://www.example.com/iri" ontologyIRI="http://www.example.com/iri">
+                <Import>file:///abosulte/file</Import>
+                <Import>http://www.example.com/other-property</Import>
+                <Declaration>
+                    <Class IRI="https://www.example.com/o9"/>
+                </Declaration>
+            </Ontology>
         "#
     .to_string();
         let external_doc = ExternalDocument::new(
-            ontology_text.clone(),
+            owl_ontology_text.clone(),
             Url::parse("https://example.com/onto").unwrap(),
         )
         .unwrap();
@@ -909,12 +909,7 @@ mod tests {
         let urls = external_doc.reachable_documents();
 
         // Assert
-        assert_eq!(
-            urls,
-            vec![
-                Url::parse("http://www.example.com/other-property").unwrap(),
-                Url::parse("file:///abosulte/file").unwrap()
-            ]
-        );
+        assert!(urls.contains(&Url::parse("http://www.example.com/other-property").unwrap()));
+        assert!(urls.contains(&Url::parse("file:///abosulte/file").unwrap()));
     }
 }

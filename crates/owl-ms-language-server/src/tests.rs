@@ -387,7 +387,7 @@ Class: class-in-first-file
 }
 
 #[test(tokio::test)]
-async fn test_workspace_symbolds() {
+async fn test_workspace_symbols() {
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|dir| {
