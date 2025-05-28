@@ -5,6 +5,8 @@ use std::{
     fs,
 };
 
+use anyhow::anyhow;
+use anyhow::Result;
 use dashmap::DashMap;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
@@ -13,8 +15,12 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, SymbolKind, Url, Work
 use tree_sitter::{Node, Parser, Query, QueryCursor, Tree};
 
 use crate::{
-    catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
-    rope_provider::RopeProvider, LANGUAGE, NODE_TYPES,
+    catalog::{Catalog, CatalogUri},
+    debugging::timeit,
+    queries::ALL_QUERIES,
+    range::Range,
+    rope_provider::RopeProvider,
+    NODE_TYPES,
 };
 
 #[derive(Debug)]
@@ -36,6 +42,33 @@ impl Workspace {
             workspace_folder,
             catalogs,
         }
+    }
+
+    pub fn load_catalog_documents(&self, parser: &mut Parser) {
+        for catalog in &self.catalogs {
+            for catalog_uri in catalog.all_catalog_uris() {
+                match self.load_catalog_uri(catalog, catalog_uri, parser) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("Load catalog documents error: {e}");
+                    }
+                }
+            }
+        }
+    }
+
+    fn load_catalog_uri(
+        &self,
+        catalog: &Catalog,
+        catalog_uri: &CatalogUri,
+        parser: &mut Parser,
+    ) -> Result<()> {
+        let path = catalog.parent_folder().join(catalog_uri.uri.clone());
+        let file_url = Url::from_file_path(path).map_err(|_| anyhow!("Path is not absolute"))?;
+        self.resolve_url_to_document(&file_url, parser)
+            .ok_or(anyhow!("Could not resolve to document"))?;
+
+        Ok(())
     }
 
     /// Returns a bool that specifies if the workspace url is a base for the provided url and therefore
@@ -172,6 +205,8 @@ pub struct Document {
 }
 
 impl Document {
+    /// Arguments:
+    /// - `uri` This must be a file url
     pub fn new(uri: Url, version: i32, text: String, parser: &mut Parser) -> Document {
         let tree = timeit("create_document / parse", || {
             parser

@@ -78,13 +78,21 @@ impl LanguageServer for Backend {
         let mut pg = self.position_encoding.lock().await;
         *pg = encoding.clone();
 
-        let mut wf = self.workspaces.lock().await;
-        *wf = params
-            .workspace_folders
-            .unwrap_or_default()
-            .iter()
-            .map(|wf| Workspace::new(wf.clone()))
-            .collect();
+        {
+            let mut parser = self.parser.lock().await;
+
+            let mut wf = self.workspaces.lock().await;
+            *wf = params
+                .workspace_folders
+                .unwrap_or_default()
+                .iter()
+                .map(|wf| {
+                    let w = Workspace::new(wf.clone());
+                    w.load_catalog_documents(&mut parser);
+                    w
+                })
+                .collect();
+        }
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
