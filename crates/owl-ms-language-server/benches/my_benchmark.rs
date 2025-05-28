@@ -2,7 +2,6 @@ use std::{hint::black_box, time::Duration};
 
 // use crate::Backend;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use itertools::Itertools;
 use owl_ms_language_server::rope_provider::RopeProvider;
 use ropey::Rope;
 use tree_sitter::{InputEdit, Parser, Point, Query, QueryCursor, Tree};

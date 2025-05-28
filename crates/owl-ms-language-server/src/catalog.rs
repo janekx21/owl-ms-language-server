@@ -4,7 +4,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use log::{debug, info};
+use log::info;
 use quick_xml::de::from_str;
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Url;

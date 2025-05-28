@@ -7,7 +7,7 @@ use test_log::test;
 use tower_lsp::LspService;
 
 use crate::{
-    catalog::{Catalog, CatalogUri},
+    catalog::Catalog,
     *,
 };
 

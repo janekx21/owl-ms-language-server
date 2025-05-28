@@ -3,8 +3,6 @@ use std::{
     ffi::OsStr,
     fmt::Display,
     fs,
-    iter::once,
-    path::Path,
 };
 
 use dashmap::DashMap;
