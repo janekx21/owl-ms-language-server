@@ -1,3 +1,5 @@
+use std::{fs, path::Path};
+
 use pretty_assertions::assert_eq;
 use ropey::Rope;
 use tempdir::{self, TempDir};
@@ -6,10 +8,7 @@ use quick_xml::de::from_str;
 use test_log::test;
 use tower_lsp::LspService;
 
-use crate::{
-    catalog::Catalog,
-    *,
-};
+use crate::{catalog::Catalog, *};
 
 #[test]
 fn test_parse() {
