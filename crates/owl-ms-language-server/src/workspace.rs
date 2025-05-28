@@ -3,13 +3,13 @@ use std::{
     ffi::OsStr,
     fmt::Display,
     fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
 use anyhow::anyhow;
 use anyhow::Result;
 use dashmap::DashMap;
-use itertools::{Itertools, Tuples};
+use itertools::Itertools;
 use log::{debug, error, info, warn};
 use ropey::Rope;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, SymbolKind, Url, WorkspaceFolder};
@@ -20,8 +20,7 @@ use crate::{
     debugging::timeit,
     queries::ALL_QUERIES,
     range::Range,
-    rope_provider::RopeProvider,
-    LANGUAGE, NODE_TYPES,
+    rope_provider::RopeProvider, NODE_TYPES,
 };
 
 #[derive(Debug)]
@@ -568,11 +567,11 @@ pub struct Location {
     range: Range,
 }
 
-impl Into<tower_lsp::lsp_types::Location> for Location {
-    fn into(self) -> tower_lsp::lsp_types::Location {
+impl From<Location> for tower_lsp::lsp_types::Location {
+    fn from(val: Location) -> Self {
         tower_lsp::lsp_types::Location {
-            uri: self.uri,
-            range: self.range.into(),
+            uri: val.uri,
+            range: val.range.into(),
         }
     }
 }

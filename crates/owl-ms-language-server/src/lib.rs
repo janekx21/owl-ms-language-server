@@ -11,7 +11,7 @@ mod workspace;
 use core::panic;
 use debugging::timeit;
 use itertools::Itertools;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use once_cell::sync::Lazy;
 use position::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
