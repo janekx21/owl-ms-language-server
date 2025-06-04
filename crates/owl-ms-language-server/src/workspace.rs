@@ -5,6 +5,7 @@ use std::{
     fs,
     ops::Deref,
     path::PathBuf,
+    sync::{Arc, RwLock},
 };
 
 use anyhow::anyhow;
@@ -13,6 +14,7 @@ use dashmap::DashMap;
 use horned_owl::{curie::PrefixMapping, ontology::set::SetOntology};
 use itertools::Itertools;
 use log::{debug, error, info, warn};
+use once_cell::sync::Lazy;
 use ropey::Rope;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, SymbolKind, Url, WorkspaceFolder};
 use tree_sitter::{Node, Parser, Query, QueryCursor, Tree};
@@ -24,8 +26,8 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Workspace {
-    pub internal_document_map: DashMap<Url, InternalDocument>,
-    pub external_document_map: DashMap<Url, ExternalDocument>,
+    /// Maps an URL to a document that can be internal or external
+    pub documents: DashMap<Url, Arc<RwLock<Document>>>,
     pub workspace_folder: WorkspaceFolder,
     pub catalogs: Vec<Catalog>,
 }
@@ -38,11 +40,21 @@ impl Workspace {
             workspace_folder.uri, catalogs
         );
         Workspace {
-            internal_document_map: DashMap::new(),
-            external_document_map: DashMap::new(),
+            documents: DashMap::new(),
             workspace_folder,
             catalogs,
         }
+    }
+
+    // TODO how to do this?
+    pub fn internal_documents(&self) -> DashMap<Url, Arc<RwLock<InternalDocument>>> {
+        self.documents
+            .iter()
+            .filter_map(|doc| match &*doc.read().unwrap() {
+                Document::Internal(internal_document) => Some(internal_document),
+                Document::External(external_document) => None,
+            })
+            .collect();
     }
 
     /// Returns a bool that specifies if the workspace url is a base for the provided url and therefore
@@ -57,21 +69,20 @@ impl Workspace {
         fp_file.starts_with(fp_folder)
     }
 
-    pub fn insert_document(
-        &self,
-        document: InternalDocument,
-    ) -> dashmap::mapref::one::Ref<Url, InternalDocument> {
-        let uri = document.uri.clone();
-        self.internal_document_map.insert(uri.clone(), document);
-        self.internal_document_map.get(&uri).unwrap()
+    pub fn insert_document(&self, document: Document) -> Arc<RwLock<Document>> {
+        let uri = document.url();
+        let arc = Arc::new(RwLock::new(document));
+        self.documents.insert(uri, arc.clone());
+        arc
     }
 
     // TODO #28 maybe return a reference?
     pub fn search_frame(&self, partial_text: &str) -> Vec<(Iri, FrameInfo)> {
-        self.internal_document_map
+        self.documents
             .iter()
             .flat_map(|dm| {
-                dm.frame_infos
+                let dm = &*dm.value().read().unwrap();
+                dm.frame_infos()
                     .iter()
                     .filter(|item| item.key().contains(partial_text))
                     .map(|kv| (kv.key().clone(), kv.value().clone()))
@@ -81,9 +92,12 @@ impl Workspace {
     }
 
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
-        self.internal_document_map
+        self.documents
             .iter()
-            .filter_map(|dm| dm.frame_infos.get(iri).map(|v| v.value().clone()))
+            .filter_map(|dm| {
+                let dm = dm.value().read().unwrap();
+                dm.frame_infos().get(iri).map(|v| v.value().clone())
+            })
             .tree_reduce(FrameInfo::merge)
     }
 
@@ -123,20 +137,16 @@ impl Workspace {
     }
 
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
-        self.internal_document_map
+        self.documents
             .iter()
-            .flat_map(|doc| doc.query(query))
+            .flat_map(|doc| doc.read().unwrap().query(query))
             .collect_vec()
     }
 
-    pub fn resolve_url_to_document(
-        &self,
-        url: &Url,
-        parser: &mut Parser,
-    ) -> Result<dashmap::mapref::one::Ref<'_, Url, InternalDocument>> {
-        if let Some(doc) = self.internal_document_map.get(url) {
+    pub fn resolve_url_to_document(&self, url: &Url, parser: &mut Parser) -> Result<DocumentRef> {
+        if let Some(doc) = self.documents.get(url) {
             // Document is loaded already
-            return Ok(doc);
+            return Ok(doc.clone());
         }
 
         for catalog in &self.catalogs {
@@ -144,19 +154,32 @@ impl Workspace {
                 if catalog_uri.name == url.to_string() {
                     let file_or_external_url = Url::parse(&catalog_uri.uri);
 
-                    let (document_text, document_url) = match file_or_external_url {
+                    match file_or_external_url {
                         Ok(url) => match url.to_file_path() {
                             Ok(path) => {
                                 // This is an abolute file path url
-                                load_file_from_disk(path)?
+                                let (document_text, document_url) = load_file_from_disk(path)?;
+                                let document = Document::Internal(Box::new(InternalDocument::new(
+                                    document_url,
+                                    -1,
+                                    document_text,
+                                    parser,
+                                )));
+                                let doc = self.insert_document(document);
+                                return Ok(doc);
                             }
                             Err(_) => {
                                 // This is an external url
-                                let text = ureq::get(url.to_string())
+                                let document_text = ureq::get(url.to_string())
                                     .call()?
                                     .body_mut()
                                     .read_to_string()?;
-                                (text, url)
+                                let document = Document::External(Box::new(ExternalDocument::new(
+                                    document_text,
+                                    url,
+                                )?));
+                                let doc = self.insert_document(document);
+                                return Ok(doc);
                             }
                         },
                         Err(_) => {
@@ -164,12 +187,18 @@ impl Workspace {
                             let path = catalog.parent_folder().join(&catalog_uri.uri);
 
                             info!("Loaded file from disk at {}", path.display());
-                            load_file_from_disk(path)?
+                            let (document_text, document_url) = load_file_from_disk(path)?;
+
+                            let document = Document::Internal(Box::new(InternalDocument::new(
+                                document_url,
+                                -1,
+                                document_text,
+                                parser,
+                            )));
+                            let doc = self.insert_document(document);
+                            return Ok(doc);
                         }
                     };
-
-                    let document = InternalDocument::new(document_url, -1, document_text, parser);
-                    return Ok(self.insert_document(document));
                 }
             }
         }
@@ -196,11 +225,41 @@ fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
     ))
 }
 
+pub type DocumentRef = Arc<RwLock<Document>>;
+
 #[derive(Debug)]
 pub enum Document {
     Internal(Box<InternalDocument>),
     External(Box<ExternalDocument>),
 }
+
+static EMTPTY_FRAME_INFO_MAP: Lazy<DashMap<Iri, FrameInfo>> = Lazy::new(|| DashMap::new());
+
+impl Document {
+    fn url(&self) -> Url {
+        match self {
+            Document::Internal(internal_document) => internal_document.uri.clone(),
+            Document::External(external_document) => external_document.uri.clone(),
+        }
+    }
+
+    #[deprecated = "This will not result in all data. Query the document instead."]
+    fn frame_infos(&self) -> &DashMap<Iri, FrameInfo> {
+        match self {
+            Document::Internal(internal_document) => &internal_document.frame_infos,
+            // This is a sub for empty data
+            Document::External(_) => &*EMTPTY_FRAME_INFO_MAP,
+        }
+    }
+
+    pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
+        match self {
+            Document::Internal(internal_document) => internal_document.query(query),
+            Document::External(external_document) => vec![], // TODO
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum OwlDialect {
     Unknown,
@@ -215,6 +274,7 @@ pub struct InternalDocument {
     pub rope: Rope,
     pub version: i32,
     pub diagnostics: Vec<Diagnostic>,
+    #[deprecated = "Will not be filled with data. Query the AST directly with the query functions"]
     pub frame_infos: DashMap<Iri, FrameInfo>,
 
     /// This can differ from the url file extention, so we need to track it
@@ -406,7 +466,9 @@ impl InternalDocument {
 
         info!("Query in documents with additional {}", docs.len());
 
-        docs.iter().flat_map(|doc| doc.query(query)).collect_vec()
+        docs.iter()
+            .flat_map(|doc| doc.read().unwrap().query(query))
+            .collect_vec()
     }
 
     fn reachable_docs_recusive(&self, workspace: &Workspace, parser: &mut Parser) -> Vec<Url> {
@@ -440,7 +502,12 @@ impl InternalDocument {
             .collect_vec();
 
         for doc in docs {
-            doc.reachable_docs_recursive_helper(workspace, parser, result);
+            match &*doc.read().unwrap() {
+                Document::Internal(internal_document) => {
+                    internal_document.reachable_docs_recursive_helper(workspace, parser, result)
+                }
+                Document::External(_) => {} // TODO
+            };
         }
     }
 
@@ -515,11 +582,17 @@ impl ExternalDocument {
                 }
             })?;
 
+        let owl_dialect = match &url.path() {
+            x if x.ends_with(".owl") => OwlDialect::Owl,
+            x if x.ends_with(".omn") => OwlDialect::Omn,
+            _ => OwlDialect::Unknown,
+        };
+
         Ok(ExternalDocument {
             uri: url,
             text,
             ontology,
-            owl_dialect: OwlDialect::Unknown,
+            owl_dialect,
         })
     }
 

@@ -207,7 +207,7 @@ impl LanguageServer for Backend {
             )
             .await;
 
-        let document = workspace.insert_document(document);
+        let document = workspace.insert_document(workspace::Document::Internal(Box::new(document)));
 
         debug!("Inserted document");
 
@@ -231,10 +231,7 @@ impl LanguageServer for Backend {
         let url = &params.text_document.uri;
         let workspace = self.find_workspace(url).await;
 
-        if let Some(mut document) = workspace
-            .internal_document_map
-            .get_mut(&params.text_document.uri)
-        {
+        if let Some(mut document) = workspace.documents.get_mut(&params.text_document.uri) {
             if document.version >= params.text_document.version {
                 return; // no change needed
             }
@@ -798,7 +795,7 @@ impl Backend {
 
     async fn resolve_imports(
         &self,
-        document: &InternalDocument,
+        document: &Document,
         workspace: &Workspace,
         parser: &mut Parser,
     ) {
