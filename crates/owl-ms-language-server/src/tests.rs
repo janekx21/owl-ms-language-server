@@ -394,15 +394,10 @@ async fn test_workspace_symbolds() {
 
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![
-            WorkspaceMember::CatalogFile(Catalog {
-                uri: vec![CatalogUri {
-                    _id: "Testing".into(),
-                    name: "http://foo.org/a.omn".into(),
-                    uri: "a.omn".to_string(),
-                }],
-                group: vec![],
-                locaton: dir.join("catalog.xml").to_str().unwrap().to_string(),
-            }),
+            WorkspaceMember::CatalogFile(
+                Catalog::new(dir.join("catalog.xml").to_str().unwrap())
+                    .with_uri("http://foo.org/a.omn", "a.omn"),
+            ),
             WorkspaceMember::OmnFile {
                 name: "a.omn".into(),
                 content: r#"
