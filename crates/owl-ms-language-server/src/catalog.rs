@@ -1,4 +1,7 @@
-use std::{fs::read_to_string, path::Path};
+use std::{
+    fs::read_to_string,
+    path::{Path, PathBuf},
+};
 
 use itertools::Itertools;
 use log::info;
@@ -10,11 +13,36 @@ use walkdir::WalkDir;
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct Catalog {
-    pub uri: Vec<CatalogUri>,
+    #[serde(default)]
+    uri: Vec<CatalogUri>,
+    #[serde(default)]
+    group: Vec<CatalogGroup>,
 
-    #[serde(skip)]
     /// Warning! This is the path to the catalog file NOT its parent folder.
-    pub locaton: String,
+    #[serde(skip)]
+    locaton: String,
+}
+
+impl Catalog {
+    #[cfg(test)]
+    pub fn new(location: &str) -> Catalog {
+        Catalog {
+            uri: vec![],
+            group: vec![],
+            locaton: location.into(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_uri(self, name: &str, uri: &str) -> Catalog {
+        let mut c = self.clone();
+        c.uri.push(CatalogUri {
+            _id: "Constructed in a builder".into(),
+            name: name.into(),
+            uri: uri.into(),
+        });
+        c
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -31,6 +59,12 @@ pub struct CatalogUri {
     /// Relative file path of the backing ontology file
     #[serde(rename = "@uri")]
     pub uri: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(rename_all = "kebab-case")]
+pub struct CatalogGroup {
+    pub uri: Vec<CatalogUri>,
 }
 
 impl Catalog {
@@ -51,6 +85,23 @@ impl Catalog {
                 catalog
             })
             .collect_vec()
+    }
+
+    pub fn all_catalog_uris(&self) -> impl Iterator<Item = &CatalogUri> {
+        self.uri
+            .iter()
+            .chain(self.group.iter().flat_map(|g| &g.uri))
+    }
+
+    /// Takes a path to a document and determins if the item is inside this catalog
+    pub fn contains(&self, path: &PathBuf) -> bool {
+        for catalog_uri in self.all_catalog_uris() {
+            let catalog_item_path = self.parent_folder().join(&catalog_uri.uri);
+            if &catalog_item_path == path {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn parent_folder(&self) -> &Path {

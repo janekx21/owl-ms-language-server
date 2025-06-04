@@ -1,8 +1,13 @@
-use std::{collections::HashMap, fmt::Display, fs, iter::once, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    ffi::OsStr,
+    fmt::Display,
+    fs,
+};
 
 use dashmap::DashMap;
 use itertools::Itertools;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use ropey::Rope;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Url, WorkspaceFolder};
 use tree_sitter::{Node, Parser, Query, QueryCursor, Tree};
@@ -22,7 +27,10 @@ pub struct Workspace {
 impl Workspace {
     pub fn new(workspace_folder: WorkspaceFolder) -> Self {
         let catalogs = Catalog::load_catalogs_recursive(workspace_folder.uri.clone());
-        info!("New workspace at {}", workspace_folder.uri);
+        info!(
+            "New workspace at {} with catalogs {:?}",
+            workspace_folder.uri, catalogs
+        );
         Workspace {
             document_map: DashMap::new(),
             workspace_folder,
@@ -116,30 +124,34 @@ impl Workspace {
         url: &Url,
         parser: &mut Parser,
     ) -> Option<dashmap::mapref::one::Ref<'_, Url, Document>> {
-        for catalog in &self.catalogs {
-            for catalog_uri in &catalog.uri {
-                if catalog_uri.name == url.to_string() {
-                    // Found a valid import
+        if let Some(doc) = self.document_map.get(url) {
+            // Document is loaded already
+            return Some(doc);
+        }
 
-                    return if let Some(doc) = self.document_map.get(url) {
-                        // Load from document_map
-                        Some(doc)
+        for catalog in &self.catalogs {
+            for catalog_uri in catalog.all_catalog_uris() {
+                if catalog_uri.name == url.to_string() {
+                    // Load document from disk
+                    let path = catalog.parent_folder().join(&catalog_uri.uri);
+
+                    if path.extension() != Some(OsStr::new("omn")) {
+                        warn!("Non omn files can not be loaded. path {}", path.display());
+                        return None;
+                    }
+
+                    return if let Ok(ontology_text) = fs::read_to_string(&path) {
+                        let document = Document::new(
+                            Url::from_file_path(&path).unwrap(),
+                            -1,
+                            ontology_text,
+                            parser,
+                        );
+                        info!("Loaded file from disk at {}", path.display());
+                        Some(self.insert_document(document))
                     } else {
-                        // Load doc from disk
-                        let path = catalog.parent_folder().join(&catalog_uri.uri);
-                        if let Ok(ontology_text) = fs::read_to_string(&path) {
-                            let document = Document::new(
-                                Url::from_file_path(&path).unwrap(),
-                                -1,
-                                ontology_text,
-                                parser,
-                            );
-                            info!("Loaded file from disk at {}", path.display());
-                            Some(self.insert_document(document))
-                        } else {
-                            error!("File could not be loaded at {}", path.display());
-                            None
-                        }
+                        error!("File could not be loaded at {}", path.display());
+                        None
                     };
                 }
             }
@@ -284,21 +296,58 @@ impl Document {
         workspace: &Workspace,
         parser: &mut Parser,
     ) -> Vec<UnwrappedQueryMatch> {
-        // Resolve the documents that are imported here (not recursive yet)
+        // Resolve the documents that are imported here
+        // This also contains itself!
         let docs = self
-            .query_helper(&ALL_QUERIES.import_query, None)
+            .reachable_docs_recusive(workspace, parser)
             .iter()
-            .filter_map(|m| match &m.captures[..] {
-                [iri] => Url::parse(iri.node.text.trim_end_matches(">").trim_start_matches("<"))
-                    .ok()
-                    .and_then(|url| workspace.resolve_url_to_document(&url, parser)),
-                _ => unimplemented!(),
-            })
+            .filter_map(|url| workspace.resolve_url_to_document(url, parser))
             .collect_vec();
 
-        docs.iter()
-            .flat_map(|doc| doc.query(query))
-            .chain(self.query(query))
+        info!("Query in documents with additional {}", docs.len());
+
+        docs.iter().flat_map(|doc| doc.query(query)).collect_vec()
+    }
+
+    fn reachable_docs_recusive(&self, workspace: &Workspace, parser: &mut Parser) -> Vec<Url> {
+        let mut set: HashSet<Url> = HashSet::new();
+        self.reachable_docs_recursive_helper(workspace, parser, &mut set);
+        set.into_iter().collect_vec()
+    }
+
+    fn reachable_docs_recursive_helper(
+        &self,
+        workspace: &Workspace,
+        parser: &mut Parser,
+        result: &mut HashSet<Url>,
+    ) {
+        if result.contains(&self.uri) {
+            // Do nothing
+            return;
+        }
+
+        result.insert(self.uri.clone());
+
+        let docs = self
+            .reachable_documents()
+            .iter()
+            .filter_map(|url| workspace.resolve_url_to_document(url, parser))
+            .collect_vec();
+
+        for doc in docs {
+            doc.reachable_docs_recursive_helper(workspace, parser, result);
+        }
+    }
+
+    fn reachable_documents(&self) -> Vec<Url> {
+        self.query(&ALL_QUERIES.import_query)
+            .iter()
+            .filter_map(|m| match &m.captures[..] {
+                [iri] => {
+                    Url::parse(iri.node.text.trim_end_matches(">").trim_start_matches("<")).ok()
+                }
+                _ => unimplemented!(),
+            })
             .collect_vec()
     }
 
@@ -357,6 +406,12 @@ pub struct UnwrappedNode {
     /// This informtion can be outdated
     pub range: Range,
     pub kind: String,
+}
+
+impl UnwrappedNode {
+    pub fn text_trimmed(&self) -> String {
+        trim_string_value(&self.text)
+    }
 }
 
 /// This represents informations about a frame.
@@ -442,7 +497,7 @@ fn trim_string_value(value: &String) -> String {
         .trim_start_matches('"')
         .trim_end_matches("@en")
         .trim_end_matches("@de")
-        .trim_end_matches("@pl")
+        .trim_end_matches("@pt")
         .trim_end_matches("^^xsd:string") // typed literal with type string
         .trim_end_matches('"')
         .replace("\\\"", "\"")
