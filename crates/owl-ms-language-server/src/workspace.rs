@@ -5,7 +5,7 @@ use std::{
     fs,
     ops::Deref,
     path::PathBuf,
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 
 use anyhow::anyhow;
@@ -15,9 +15,12 @@ use horned_owl::{curie::PrefixMapping, ontology::set::SetOntology};
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
+use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard};
 use ropey::Rope;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, SymbolKind, Url, WorkspaceFolder};
-use tree_sitter::{Node, Parser, Query, QueryCursor, Tree};
+use tower_lsp::lsp_types::{
+    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, SymbolKind, Url, WorkspaceFolder,
+};
+use tree_sitter::{InputEdit, Node, Parser, Point, Query, QueryCursor, Tree};
 
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
@@ -46,16 +49,36 @@ impl Workspace {
         }
     }
 
-    // TODO how to do this?
-    pub fn internal_documents(&self) -> DashMap<Url, Arc<RwLock<InternalDocument>>> {
-        self.documents
-            .iter()
-            .filter_map(|doc| match &*doc.read().unwrap() {
-                Document::Internal(internal_document) => Some(internal_document),
-                Document::External(external_document) => None,
+    pub fn get_internal_document(&self, url: &Url) {
+        let a = self.documents.get(url).map(|doc| {
+            RwLockReadGuard::map(doc.read(), |d| match d {
+                Document::Internal(internal_document) => &Some(*internal_document),
+                Document::External(external_document) => &None,
             })
-            .collect();
+        });
+
+        // self.documents.get(url).and_then(|doc| match &*doc.read() {
+        //     Document::Internal(internal) => {
+        //         RwLockReadGuard::map(doc.read(), |d| d.
+        //     },
+        //     Document::External(_) => None,
+        // });
     }
+
+    // TODO how to do this?
+    // pub fn internal_documents(&self) -> Vec<Arc<RwLock<InternalDocument>>> {
+    //     let a = self
+    //         .documents
+    //         .iter()
+    //         .filter(|doc| {
+    //             RwLockReadGuard::map(doc.read(), |d| match d {
+    //                 Document::Internal(internal_document) => &Some(**internal_document),
+    //                 Document::External(external_document) => &None,
+    //             })
+    //         })
+    //         .filter_map(|mg| mg)
+    //         .collect_vec();
+    // }
 
     /// Returns a bool that specifies if the workspace url is a base for the provided url and therefore
     /// the workspace could contain that url
@@ -159,12 +182,12 @@ impl Workspace {
                             Ok(path) => {
                                 // This is an abolute file path url
                                 let (document_text, document_url) = load_file_from_disk(path)?;
-                                let document = Document::Internal(Box::new(InternalDocument::new(
+                                let document = Document::Internal(InternalDocument::new(
                                     document_url,
                                     -1,
                                     document_text,
                                     parser,
-                                )));
+                                ));
                                 let doc = self.insert_document(document);
                                 return Ok(doc);
                             }
@@ -174,10 +197,8 @@ impl Workspace {
                                     .call()?
                                     .body_mut()
                                     .read_to_string()?;
-                                let document = Document::External(Box::new(ExternalDocument::new(
-                                    document_text,
-                                    url,
-                                )?));
+                                let document =
+                                    Document::External(ExternalDocument::new(document_text, url)?);
                                 let doc = self.insert_document(document);
                                 return Ok(doc);
                             }
@@ -189,12 +210,12 @@ impl Workspace {
                             info!("Loaded file from disk at {}", path.display());
                             let (document_text, document_url) = load_file_from_disk(path)?;
 
-                            let document = Document::Internal(Box::new(InternalDocument::new(
+                            let document = Document::Internal(InternalDocument::new(
                                 document_url,
                                 -1,
                                 document_text,
                                 parser,
-                            )));
+                            ));
                             let doc = self.insert_document(document);
                             return Ok(doc);
                         }
@@ -228,34 +249,49 @@ fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
 pub type DocumentRef = Arc<RwLock<Document>>;
 
 #[derive(Debug)]
-pub enum Document {
-    Internal(Box<InternalDocument>),
-    External(Box<ExternalDocument>),
+pub struct Document {
+    pub uri: Url,
+    inner: InnerDocument,
+}
+
+#[derive(Debug)]
+pub enum InnerDocument {
+    // Not boxing this is fine because the size ratio is just about 1.6
+    Internal(InternalDocument),
+    External(ExternalDocument),
 }
 
 static EMTPTY_FRAME_INFO_MAP: Lazy<DashMap<Iri, FrameInfo>> = Lazy::new(|| DashMap::new());
 
 impl Document {
-    fn url(&self) -> Url {
-        match self {
-            Document::Internal(internal_document) => internal_document.uri.clone(),
-            Document::External(external_document) => external_document.uri.clone(),
+    pub fn new_internal(url: Url, internal: InternalDocument) -> Document {
+        Document {
+            uri: url,
+            inner: InnerDocument::Internal(internal),
         }
     }
 
+    pub fn url(&self) -> Url {
+        self.uri.clone()
+        // match self {
+        //     Document::Internal(internal_document) => internal_document.uri.clone(),
+        //     Document::External(external_document) => external_document.uri.clone(),
+        // }
+    }
+
     #[deprecated = "This will not result in all data. Query the document instead."]
-    fn frame_infos(&self) -> &DashMap<Iri, FrameInfo> {
-        match self {
-            Document::Internal(internal_document) => &internal_document.frame_infos,
+    pub fn frame_infos(&self) -> &DashMap<Iri, FrameInfo> {
+        match &self.inner {
+            InnerDocument::Internal(internal_document) => &internal_document.frame_infos,
             // This is a sub for empty data
-            Document::External(_) => &*EMTPTY_FRAME_INFO_MAP,
+            InnerDocument::External(_) => &*EMTPTY_FRAME_INFO_MAP,
         }
     }
 
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
-        match self {
-            Document::Internal(internal_document) => internal_document.query(query),
-            Document::External(external_document) => vec![], // TODO
+        match &self.inner {
+            InnerDocument::Internal(internal_document) => internal_document.query(query),
+            InnerDocument::External(external_document) => vec![], // TODO
         }
     }
 }
@@ -269,7 +305,6 @@ pub enum OwlDialect {
 
 #[derive(Debug)]
 pub struct InternalDocument {
-    pub uri: Url,
     pub tree: Tree,
     pub rope: Rope,
     pub version: i32,
@@ -550,6 +585,169 @@ impl InternalDocument {
                     .collect_vec(),
             })
             .collect_vec()
+    }
+
+    pub fn edit(&mut self, params: DidChangeTextDocumentParams, parser: &Parser) {
+        if self.version >= params.text_document.version {
+            return; // no change needed
+        }
+
+        if params
+            .content_changes
+            .iter()
+            .any(|change| change.range.is_none())
+        {
+            // Change the whole file
+            panic!("Whole file changes are not supported yet");
+        }
+
+        // This range is relative to the *old* document not the new one
+        let change_ranges = params
+            .content_changes
+            .iter()
+            .rev() // See https://github.com/helix-editor/helix/blob/0815b52e0959e21ec792ea41d508a050b552f850/helix-core/src/syntax.rs#L1293C1-L1297C26
+            .map(|change| {
+                if let Some(range) = change.range {
+                    let old_range: Range = range.into();
+                    let start_char = self
+                        .rope
+                        .try_line_to_char(old_range.start.line as usize)
+                        .expect("line_idx out of bounds")
+                        + (old_range.start.character as usize);
+
+                    let old_end_char = self
+                        .rope
+                        .try_line_to_char(old_range.end.line as usize)
+                        .expect("line_idx out of bounds")
+                        + (old_range.end.character as usize); // exclusive
+
+                    // must come before the rope is changed!
+                    let old_end_byte = self.rope.char_to_byte(old_end_char);
+
+                    // rope replace
+                    timeit("rope operations", || {
+                        self.rope.remove(start_char..old_end_char);
+                        self.rope.insert(start_char, &change.text);
+                    });
+
+                    // this must come after the rope was changed!
+                    let start_byte = self.rope.char_to_byte(start_char);
+                    let new_end_byte = start_byte + change.text.len();
+                    let new_end_line = self.rope.byte_to_line(new_end_byte);
+                    let new_end_character =
+                        self.rope.byte_to_char(new_end_byte) - self.rope.line_to_char(new_end_line);
+
+                    let edit = InputEdit {
+                        start_byte,
+                        old_end_byte,
+                        new_end_byte: start_byte + change.text.len(),
+                        start_position: old_range.start.into(),
+                        old_end_position: old_range.end.into(),
+                        new_end_position: Point {
+                            row: new_end_line,
+                            column: new_end_character,
+                        },
+                    };
+                    timeit("tree edit", || self.tree.edit(&edit));
+
+                    self.version = params.text_document.version;
+
+                    let new_range = Range {
+                        start: edit.start_position.into(),
+                        end: edit.new_end_position.into(),
+                    };
+
+                    (old_range, edit, new_range)
+                } else {
+                    unreachable!("Change should have range {:#?}", change);
+                }
+            })
+            .collect::<Vec<(Range, InputEdit, Range)>>();
+
+        debug!("Change ranges {:#?}", change_ranges);
+
+        let rope_provider = RopeProvider::new(&self.rope);
+
+        let tree = {
+            let mut parser_guard = self.parser.lock().await;
+            timeit("parsing", || {
+                parser_guard
+                    .parse_with(
+                        &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+                        Some(&document.tree),
+                    )
+                    .expect("language to be set, no timeout to be used, no cancelation flag")
+            })
+        };
+        debug!("New tree {}", tree.root_node().to_sexp());
+        document.tree = tree;
+
+        for (_, _, new_range) in change_ranges.iter() {
+            // TODO #32 prune
+            // document
+            //     .frame_infos
+            //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
+
+            let frame_infos = timeit("gen_class_iri_label_map", || {
+                document.gen_frame_infos(Some(new_range))
+            });
+
+            document.frame_infos.extend(frame_infos);
+        }
+
+        // TODO #30 prune
+        // Remove all old diagnostics with an overlapping range. They will need to be recreated
+        // for (_, _, old_range) in change_ranges.iter() {
+        //     document
+        //         .diagnostics
+        //         .retain(|d| !lines_overlap(&d.range.into(), old_range));
+        // }
+        // Move all other diagnostics
+        // for diagnostic in &mut document.diagnostics {
+        //     for (new_range, edit, old_range) in change_ranges.iter() {
+        //         let mut range_to_end = *old_range;
+        //         range_to_end.end = Position {
+        //             line: u32::MAX,
+        //             character: u32::MAX,
+        //         };
+        //         if lines_overlap(&diagnostic.range.into(), &range_to_end) {
+        //             debug!("old {} -> new {}", old_range, new_range);
+        //             let delta = new_range.end.line as i32 - old_range.end.line as i32;
+        //             diagnostic.range.start.line =
+        //                 (diagnostic.range.start.line as i32 + delta) as u32;
+        //             diagnostic.range.start.line =
+        //                 (diagnostic.range.end.line as i32 + delta) as u32;
+        //         }
+        //     }
+        // }
+        // for (_, _, _) in change_ranges.iter() {
+        //     let cursor = document.tree.walk();
+        //     // TODO #30
+        //     // while range_exclusive_inside(new_range, &cursor.node().range().into()) {
+        //     //     if cursor
+        //     //         .goto_first_child_for_point(new_range.start.into())
+        //     //         .is_none()
+        //     //     {
+        //     //         break;
+        //     //     }
+        //     // }
+        //     // cursor.goto_parent();
+        //     let node_that_has_change = cursor.node();
+        //     drop(cursor);
+        //     // while range_overlaps(&ts_range_to_lsp_range(cursor.node().range()), &range) {}
+        //     // document.diagnostics =
+        //     let additional_diagnostics = timeit("did_change > gen_diagnostics", || {
+        //         gen_diagnostics(&node_that_has_change)
+        //     })
+        //     .into_iter();
+        //     // .filter(|d| lines_overlap(&d.range.into(), new_range)); // should be exclusive to other diagnostics
+        //     document.diagnostics.extend(additional_diagnostics);
+        // }
+
+        // TODO #30 replace with above
+        document.diagnostics = timeit("did_change > gen_diagnostics", || {
+            gen_diagnostics(&document.tree.root_node())
+        });
     }
 }
 

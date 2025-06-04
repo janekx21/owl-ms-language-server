@@ -25,7 +25,7 @@ use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
 use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree, TreeCursor};
 use tree_sitter_owl_ms::language;
-use workspace::{gen_diagnostics, node_text, InternalDocument, Workspace};
+use workspace::{gen_diagnostics, node_text, Document, DocumentRef, InternalDocument, Workspace};
 
 // Constants
 
@@ -192,7 +192,7 @@ impl LanguageServer for Backend {
 
         let mut parser_guard = self.parser.lock().await;
 
-        let document = InternalDocument::new(
+        let internal_document = InternalDocument::new(
             url.clone(),
             params.text_document.version,
             params.text_document.text,
@@ -202,12 +202,13 @@ impl LanguageServer for Backend {
         self.client
             .publish_diagnostics(
                 url.clone(),
-                document.diagnostics.clone(),
-                Some(document.version),
+                internal_document.diagnostics.clone(),
+                Some(internal_document.version),
             )
             .await;
 
-        let document = workspace.insert_document(workspace::Document::Internal(Box::new(document)));
+        let document =
+            workspace.insert_document(workspace::Document::new_internal(url, internal_document));
 
         debug!("Inserted document");
 
@@ -231,175 +232,23 @@ impl LanguageServer for Backend {
         let url = &params.text_document.uri;
         let workspace = self.find_workspace(url).await;
 
-        if let Some(mut document) = workspace.documents.get_mut(&params.text_document.uri) {
-            if document.version >= params.text_document.version {
-                return; // no change needed
-            }
+        if let Some(document) = workspace.documents.get_mut(&params.text_document.uri) {
+            match &mut *document.write() {
+                Document::Internal(document) => {
+                    params.content_changes
 
-            if params
-                .content_changes
-                .iter()
-                .any(|change| change.range.is_none())
-            {
-                // Change the whole file
-                panic!("Whole file changes are not supported yet");
-            }
-
-            // This range is relative to the *old* document not the new one
-            let change_ranges = params
-                .content_changes
-                .iter()
-                .rev() // See https://github.com/helix-editor/helix/blob/0815b52e0959e21ec792ea41d508a050b552f850/helix-core/src/syntax.rs#L1293C1-L1297C26
-                .map(|change| {
-                    if let Some(range) = change.range {
-                        let old_range: Range = range.into();
-                        let start_char = document
-                            .rope
-                            .try_line_to_char(old_range.start.line as usize)
-                            .expect("line_idx out of bounds")
-                            + (old_range.start.character as usize);
-
-                        let old_end_char = document
-                            .rope
-                            .try_line_to_char(old_range.end.line as usize)
-                            .expect("line_idx out of bounds")
-                            + (old_range.end.character as usize); // exclusive
-
-                        // must come before the rope is changed!
-                        let old_end_byte = document.rope.char_to_byte(old_end_char);
-
-                        // rope replace
-                        timeit("rope operations", || {
-                            document.rope.remove(start_char..old_end_char);
-                            document.rope.insert(start_char, &change.text);
-                        });
-
-                        // this must come after the rope was changed!
-                        let start_byte = document.rope.char_to_byte(start_char);
-                        let new_end_byte = start_byte + change.text.len();
-                        let new_end_line = document.rope.byte_to_line(new_end_byte);
-                        let new_end_character = document.rope.byte_to_char(new_end_byte)
-                            - document.rope.line_to_char(new_end_line);
-
-                        let edit = InputEdit {
-                            start_byte,
-                            old_end_byte,
-                            new_end_byte: start_byte + change.text.len(),
-                            start_position: old_range.start.into(),
-                            old_end_position: old_range.end.into(),
-                            new_end_position: Point {
-                                row: new_end_line,
-                                column: new_end_character,
-                            },
-                        };
-                        timeit("tree edit", || document.tree.edit(&edit));
-
-                        document.version = params.text_document.version;
-
-                        let new_range = Range {
-                            start: edit.start_position.into(),
-                            end: edit.new_end_position.into(),
-                        };
-
-                        (old_range, edit, new_range)
-                    } else {
-                        unreachable!("Change should have range {:#?}", change);
-                    }
-                })
-                .collect::<Vec<(Range, InputEdit, Range)>>();
-
-            debug!("Change ranges {:#?}", change_ranges);
-
-            let rope_provider = RopeProvider::new(&document.rope);
-
-            let tree = {
-                let mut parser_guard = self.parser.lock().await;
-                timeit("parsing", || {
-                    parser_guard
-                        .parse_with(
-                            &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
-                            Some(&document.tree),
-                        )
-                        .expect("language to be set, no timeout to be used, no cancelation flag")
-                })
+                    let uri = params.text_document.uri.clone();
+                    let diagnostics = document.diagnostics.clone();
+                    let client = self.client.clone();
+                    let version = Some(document.version);
+                    task::spawn(async move {
+                        client.publish_diagnostics(uri, diagnostics, version).await;
+                    });
+                }
+                Document::External(external_document) => {
+                    todo!("TODO edit external documents");
+                }
             };
-            debug!("New tree {}", tree.root_node().to_sexp());
-            document.tree = tree;
-
-            for (_, _, new_range) in change_ranges.iter() {
-                // TODO #32 prune
-                // document
-                //     .frame_infos
-                //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
-
-                let frame_infos = timeit("gen_class_iri_label_map", || {
-                    document.gen_frame_infos(Some(new_range))
-                });
-
-                document.frame_infos.extend(frame_infos);
-            }
-
-            // TODO #30 prune
-            // Remove all old diagnostics with an overlapping range. They will need to be recreated
-            // for (_, _, old_range) in change_ranges.iter() {
-            //     document
-            //         .diagnostics
-            //         .retain(|d| !lines_overlap(&d.range.into(), old_range));
-            // }
-            // Move all other diagnostics
-            // for diagnostic in &mut document.diagnostics {
-            //     for (new_range, edit, old_range) in change_ranges.iter() {
-            //         let mut range_to_end = *old_range;
-            //         range_to_end.end = Position {
-            //             line: u32::MAX,
-            //             character: u32::MAX,
-            //         };
-            //         if lines_overlap(&diagnostic.range.into(), &range_to_end) {
-            //             debug!("old {} -> new {}", old_range, new_range);
-            //             let delta = new_range.end.line as i32 - old_range.end.line as i32;
-            //             diagnostic.range.start.line =
-            //                 (diagnostic.range.start.line as i32 + delta) as u32;
-            //             diagnostic.range.start.line =
-            //                 (diagnostic.range.end.line as i32 + delta) as u32;
-            //         }
-            //     }
-            // }
-            // for (_, _, _) in change_ranges.iter() {
-            //     let cursor = document.tree.walk();
-            //     // TODO #30
-            //     // while range_exclusive_inside(new_range, &cursor.node().range().into()) {
-            //     //     if cursor
-            //     //         .goto_first_child_for_point(new_range.start.into())
-            //     //         .is_none()
-            //     //     {
-            //     //         break;
-            //     //     }
-            //     // }
-            //     // cursor.goto_parent();
-            //     let node_that_has_change = cursor.node();
-            //     drop(cursor);
-            //     // while range_overlaps(&ts_range_to_lsp_range(cursor.node().range()), &range) {}
-            //     // document.diagnostics =
-            //     let additional_diagnostics = timeit("did_change > gen_diagnostics", || {
-            //         gen_diagnostics(&node_that_has_change)
-            //     })
-            //     .into_iter();
-            //     // .filter(|d| lines_overlap(&d.range.into(), new_range)); // should be exclusive to other diagnostics
-            //     document.diagnostics.extend(additional_diagnostics);
-            // }
-
-            // TODO #30 replace with above
-            document.diagnostics = timeit("did_change > gen_diagnostics", || {
-                gen_diagnostics(&document.tree.root_node())
-            });
-
-            let uri = params.text_document.uri.clone();
-            let diagnostics = document.diagnostics.clone();
-            let client = self.client.clone();
-            let version = Some(document.version);
-            task::spawn(async move {
-                client.publish_diagnostics(uri, diagnostics, version).await;
-            });
         };
     }
 
@@ -429,16 +278,22 @@ impl LanguageServer for Backend {
 
         let workspace = self.find_workspace(&url).await;
 
-        Ok(workspace.internal_document_map.get(&url).map(|document| {
-            let pos = params.text_document_position_params.position.into();
-            let node = deepest_named_node_at_pos(&document.tree, pos);
-            let info = workspace.node_info(&node, &document);
-            let range: Range = node.range().into();
-            Hover {
-                contents: HoverContents::Scalar(MarkedString::String(info)),
-                range: Some(range.into()),
-            }
-        }))
+        Ok(workspace
+            .documents
+            .get(&url)
+            .map(|document| match &*document.read() {
+                Document::Internal(document) => {
+                    let pos = params.text_document_position_params.position.into();
+                    let node = deepest_named_node_at_pos(&document.tree, pos);
+                    let info = workspace.node_info(&node, &document);
+                    let range: Range = node.range().into();
+                    Hover {
+                        contents: HoverContents::Scalar(MarkedString::String(info)),
+                        range: Some(range.into()),
+                    }
+                }
+                Document::External(_) => todo!(),
+            }))
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
@@ -795,11 +650,12 @@ impl Backend {
 
     async fn resolve_imports(
         &self,
-        document: &Document,
+        document: &DocumentRef,
         workspace: &Workspace,
         parser: &mut Parser,
     ) {
         let urls = document
+            .read()
             .query(&ALL_QUERIES.import_query)
             .iter()
             .filter_map(|match_| match &match_.captures[..] {
