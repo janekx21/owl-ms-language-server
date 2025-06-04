@@ -1,3 +1,17 @@
+use crate::web::HttpClient;
+use crate::{
+    catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
+    rope_provider::RopeProvider, LANGUAGE, NODE_TYPES,
+};
+use anyhow::anyhow;
+use anyhow::Result;
+use dashmap::DashMap;
+use horned_owl::{curie::PrefixMapping, ontology::set::SetOntology};
+use itertools::Itertools;
+use log::{debug, error, info, trace, warn};
+use once_cell::sync::Lazy;
+use parking_lot::{Mutex, MutexGuard, RwLock};
+use ropey::Rope;
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
@@ -7,30 +21,31 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-
-use anyhow::anyhow;
-use anyhow::Result;
-use dashmap::DashMap;
-use horned_owl::{curie::PrefixMapping, ontology::set::SetOntology};
-use itertools::Itertools;
-use log::{debug, error, info, warn};
-use once_cell::sync::Lazy;
-use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard};
-use ropey::Rope;
 use tower_lsp::lsp_types::{
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, SymbolKind, Url, WorkspaceFolder,
 };
 use tree_sitter::{InputEdit, Node, Parser, Point, Query, QueryCursor, Tree};
 
-use crate::{
-    catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
-    rope_provider::RopeProvider, NODE_TYPES,
-};
+static GLOBAL_PARSER: Lazy<Mutex<Parser>> = Lazy::new(|| {
+    let mut parser = Parser::new();
+    parser.set_language(*LANGUAGE).unwrap();
+    parser.set_logger(Some(Box::new(|type_, str| match type_ {
+        tree_sitter::LogType::Parse => trace!(target: "tree-sitter-parse", "{}", str),
+        tree_sitter::LogType::Lex => trace!(target: "tree-sitter-lex", "{}", str),
+    })));
+
+    Mutex::new(parser)
+});
+
+pub fn lock_global_parser() -> MutexGuard<'static, Parser> {
+    (*GLOBAL_PARSER).lock()
+}
 
 #[derive(Debug)]
 pub struct Workspace {
     /// Maps an URL to a document that can be internal or external
-    pub documents: DashMap<Url, Arc<RwLock<Document>>>,
+    pub internal_documents: DashMap<Url, Arc<RwLock<InternalDocument>>>,
+    pub external_documents: DashMap<Url, Arc<RwLock<ExternalDocument>>>,
     pub workspace_folder: WorkspaceFolder,
     pub catalogs: Vec<Catalog>,
 }
@@ -43,42 +58,12 @@ impl Workspace {
             workspace_folder.uri, catalogs
         );
         Workspace {
-            documents: DashMap::new(),
+            internal_documents: DashMap::new(),
+            external_documents: DashMap::new(),
             workspace_folder,
             catalogs,
         }
     }
-
-    pub fn get_internal_document(&self, url: &Url) {
-        let a = self.documents.get(url).map(|doc| {
-            RwLockReadGuard::map(doc.read(), |d| match d {
-                Document::Internal(internal_document) => &Some(*internal_document),
-                Document::External(external_document) => &None,
-            })
-        });
-
-        // self.documents.get(url).and_then(|doc| match &*doc.read() {
-        //     Document::Internal(internal) => {
-        //         RwLockReadGuard::map(doc.read(), |d| d.
-        //     },
-        //     Document::External(_) => None,
-        // });
-    }
-
-    // TODO how to do this?
-    // pub fn internal_documents(&self) -> Vec<Arc<RwLock<InternalDocument>>> {
-    //     let a = self
-    //         .documents
-    //         .iter()
-    //         .filter(|doc| {
-    //             RwLockReadGuard::map(doc.read(), |d| match d {
-    //                 Document::Internal(internal_document) => &Some(**internal_document),
-    //                 Document::External(external_document) => &None,
-    //             })
-    //         })
-    //         .filter_map(|mg| mg)
-    //         .collect_vec();
-    // }
 
     /// Returns a bool that specifies if the workspace url is a base for the provided url and therefore
     /// the workspace could contain that url
@@ -92,20 +77,33 @@ impl Workspace {
         fp_file.starts_with(fp_folder)
     }
 
-    pub fn insert_document(&self, document: Document) -> Arc<RwLock<Document>> {
-        let uri = document.url();
+    pub fn insert_internal_document(
+        &self,
+        document: InternalDocument,
+    ) -> Arc<RwLock<InternalDocument>> {
+        let uri = document.uri.clone();
         let arc = Arc::new(RwLock::new(document));
-        self.documents.insert(uri, arc.clone());
+        self.internal_documents.insert(uri, arc.clone());
+        arc
+    }
+    pub fn insert_external_document(
+        &self,
+        document: ExternalDocument,
+    ) -> Arc<RwLock<ExternalDocument>> {
+        let uri = document.uri.clone();
+        let arc = Arc::new(RwLock::new(document));
+        self.external_documents.insert(uri, arc.clone());
         arc
     }
 
     // TODO #28 maybe return a reference?
+    /// This searches in the frames of internal documents
     pub fn search_frame(&self, partial_text: &str) -> Vec<(Iri, FrameInfo)> {
-        self.documents
+        self.internal_documents
             .iter()
             .flat_map(|dm| {
-                let dm = &*dm.value().read().unwrap();
-                dm.frame_infos()
+                let dm = &*dm.value().read();
+                dm.frame_infos
                     .iter()
                     .filter(|item| item.key().contains(partial_text))
                     .map(|kv| (kv.key().clone(), kv.value().clone()))
@@ -114,12 +112,13 @@ impl Workspace {
             .collect_vec()
     }
 
+    /// This finds a frame info in the internal documents
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
-        self.documents
+        self.internal_documents
             .iter()
             .filter_map(|dm| {
-                let dm = dm.value().read().unwrap();
-                dm.frame_infos().get(iri).map(|v| v.value().clone())
+                let dm = dm.value().read();
+                dm.frame_infos.get(iri).map(|v| v.value().clone())
             })
             .tree_reduce(FrameInfo::merge)
     }
@@ -159,17 +158,23 @@ impl Workspace {
         }
     }
 
+    /// Queries in the internal documents only
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
-        self.documents
+        self.internal_documents
             .iter()
-            .flat_map(|doc| doc.read().unwrap().query(query))
+            .flat_map(|doc| doc.read().query(query))
             .collect_vec()
     }
 
-    pub fn resolve_url_to_document(&self, url: &Url, parser: &mut Parser) -> Result<DocumentRef> {
-        if let Some(doc) = self.documents.get(url) {
+    /// Resolves in the interal documents only
+    pub fn resolve_url_to_document(
+        &self,
+        url: &Url,
+        client: &dyn HttpClient,
+    ) -> Result<DocumentReference> {
+        if let Some(doc) = self.internal_documents.get(url) {
             // Document is loaded already
-            return Ok(doc.clone());
+            return Ok(DocumentReference::Internal(doc.clone()));
         }
 
         for catalog in &self.catalogs {
@@ -182,14 +187,10 @@ impl Workspace {
                             Ok(path) => {
                                 // This is an abolute file path url
                                 let (document_text, document_url) = load_file_from_disk(path)?;
-                                let document = Document::Internal(InternalDocument::new(
-                                    document_url,
-                                    -1,
-                                    document_text,
-                                    parser,
-                                ));
-                                let doc = self.insert_document(document);
-                                return Ok(doc);
+                                let document =
+                                    InternalDocument::new(document_url, -1, document_text);
+                                let doc = self.insert_internal_document(document);
+                                return Ok(DocumentReference::Internal(doc));
                             }
                             Err(_) => {
                                 // This is an external url
@@ -197,10 +198,9 @@ impl Workspace {
                                     .call()?
                                     .body_mut()
                                     .read_to_string()?;
-                                let document =
-                                    Document::External(ExternalDocument::new(document_text, url)?);
-                                let doc = self.insert_document(document);
-                                return Ok(doc);
+                                let document = ExternalDocument::new(document_text, url)?;
+                                let doc = self.insert_external_document(document);
+                                return Ok(DocumentReference::External(doc));
                             }
                         },
                         Err(_) => {
@@ -210,14 +210,9 @@ impl Workspace {
                             info!("Loaded file from disk at {}", path.display());
                             let (document_text, document_url) = load_file_from_disk(path)?;
 
-                            let document = Document::Internal(InternalDocument::new(
-                                document_url,
-                                -1,
-                                document_text,
-                                parser,
-                            ));
-                            let doc = self.insert_document(document);
-                            return Ok(doc);
+                            let document = InternalDocument::new(document_url, -1, document_text);
+                            let doc = self.insert_internal_document(document);
+                            return Ok(DocumentReference::Internal(doc));
                         }
                     };
                 }
@@ -246,55 +241,56 @@ fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
     ))
 }
 
-pub type DocumentRef = Arc<RwLock<Document>>;
-
 #[derive(Debug)]
-pub struct Document {
-    pub uri: Url,
-    inner: InnerDocument,
-}
-
-#[derive(Debug)]
-pub enum InnerDocument {
+pub enum DocumentReference {
     // Not boxing this is fine because the size ratio is just about 1.6
-    Internal(InternalDocument),
-    External(ExternalDocument),
+    Internal(Arc<RwLock<InternalDocument>>),
+    External(Arc<RwLock<ExternalDocument>>),
 }
 
-static EMTPTY_FRAME_INFO_MAP: Lazy<DashMap<Iri, FrameInfo>> = Lazy::new(|| DashMap::new());
+// static EMTPTY_FRAME_INFO_MAP: Lazy<DashMap<Iri, FrameInfo>> = Lazy::new(|| DashMap::new());
 
-impl Document {
-    pub fn new_internal(url: Url, internal: InternalDocument) -> Document {
-        Document {
-            uri: url,
-            inner: InnerDocument::Internal(internal),
-        }
-    }
+// impl Document {
+//     pub fn new_internal(url: Url, internal: InternalDocument) -> Document {
+//         Document {
+//             uri: url,
+//             inner: Document::Internal(internal),
+//         }
+//     }
 
-    pub fn url(&self) -> Url {
-        self.uri.clone()
-        // match self {
-        //     Document::Internal(internal_document) => internal_document.uri.clone(),
-        //     Document::External(external_document) => external_document.uri.clone(),
-        // }
-    }
+//     pub fn url(&self) -> Url {
+//         self.uri.clone()
+//         // match self {
+//         //     Document::Internal(internal_document) => internal_document.uri.clone(),
+//         //     Document::External(external_document) => external_document.uri.clone(),
+//         // }
+//     }
 
-    #[deprecated = "This will not result in all data. Query the document instead."]
-    pub fn frame_infos(&self) -> &DashMap<Iri, FrameInfo> {
-        match &self.inner {
-            InnerDocument::Internal(internal_document) => &internal_document.frame_infos,
-            // This is a sub for empty data
-            InnerDocument::External(_) => &*EMTPTY_FRAME_INFO_MAP,
-        }
-    }
+//     #[deprecated = "This will not result in all data. Query the document instead."]
+//     pub fn frame_infos(&self) -> &DashMap<Iri, FrameInfo> {
+//         match &self.inner {
+//             Document::Internal(internal_document) => &internal_document.frame_infos,
+//             // This is a sub for empty data
+//             Document::External(_) => &*EMTPTY_FRAME_INFO_MAP,
+//         }
+//     }
 
-    pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
-        match &self.inner {
-            InnerDocument::Internal(internal_document) => internal_document.query(query),
-            InnerDocument::External(external_document) => vec![], // TODO
-        }
-    }
-}
+//     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
+//         match &self.inner {
+//             Document::Internal(internal_document) => internal_document.query(query),
+//             Document::External(external_document) => vec![], // TODO
+//         }
+//     }
+
+//     pub fn edit(&mut self, params: &DidChangeTextDocumentParams) {
+//         match &mut self.inner {
+//             Document::Internal(internal_document) => internal_document.edit(params),
+//             Document::External(_) => {
+//                 error!("You can not edit external documents")
+//             }
+//         }
+//     }
+// }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum OwlDialect {
@@ -305,6 +301,7 @@ pub enum OwlDialect {
 
 #[derive(Debug)]
 pub struct InternalDocument {
+    pub uri: Url,
     pub tree: Tree,
     pub rope: Rope,
     pub version: i32,
@@ -317,7 +314,7 @@ pub struct InternalDocument {
 }
 
 impl InternalDocument {
-    pub fn new(uri: Url, version: i32, text: String, parser: &mut Parser) -> InternalDocument {
+    pub fn new(uri: Url, version: i32, text: String) -> InternalDocument {
         let owl_dialect = match &uri.path() {
             x if x.ends_with(".owl") => OwlDialect::Owl,
             x if x.ends_with(".omn") => OwlDialect::Omn,
@@ -326,7 +323,7 @@ impl InternalDocument {
 
         if owl_dialect == OwlDialect::Omn {
             let tree = timeit("create_document / parse", || {
-                parser
+                lock_global_parser()
                     .parse(&text, None)
                     .expect("language to be set, no timeout to be used, no cancelation flag")
             });
@@ -336,8 +333,8 @@ impl InternalDocument {
                 gen_diagnostics(&tree.root_node())
             });
             let mut document = InternalDocument {
-                owl_dialect,
                 uri,
+                owl_dialect,
                 version,
                 tree,
                 rope,
@@ -349,10 +346,10 @@ impl InternalDocument {
         } else {
             warn!("Only omn files are supported");
             InternalDocument {
-                owl_dialect,
                 uri,
+                owl_dialect,
                 version,
-                tree: parser
+                tree: lock_global_parser()
                     .parse(&text, None)
                     .expect("language to be set, no timeout to be used, no cancelation flag"),
                 rope: Rope::from(text),
@@ -484,16 +481,16 @@ impl InternalDocument {
         &self,
         query: &Query,
         workspace: &Workspace,
-        parser: &mut Parser,
+        http_client: &dyn HttpClient,
     ) -> Vec<UnwrappedQueryMatch> {
         // Resolve the documents that are imported here
         // This also contains itself!
         let docs = self
-            .reachable_docs_recusive(workspace, parser)
+            .reachable_docs_recusive(workspace, http_client)
             .iter()
             .filter_map(|url| {
                 workspace
-                    .resolve_url_to_document(url, parser)
+                    .resolve_url_to_document(url, http_client)
                     .inspect_err(|e| error!("{e}"))
                     .ok()
             })
@@ -502,21 +499,31 @@ impl InternalDocument {
         info!("Query in documents with additional {}", docs.len());
 
         docs.iter()
-            .flat_map(|doc| doc.read().unwrap().query(query))
+            .flat_map(|doc| match doc {
+                DocumentReference::Internal(doc) => doc.read().query(query),
+                DocumentReference::External(_) => {
+                    error!("Query in external document not supported");
+                    vec![]
+                }
+            })
             .collect_vec()
     }
 
-    fn reachable_docs_recusive(&self, workspace: &Workspace, parser: &mut Parser) -> Vec<Url> {
+    fn reachable_docs_recusive(
+        &self,
+        workspace: &Workspace,
+        http_client: &dyn HttpClient,
+    ) -> Vec<Url> {
         let mut set: HashSet<Url> = HashSet::new();
-        self.reachable_docs_recursive_helper(workspace, parser, &mut set);
+        self.reachable_docs_recursive_helper(workspace, &mut set, http_client);
         set.into_iter().collect_vec()
     }
 
     fn reachable_docs_recursive_helper(
         &self,
         workspace: &Workspace,
-        parser: &mut Parser,
         result: &mut HashSet<Url>,
+        http_client: &dyn HttpClient,
     ) {
         if result.contains(&self.uri) {
             // Do nothing
@@ -530,18 +537,18 @@ impl InternalDocument {
             .iter()
             .filter_map(|url| {
                 workspace
-                    .resolve_url_to_document(url, parser)
+                    .resolve_url_to_document(url, http_client)
                     .inspect_err(|e| error!("{e}"))
                     .ok()
             })
             .collect_vec();
 
         for doc in docs {
-            match &*doc.read().unwrap() {
-                Document::Internal(internal_document) => {
-                    internal_document.reachable_docs_recursive_helper(workspace, parser, result)
-                }
-                Document::External(_) => {} // TODO
+            match doc {
+                DocumentReference::Internal(internal_document) => internal_document
+                    .read()
+                    .reachable_docs_recursive_helper(workspace, result, http_client),
+                DocumentReference::External(_) => {} // TODO
             };
         }
     }
@@ -587,7 +594,7 @@ impl InternalDocument {
             .collect_vec()
     }
 
-    pub fn edit(&mut self, params: DidChangeTextDocumentParams, parser: &Parser) {
+    pub fn edit(&mut self, params: &DidChangeTextDocumentParams) {
         if self.version >= params.text_document.version {
             return; // no change needed
         }
@@ -669,18 +676,18 @@ impl InternalDocument {
         let rope_provider = RopeProvider::new(&self.rope);
 
         let tree = {
-            let mut parser_guard = self.parser.lock().await;
+            let mut parser_guard = lock_global_parser();
             timeit("parsing", || {
                 parser_guard
                     .parse_with(
                         &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
-                        Some(&document.tree),
+                        Some(&self.tree),
                     )
                     .expect("language to be set, no timeout to be used, no cancelation flag")
             })
         };
         debug!("New tree {}", tree.root_node().to_sexp());
-        document.tree = tree;
+        self.tree = tree;
 
         for (_, _, new_range) in change_ranges.iter() {
             // TODO #32 prune
@@ -689,10 +696,10 @@ impl InternalDocument {
             //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
 
             let frame_infos = timeit("gen_class_iri_label_map", || {
-                document.gen_frame_infos(Some(new_range))
+                self.gen_frame_infos(Some(new_range))
             });
 
-            document.frame_infos.extend(frame_infos);
+            self.frame_infos.extend(frame_infos);
         }
 
         // TODO #30 prune
@@ -745,8 +752,8 @@ impl InternalDocument {
         // }
 
         // TODO #30 replace with above
-        document.diagnostics = timeit("did_change > gen_diagnostics", || {
-            gen_diagnostics(&document.tree.root_node())
+        self.diagnostics = timeit("did_change > gen_diagnostics", || {
+            gen_diagnostics(&self.tree.root_node())
         });
     }
 }
@@ -911,7 +918,7 @@ impl FrameInfo {
         self.annotations
             .get("rdfs:label")
             // TODO #20 make this more usable by providing multiple lines with indentation
-            .map(|resolved| resolved.iter().map(trim_string_value).join(","))
+            .map(|resolved| resolved.iter().map(|s| trim_string_value(s)).join(","))
             .unwrap_or("(rdfs:label missing)".into())
     }
 
@@ -919,7 +926,7 @@ impl FrameInfo {
         self.annotations
             .get(iri)
             // TODO #20 make this more usable by providing multiple lines with indentation
-            .map(|resolved| resolved.iter().map(trim_string_value).join(","))
+            .map(|resolved| resolved.iter().map(|s| trim_string_value(s)).join(","))
     }
 
     pub fn info_display(&self, workspace: &Workspace) -> String {
@@ -944,7 +951,7 @@ impl FrameInfo {
     }
 }
 
-fn trim_string_value(value: &String) -> String {
+fn trim_string_value(value: &str) -> String {
     value
         .trim_start_matches('"')
         .trim_end_matches("@en")

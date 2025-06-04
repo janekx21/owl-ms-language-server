@@ -6,8 +6,9 @@ use tempdir::{self, TempDir};
 use quick_xml::de::from_str;
 use test_log::test;
 use tower_lsp::LspService;
+use tree_sitter::Parser;
 
-use crate::{catalog::Catalog, *};
+use crate::{catalog::Catalog, web::StaticClient, *};
 
 #[test]
 fn test_parse() {
@@ -79,7 +80,7 @@ Ontology: <http://foo.bar>
 #[test(tokio::test)]
 async fn test_language_server_did_change() {
     // Arrange
-    let service = arrange_backend(None).await;
+    let service = arrange_backend(None, vec![]).await;
 
     let url = Url::parse("file:///tmp/foo.omn").expect("valid url");
     //                              ^^^ 2 for the scheme, 1 for the root
@@ -147,9 +148,10 @@ async fn test_language_server_did_change() {
     let workspace = service.inner().find_workspace(&url).await;
 
     let doc = workspace
-        .internal_document_map
+        .internal_documents
         .get(&url.clone())
         .expect("found the document");
+    let doc = doc.read();
     let doc_content = doc.rope.to_string();
 
     assert_eq!(doc_content, "ABCDEFGHI");
@@ -254,15 +256,12 @@ async fn test_import_resolve() {
         ]
     });
 
-    let parser = arrange_parser();
-    let (service, _) = LspService::new(|client| Backend::new(client, parser));
-
-    arrange_init_backend(
-        &service,
+    let service = arrange_backend(
         Some(WorkspaceFolder {
             uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
             name: "test workspace".into(),
         }),
+        vec![],
     )
     .await;
 
@@ -287,14 +286,11 @@ async fn test_import_resolve() {
 
     // Assert
 
-    let workspaces = service.inner().lock_workspaces().await;
+    let workspaces = service.inner().workspaces.read();
     assert_eq!(workspaces.len(), 1, "all files should be in one workspace");
     let workspace = workspaces.first().unwrap();
-    info!(
-        " Workspace documents {:#?}",
-        workspace.internal_document_map
-    );
-    let document_count = workspace.internal_document_map.iter().count();
+    info!(" Workspace documents {:#?}", workspace.internal_documents);
+    let document_count = workspace.internal_documents.iter().count();
     assert_eq!(document_count, 2);
 }
 
@@ -316,7 +312,7 @@ fn test_path_segment() {
 #[test(tokio::test)]
 async fn test_gen_frame_info_removing_infos() {
     // Arrange
-    let service = arrange_backend(None).await;
+    let service = arrange_backend(None, vec![]).await;
 
     let ontology_url = Url::from_file_path("/tmp/file.omn").unwrap();
 
@@ -368,15 +364,15 @@ Class: class-in-first-file
 
     // Assert
 
-    let workspaces = service.inner().lock_workspaces().await;
+    let workspaces = service.inner().workspaces.read();
     let workspace = workspaces.iter().exactly_one().unwrap();
     let document = workspace
-        .internal_document_map
+        .internal_documents
         .iter()
         .exactly_one()
-        .unwrap_or_else(|_| self::panic!("Multiple documents"));
+        .unwrap_or_else(|_| panic!("Multiple documents"));
     assert_eq!(
-        document.rope.to_string(),
+        document.read().rope.to_string(),
         r#"Ontology: <http://a.b/multi-file>
 Class: class-in-first-file
 
@@ -392,15 +388,10 @@ async fn test_workspace_symbols() {
 
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![
-            WorkspaceMember::CatalogFile(Catalog {
-                uri: vec![CatalogUri {
-                    _id: "Testing".into(),
-                    name: "http://foo.org/a.omn".into(),
-                    uri: "a.omn".to_string(),
-                }],
-                group: vec![],
-                locaton: dir.join("catalog.xml").to_str().unwrap().to_string(),
-            }),
+            WorkspaceMember::CatalogFile(
+                Catalog::new(dir.join("catalog.xml").to_str().unwrap())
+                    .with_uri("http://foo.org/a.omn", "a.omn"),
+            ),
             WorkspaceMember::OmnFile {
                 name: "a.omn".into(),
                 content: r#"
@@ -425,15 +416,12 @@ async fn test_workspace_symbols() {
         ]
     });
 
-    let parser = arrange_parser();
-    let (service, _) = LspService::new(|client| Backend::new(client, parser));
-
-    arrange_init_backend(
-        &service,
+    let service = arrange_backend(
         Some(WorkspaceFolder {
             uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
             name: "foo".into(),
         }),
+        vec![],
     )
     .await;
 
@@ -482,7 +470,86 @@ async fn test_workspace_symbols() {
     assert_eq!(symbols.len(), 2);
 }
 
+#[test(tokio::test)]
+async fn test_load_external_document() {
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![
+            WorkspaceMember::CatalogFile(
+                Catalog::new(dir.join("catalog.xml").to_str().unwrap())
+                    .with_uri("http://foo.org/a.omn", "http://foo.org/version/file.omn"),
+            ),
+            WorkspaceMember::OmnFile {
+                name: "a.omn".into(),
+                content: r#"
+                Ontology: <http://foo.org/a>
+                    Class: some-class
+                        Annotations:
+                            rdfs:label "Some class"
+                "#
+                .into(),
+            },
+        ]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "foo".into(),
+        }),
+        vec![("http://foo.org/version/file.omn", "Onlogogie thingy")],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("c.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://foo.org/c>
+            Import: <http://foo.org/a.omn>
+            Class: some-other-class-at-c
+                Annotations:
+                    rdfs:label "Some other class at c"
+    "#;
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    let result = service
+        .inner()
+        .symbol(WorkspaceSymbolParams {
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            query: "some".to_string(),
+        })
+        .await;
+
+    // Assert
+
+    let symbols = result
+        .expect("Symbols should not throw errors")
+        .expect("Symbols should contain something");
+
+    assert_eq!(symbols.len(), 2);
+}
+
+//////////////////////////
 // Arrange
+//////////////////////////
 
 #[derive(Debug, Clone)]
 enum WorkspaceMember {
@@ -553,12 +620,21 @@ async fn arrange_init_backend(
     service.inner().initialized(InitializedParams {}).await;
 }
 
-async fn arrange_backend(_workspace_folder: Option<WorkspaceFolder>) -> LspService<Backend> {
-    // TODO support workspace folder
-    let _ = _workspace_folder;
-    let (service, _) = LspService::new(|client| Backend::new(client, arrange_parser()));
-
-    arrange_init_backend(&service, None).await;
+async fn arrange_backend(
+    workspace_folder: Option<WorkspaceFolder>,
+    data: Vec<(&str, &str)>,
+) -> LspService<Backend> {
+    let (service, _) = LspService::new(|a| {
+        let mut backend = Backend::new(a);
+        backend.http_client = Arc::new(StaticClient {
+            data: data
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        });
+        backend
+    });
+    arrange_init_backend(&service, workspace_folder).await;
     service
 }
 

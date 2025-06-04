@@ -1,8 +1,10 @@
-use std::{fs::File, io::Write};
-
-use log::info;
+use log::{info, LevelFilter};
+use std::io::Write;
+use std::{env, fs::File};
 use tokio::task;
-use tower_lsp::{lsp_types::MessageType, Client};
+use tower_lsp::{lsp_types::MessageType, Client, LspService};
+
+use crate::Backend;
 
 pub fn timeit<F: FnMut() -> T, T>(name: &str, mut f: F) -> T {
     use std::time::Instant;
@@ -40,4 +42,18 @@ impl Write for BackendLogger {
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+pub fn init_logging(service: &LspService<Backend>) {
+    let mut log_file_path = env::temp_dir();
+    log_file_path.push("owl-ms-lanugage-server.log");
+    let log_file_path = log_file_path.as_path();
+
+    simple_logging::log_to(
+        BackendLogger {
+            client: service.inner().client.clone(),
+            file: File::create(log_file_path).ok(),
+        },
+        LevelFilter::Debug,
+    );
 }
