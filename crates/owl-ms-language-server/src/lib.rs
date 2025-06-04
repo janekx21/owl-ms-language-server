@@ -11,7 +11,7 @@ mod workspace;
 use core::panic;
 use debugging::timeit;
 use itertools::Itertools;
-use log::{debug, info};
+use log::{debug, error, info};
 use once_cell::sync::Lazy;
 use position::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
@@ -78,13 +78,21 @@ impl LanguageServer for Backend {
         let mut pg = self.position_encoding.lock().await;
         *pg = encoding.clone();
 
-        let mut wf = self.workspaces.lock().await;
-        *wf = params
-            .workspace_folders
-            .unwrap_or_default()
-            .iter()
-            .map(|wf| Workspace::new(wf.clone()))
-            .collect();
+        {
+            let mut parser = self.parser.lock().await;
+
+            let mut wf = self.workspaces.lock().await;
+            *wf = params
+                .workspace_folders
+                .unwrap_or_default()
+                .iter()
+                .map(|wf| {
+                    let w = Workspace::new(wf.clone());
+                    w.load_catalog_documents(&mut parser);
+                    w
+                })
+                .collect();
+        }
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -139,6 +147,12 @@ impl LanguageServer for Backend {
                         },
                     ),
                 ),
+                workspace_symbol_provider: Some(OneOf::Right(WorkspaceSymbolOptions {
+                    work_done_progress_options: WorkDoneProgressOptions {
+                        work_done_progress: Some(false),
+                    },
+                    resolve_provider: Some(false),
+                })),
                 ..Default::default()
             },
         })
@@ -325,11 +339,11 @@ impl LanguageServer for Backend {
                 //     .frame_infos
                 //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
 
-                let iri_info_map = timeit("gen_class_iri_label_map", || {
+                let frame_infos = timeit("gen_class_iri_label_map", || {
                     document.gen_frame_infos(Some(new_range))
                 });
 
-                document.frame_infos.extend(iri_info_map);
+                document.frame_infos.extend(frame_infos);
             }
 
             // TODO #30 prune
@@ -537,10 +551,7 @@ impl LanguageServer for Backend {
                     let locations = frame_info
                         .definitions
                         .iter()
-                        .map(|(uri, range)| Location {
-                            uri: uri.clone(),
-                            range: (*range).into(),
-                        })
+                        .map(|l| l.clone().into())
                         .collect_vec();
 
                     return Ok(Some(GotoDefinitionResponse::Array(locations)));
@@ -711,6 +722,47 @@ impl LanguageServer for Backend {
         Ok(None)
     }
 
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        let query = params.query;
+        info!("symbol with query:{query}");
+        let workspaces = self.workspaces.lock().await;
+        let c = workspaces
+            .iter()
+            .flat_map(|w| {
+                w.document_map.iter()
+                // .map(|d| d.value().clone())
+                // .flat_map(|d| d.frame_infos.iter().map(|i| i.value())) //.iter().map(|i| i.value()))
+            })
+            .collect_vec();
+        let d = c.iter().flat_map(|a| a.frame_infos.iter()).collect_vec();
+
+        info!(
+            "All frame infos: {:#?}",
+            d.iter().map(|v| v.value()).collect_vec()
+        );
+
+        let symbols = d
+            .iter()
+            .filter(|i| i.iri.contains(query.as_str()))
+            .flat_map(|fi| {
+                fi.definitions.iter().map(|definition| SymbolInformation {
+                    name: fi.iri.clone(),
+                    kind: fi.frame_type.into(),
+                    tags: Some(vec![]), // TODO #38 add support for depricated entities
+                    deprecated: None,
+                    location: definition.clone().into(),
+                    container_name: None,
+                })
+            })
+            .collect_vec();
+
+        // .flat_map(|d| d.value().frame_infos.iter());
+        Ok(Some(symbols))
+    }
+
     async fn shutdown(&self) -> Result<()> {
         info!("Shutdown");
         Ok(())
@@ -774,60 +826,9 @@ impl Backend {
 
         for url in urls {
             info!("Resolving url {url}");
-            workspace.resolve_url_to_document(&url, parser);
-
-            //     // TODO #8 filepath
-            //     if workspace.document_map.contains_key(&url) {
-            //         debug!("This document is already in the backend. URL: {}", url);
-            //     } else {
-            //         debug!("Try to resolve URL {}", url);
-            //         // Find uri in catalog
-            //         debug!("{:?}", workspace.catalogs);
-            //         for c in &workspace.catalogs {
-            //             for u in &c.uri {
-            //                 debug!("url {}  u.name {}", url, u.name);
-            //                 if u.name == url.to_string() {
-            //                     // This is an import of a local file!
-            //                     let path = Path::new(&c.locaton).parent().unwrap().join(&u.uri);
-            //                     debug!(
-            //                         "Found matching local file {:?} loading from path {}",
-            //                         u,
-            //                         path.display()
-            //                     );
-            //                     let ontology_text = fs::read_to_string(&path).unwrap();
-            //                     let document = Document::new(
-            //                         Url::from_file_path(path).unwrap(),
-            //                         -1,
-            //                         ontology_text,
-            //                         parser,
-            //                     );
-            //                     workspace.insert_document(document);
-            //                 }
-            //             }
-            //         }
-
-            //         // debug!("Resolving import of {}", url.clone());
-            //         // TODO #10
-            //         // let ontology_text = ureq::get(url.to_string())
-            //         //     .call()
-            //         //     .unwrap()
-            //         //     .body_mut()
-            //         //     .read_to_string()
-            //         //     .unwrap();
-
-            //         // debug!(
-            //         //     "Inserted imported document URL: {}, number of iris: {}, number of diagnostics: {}",
-            //         //     url,
-            //         //     document.iri_info_map.iter().count(),
-            //         //     document.diagnostics.len()
-            //         // );
-            //         // }
-            //         // } else {
-            //         // warn!("The imported URL type is not supported. URL: {}", url);
-            //         // }
-
-            //         // debug!("Resolved import {} to\n{}", url, resolved_import);
-            //     }
+            let _ = workspace
+                .resolve_url_to_document(&url, parser)
+                .inspect_err(|e| error!("Error while resolving imports: {e}"));
         }
     }
 }

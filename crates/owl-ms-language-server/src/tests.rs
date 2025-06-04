@@ -10,6 +10,10 @@ use tower_lsp::LspService;
 
 use crate::{catalog::Catalog, *};
 
+/// This file contains unit tests and integration tests.
+/// The tests are written in a arrange-act-assert style.
+/// Functions starting with "arrange_" are utility for arraning testing environments.
+
 #[test]
 fn test_parse() {
     let mut parser = arrange_parser();
@@ -382,6 +386,97 @@ Class: class-in-first-file
     );
     let frame = document.frame_infos.get("class-in-first-file").unwrap();
     // TODO #32 assert_eq!(frame.annotations.get("rdfs:label"), None);
+}
+
+#[test(tokio::test)]
+async fn test_workspace_symbolds() {
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![
+            WorkspaceMember::CatalogFile(
+                Catalog::new(dir.join("catalog.xml").to_str().unwrap())
+                    .with_uri("http://foo.org/a.omn", "a.omn"),
+            ),
+            WorkspaceMember::OmnFile {
+                name: "a.omn".into(),
+                content: r#"
+                Ontology: <http://foo.org/a>
+                    Class: some-class
+                        Annotations:
+                            rdfs:label "Some class"
+                "#
+                .into(),
+            },
+            WorkspaceMember::OmnFile {
+                name: "b.omn".into(),
+                content: r#"
+                Ontology: <http://foo.org/b>
+                    Import: <http://foo.org/a.omn>
+                    Class: some-other-class
+                        Annotations:
+                            rdfs:label "Some other class"
+                "#
+                .into(),
+            },
+        ]
+    });
+
+    let parser = arrange_parser();
+    let (service, _) = LspService::new(|client| Backend::new(client, parser));
+
+    arrange_init_backend(
+        &service,
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "foo".into(),
+        }),
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("c.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://foo.org/c>
+            Import: <http://foo.org/a.omn>
+            Class: some-other-class-at-c
+                Annotations:
+                    rdfs:label "Some other class at c"
+    "#;
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    let result = service
+        .inner()
+        .symbol(WorkspaceSymbolParams {
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            query: "some".to_string(),
+        })
+        .await;
+
+    // Assert
+
+    let symbols = result
+        .expect("Symbols should not throw errors")
+        .expect("Symbols should contain something");
+
+    assert_eq!(symbols.len(), 2);
 }
 
 // Arrange
