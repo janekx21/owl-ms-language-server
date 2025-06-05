@@ -477,8 +477,9 @@ async fn test_load_external_document() {
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![
             WorkspaceMember::CatalogFile(
-                Catalog::new(dir.join("catalog.xml").to_str().unwrap())
-                    .with_uri("http://foo.org/a.omn", "http://foo.org/version/file.omn"),
+                Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
+                    .with_uri("http://foo.org/a.omn", "http://foo.org/version/file.owl")
+                    .with_uri("http://foo.org/c.omn", "c.omn"),
             ),
             WorkspaceMember::OmnFile {
                 name: "a.omn".into(),
@@ -498,7 +499,31 @@ async fn test_load_external_document() {
             uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
             name: "foo".into(),
         }),
-        vec![("http://foo.org/version/file.omn", "Onlogogie thingy")],
+        vec![(
+            "http://foo.org/version/file.owl",
+            r##"
+                <?xml version="1.0"?>
+                <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                     xml:base="http://foo.org/a"
+                     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+                     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+                     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+                     ontologyIRI="http://foo.org/a">
+
+                    <Declaration>
+                        <Class IRI="#SomeOtherClass"/>
+                    </Declaration>
+    
+                    <AnnotationAssertion>
+                        <AnnotationProperty abbreviatedIRI="rdfs:label"/>
+                        <IRI>#SomeOtherClass</IRI>
+                        <Literal>Some other class at a</Literal>
+                    </AnnotationAssertion>
+
+                </Ontology>
+            "##,
+        )],
     )
     .await;
 
@@ -511,6 +536,9 @@ async fn test_load_external_document() {
                 Annotations:
                     rdfs:label "Some other class at c"
     "#;
+
+    // Act
+
     service
         .inner()
         .did_open(DidOpenTextDocumentParams {
@@ -523,28 +551,24 @@ async fn test_load_external_document() {
         })
         .await;
 
-    // Act
-
-    let result = service
-        .inner()
-        .symbol(WorkspaceSymbolParams {
-            partial_result_params: PartialResultParams {
-                partial_result_token: None,
-            },
-            work_done_progress_params: WorkDoneProgressParams {
-                work_done_token: None,
-            },
-            query: "some".to_string(),
-        })
-        .await;
-
     // Assert
 
-    let symbols = result
-        .expect("Symbols should not throw errors")
-        .expect("Symbols should contain something");
+    let workspaces = service.inner().workspaces.read();
+    let workspace = workspaces
+        .iter()
+        .exactly_one()
+        .expect("Only one workspace should be crated");
 
-    assert_eq!(symbols.len(), 2);
+    assert_eq!(
+        workspace.internal_documents.len(),
+        1,
+        "One internal document should be loaded. It was given"
+    );
+    assert_eq!(
+        workspace.external_documents.len(),
+        1,
+        "One external document should be loaded"
+    );
 }
 
 //////////////////////////

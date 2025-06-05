@@ -9,7 +9,7 @@ mod tests;
 mod web;
 mod workspace;
 use itertools::Itertools;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
 use parking_lot::{MappedRwLockWriteGuard, RwLock, RwLockWriteGuard};
 use position::Position;
@@ -619,10 +619,10 @@ impl Backend {
         });
 
         if maybe_workspace.is_none() {
-            info!("Workspace for {url} could not be found. Creating a new one.");
-            // Create a workspace that is a single file
             let mut file_path = url.to_file_path().expect("URL should be a filepath");
             file_path.pop();
+            warn!("Workspace for {url} could not be found. Could the entry in catalog-v001.xml be missing? Creating a new one at {}", file_path.display());
+            // Create a workspace that is a single file
             let workspace = Workspace::new(WorkspaceFolder {
                 uri: Url::from_file_path(file_path.clone()).expect("Valid URL from filepath"), // TODO do i need the parent folder fot that?
                 name: "Single File".into(),
@@ -658,7 +658,7 @@ impl Backend {
             info!("Resolving url {url}");
             workspace
                 .resolve_url_to_document(&url, &*self.http_client)
-                .inspect_err(|e| error!("Resolve error: {e}"))
+                .inspect_err(|e| error!("Resolve error: {e:?}"))
                 .ok();
 
             //     // TODO #8 filepath

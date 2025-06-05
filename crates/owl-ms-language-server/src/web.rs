@@ -1,5 +1,6 @@
 use anyhow::Result;
 use dashmap::DashMap;
+use log::info;
 
 // #[automock]
 pub trait HttpClient: Send + Sync {
@@ -21,6 +22,7 @@ pub struct StaticClient {
 
 impl HttpClient for StaticClient {
     fn get(&self, url: &str) -> Result<String> {
+        info!("Resolving {url} in static client");
         Ok(self
             .data
             .get(url)

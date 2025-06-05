@@ -3,8 +3,8 @@ use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
     rope_provider::RopeProvider, LANGUAGE, NODE_TYPES,
 };
-use anyhow::anyhow;
 use anyhow::Result;
+use anyhow::{anyhow, Context};
 use dashmap::DashMap;
 use horned_owl::{curie::PrefixMapping, ontology::set::SetOntology};
 use itertools::Itertools;
@@ -194,11 +194,10 @@ impl Workspace {
                             }
                             Err(_) => {
                                 // This is an external url
-                                let document_text = ureq::get(url.to_string())
-                                    .call()?
-                                    .body_mut()
-                                    .read_to_string()?;
-                                let document = ExternalDocument::new(document_text, url)?;
+                                let document_text =
+                                    client.get(url.as_str()).context("Http client request")?;
+                                let document = ExternalDocument::new(document_text, url)
+                                    .context("External document creation")?;
                                 let doc = self.insert_external_document(document);
                                 return Ok(DocumentReference::External(doc));
                             }
