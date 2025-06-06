@@ -381,7 +381,7 @@ impl LanguageServer for Backend {
 
                 let frame_info = workspace.get_frame_info(&iri);
 
-                debug!("Found frame info {:#?}", frame_info);
+                // debug!("Found frame info {:#?}", frame_info);
 
                 if let Some(frame_info) = frame_info {
                     let locations = frame_info

@@ -1,3 +1,4 @@
+use crate::catalog::CatalogUri;
 use crate::web::HttpClient;
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
@@ -6,6 +7,9 @@ use crate::{
 use anyhow::Result;
 use anyhow::{anyhow, Context};
 use dashmap::DashMap;
+use horned_owl::io::rdf::reader::{RDFOntology, RcRDFOntology};
+use horned_owl::io::ParserConfiguration;
+use horned_owl::model::{ArcAnnotatedComponent, ArcStr, RcAnnotatedComponent};
 use horned_owl::{curie::PrefixMapping, ontology::set::SetOntology};
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
@@ -166,72 +170,107 @@ impl Workspace {
             .collect_vec()
     }
 
-    /// Resolves in the interal documents only
+    fn find_catalog_uri(&self, url: &Url) -> Option<(&Catalog, &CatalogUri)> {
+        let url_string = url.to_string();
+
+        for catalog in &self.catalogs {
+            for catalog_uri in catalog.all_catalog_uris() {
+                if catalog_uri.name == url_string {
+                    return Some((catalog, catalog_uri));
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_document_by_url(&self, url: &Url) -> Option<DocumentReference> {
+        if let Some(doc) = self.internal_documents.get(url) {
+            // Document is loaded already
+            return Some(DocumentReference::Internal(doc.clone()));
+        }
+        if let Some(doc) = self.external_documents.get(url) {
+            // Document is loaded already
+            return Some(DocumentReference::External(doc.clone()));
+        }
+        None
+    }
+
+    /// Resolves a URL (file or http/https protocol) to a document that is inserted into this workspace
     pub fn resolve_url_to_document(
         &self,
         url: &Url,
         client: &dyn HttpClient,
     ) -> Result<DocumentReference> {
-        if let Some(doc) = self.internal_documents.get(url) {
-            // Document is loaded already
-            return Ok(DocumentReference::Internal(doc.clone()));
+        if let Some(doc) = self.get_document_by_url(url) {
+            return Ok(doc);
         }
 
-        for catalog in &self.catalogs {
-            for catalog_uri in catalog.all_catalog_uris() {
-                if catalog_uri.name == url.to_string() {
-                    let file_or_external_url = Url::parse(&catalog_uri.uri);
+        let (catalog, catalog_uri) = self
+            .find_catalog_uri(url)
+            .ok_or(anyhow!("Url could not be found in any catalog"))?;
 
-                    match file_or_external_url {
-                        Ok(url) => match url.to_file_path() {
-                            Ok(path) => {
-                                // This is an abolute file path url
-                                let (document_text, document_url) = load_file_from_disk(path)?;
-                                let document =
-                                    InternalDocument::new(document_url, -1, document_text);
-                                let doc = self.insert_internal_document(document);
-                                return Ok(DocumentReference::Internal(doc));
-                            }
-                            Err(_) => {
-                                // This is an external url
-                                let document_text =
-                                    client.get(url.as_str()).context("Http client request")?;
-                                let document = ExternalDocument::new(document_text, url)
-                                    .context("External document creation")?;
-                                let doc = self.insert_external_document(document);
-                                return Ok(DocumentReference::External(doc));
-                            }
-                        },
-                        Err(_) => {
-                            // This is a relative file path
-                            let path = catalog.parent_folder().join(&catalog_uri.uri);
+        let url_from_catalog = Url::parse(&catalog_uri.uri);
 
-                            info!("Loaded file from disk at {}", path.display());
-                            let (document_text, document_url) = load_file_from_disk(path)?;
+        match url_from_catalog {
+            Ok(url) => {
+                if let Some(doc) = self.get_document_by_url(&url) {
+                    return Ok(doc);
+                }
 
-                            let document = InternalDocument::new(document_url, -1, document_text);
-                            let doc = self.insert_internal_document(document);
-                            return Ok(DocumentReference::Internal(doc));
-                        }
-                    };
+                match url.to_file_path() {
+                    Ok(path) => {
+                        // This is an abolute file path url
+                        return self.resolve_path_to_document(path);
+                    }
+                    Err(_) => {
+                        // This is an external url
+                        let document_text =
+                            client.get(url.as_str()).context("Http client request")?;
+                        let document = ExternalDocument::new(document_text, url)
+                            .context("External document creation")?;
+                        let doc = self.insert_external_document(document);
+                        return Ok(DocumentReference::External(doc));
+                    }
                 }
             }
+            Err(_) => {
+                // This is a relative file path
+                let path = catalog.parent_folder().join(&catalog_uri.uri);
+                let url =
+                    Url::from_file_path(&path).map_err(|_| anyhow!("Url is not a file path"))?;
+                if let Some(doc) = self.get_document_by_url(&url) {
+                    return Ok(doc);
+                }
+
+                return self.resolve_path_to_document(path);
+            }
+        };
+    }
+
+    fn resolve_path_to_document(&self, path: PathBuf) -> Result<DocumentReference> {
+        let (document_text, document_url) = load_file_from_disk(path.clone())?;
+
+        match path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+        {
+            "omn" => {
+                let document = InternalDocument::new(document_url, -1, document_text);
+                let doc = self.insert_internal_document(document);
+                return Ok(DocumentReference::Internal(doc));
+            }
+            "owl" => {
+                let document = ExternalDocument::new(document_text, document_url)?;
+                let doc = self.insert_external_document(document);
+                return Ok(DocumentReference::External(doc));
+            }
+            ext => return Err(anyhow!("The extention {ext} is not supported")),
         }
-        Err(anyhow!(
-            "The document at {url} could not be found in the workspace"
-        ))
     }
 }
 
 fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
-    if path.extension() != Some(OsStr::new("omn")) {
-        warn!("Non omn files can not be loaded. path {}", path.display());
-        return Err(anyhow!(
-            "Non omn files can not be loaded. path {}",
-            path.display()
-        ));
-    }
-
     info!("Loading file from disk {}", path.display());
 
     Ok((
@@ -246,6 +285,8 @@ pub enum DocumentReference {
     Internal(Arc<RwLock<InternalDocument>>),
     External(Arc<RwLock<ExternalDocument>>),
 }
+
+impl DocumentReference {}
 
 // static EMTPTY_FRAME_INFO_MAP: Lazy<DashMap<Iri, FrameInfo>> = Lazy::new(|| DashMap::new());
 
@@ -296,6 +337,7 @@ pub enum OwlDialect {
     Unknown,
     Omn,
     Owl,
+    Rdf,
 }
 
 #[derive(Debug)]
@@ -385,7 +427,7 @@ impl InternalDocument {
         let infos = DashMap::<Iri, FrameInfo>::new();
 
         for m in matches {
-            info!("Found match {:#?}", m);
+            // info!("Found match {:#?}", m);
             match m.pattern_index {
                 0 => {
                     let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
@@ -397,7 +439,7 @@ impl InternalDocument {
 
                     let frame_type = FrameType::parse(parent_node.kind());
 
-                    debug!("Found frame {}", frame_iri);
+                    // debug!("Found frame {}", frame_iri);
 
                     if !infos.contains_key(&frame_iri) {
                         infos.insert(
@@ -434,7 +476,7 @@ impl InternalDocument {
                     let iri = capture_texts.next().unwrap().to_string();
 
                     // TODO requst prefix url to cache the ontology there
-                    debug!("Prefix named {} with iri {}", prefix_name, iri);
+                    // debug!("Prefix named {} with iri {}", prefix_name, iri);
                 }
                 2 => {
                     let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
@@ -446,7 +488,7 @@ impl InternalDocument {
 
                     let frame_node = m.captures[1].node;
 
-                    debug!("Found frame {}", frame_iri);
+                    // debug!("Found frame {}", frame_iri);
                     if !infos.contains_key(&frame_iri) {
                         infos.insert(
                             frame_iri.clone(),
@@ -490,7 +532,7 @@ impl InternalDocument {
             .filter_map(|url| {
                 workspace
                     .resolve_url_to_document(url, http_client)
-                    .inspect_err(|e| error!("{e}"))
+                    .inspect_err(|e| error!("{e:?}"))
                     .ok()
             })
             .collect_vec();
@@ -537,7 +579,7 @@ impl InternalDocument {
             .filter_map(|url| {
                 workspace
                     .resolve_url_to_document(url, http_client)
-                    .inspect_err(|e| error!("{e}"))
+                    .inspect_err(|e| error!("{e:?}"))
                     .ok()
             })
             .collect_vec();
@@ -761,17 +803,59 @@ impl InternalDocument {
 pub struct ExternalDocument {
     pub uri: Url,
     pub text: String,
-    pub ontology: (SetOntology<String>, PrefixMapping),
+    pub ontology: ExternalOntology,
     /// This can differ from the url file extention, so we need to track it
     pub owl_dialect: OwlDialect,
 }
 
+#[derive(Debug)]
+pub enum ExternalOntology {
+    RdfOntology(RDFOntology<ArcStr, ArcAnnotatedComponent>),
+    OwlOntology(SetOntology<ArcStr>),
+}
+
 impl ExternalDocument {
     pub fn new(text: String, url: Url) -> Result<ExternalDocument> {
-        let b = horned_owl::model::Build::new_string();
+        let b = horned_owl::model::Build::new_arc();
         let mut buffer = text.as_bytes();
-        let ontology =
-            horned_owl::io::owx::reader::read_with_build(&mut buffer, &b).map_err(|e| match e {
+
+        // let owl_dialect = match &url.path() {
+        //     x if x.ends_with(".owl") => OwlDialect::Owl,
+        //     x if x.ends_with(".omn") => OwlDialect::Omn,
+        //     _ => OwlDialect::Unknown,
+        // };
+        if url.path().ends_with(".owl") {
+            let (ontology, prefix_mapping) =
+                horned_owl::io::owx::reader::read_with_build(&mut buffer, &b).map_err(
+                    |e| match e {
+                        horned_owl::error::HornedError::IOError(error) => {
+                            anyhow!("IO Error: {error}")
+                        }
+                        horned_owl::error::HornedError::ParserError(error, location) => {
+                            anyhow!("Parsing Error: {error} {location}")
+                        }
+                        horned_owl::error::HornedError::ValidityError(msg, location) => {
+                            anyhow!("Validity Error: {msg} at {location}")
+                        }
+                        horned_owl::error::HornedError::CommandError(msg) => {
+                            anyhow!("Command Error: {msg}")
+                        }
+                    },
+                )?;
+
+            Ok(ExternalDocument {
+                uri: url,
+                text,
+                ontology: ExternalOntology::OwlOntology(ontology),
+                owl_dialect: OwlDialect::Owl,
+            })
+        } else {
+            let (ontology, incomplete_parse) = horned_owl::io::rdf::reader::read_with_build(
+                &mut buffer,
+                &b,
+                ParserConfiguration::default(),
+            )
+            .map_err(|e| match e {
                 horned_owl::error::HornedError::IOError(error) => {
                     anyhow!("IO Error: {error}")
                 }
@@ -786,30 +870,27 @@ impl ExternalDocument {
                 }
             })?;
 
-        let owl_dialect = match &url.path() {
-            x if x.ends_with(".owl") => OwlDialect::Owl,
-            x if x.ends_with(".omn") => OwlDialect::Omn,
-            _ => OwlDialect::Unknown,
-        };
-
-        Ok(ExternalDocument {
-            uri: url,
-            text,
-            ontology,
-            owl_dialect,
-        })
+            Ok(ExternalDocument {
+                uri: url,
+                text,
+                ontology: ExternalOntology::RdfOntology(ontology),
+                owl_dialect: OwlDialect::Rdf,
+            })
+        }
     }
 
     fn reachable_documents(&self) -> Vec<Url> {
-        self.ontology
-            .0
-            .iter()
-            .filter_map(|ac| match &ac.component {
-                horned_owl::model::Component::Import(import) => Some(Url::parse(import.0.deref())),
-                _ => None,
-            })
-            .filter_map(|r| r.ok())
-            .collect_vec()
+        vec![]
+        // TODO RDF has no imports?
+        // self.ontology
+        //     .i()
+        //     .iter()
+        //     .filter_map(|ac| match &ac.component {
+        //         horned_owl::model::Component::Import(import) => Some(Url::parse(import.0.deref())),
+        //         _ => None,
+        //     })
+        //     .filter_map(|r| r.ok())
+        //     .collect_vec()
     }
 }
 
@@ -1126,6 +1207,7 @@ impl Display for FrameType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horned_owl::vocab::OWL;
     use test_log::test;
 
     #[test]
@@ -1150,9 +1232,12 @@ mod tests {
         // Assert
         let doc = external_doc.unwrap();
         assert_eq!(doc.text, ontology_text);
-        let set_onto = &doc.ontology.0;
+        let set_ontology = match &doc.ontology {
+            ExternalOntology::OwlOntology(onto) => onto,
+            _ => panic!("Invalid ontology type"),
+        };
         assert_eq!(
-            set_onto
+            set_ontology
                 .i()
                 .the_ontology_id_or_default()
                 .iri
