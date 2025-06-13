@@ -10,6 +10,7 @@ use dashmap::DashMap;
 use horned_owl::io::rdf::reader::RDFOntology;
 use horned_owl::io::ParserConfiguration;
 use horned_owl::model::{ArcAnnotatedComponent, ArcStr};
+use horned_owl::model::{Class, Component::*};
 use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
@@ -84,7 +85,12 @@ impl Workspace {
         &self,
         document: InternalDocument,
     ) -> Arc<RwLock<InternalDocument>> {
-        debug!("Insert internal document {document:?}");
+        debug!(
+            "Insert internal document {} with {:?} length is {}",
+            document.uri,
+            document.owl_dialect,
+            document.rope.len_chars()
+        );
         let uri = document.uri.clone();
         let arc = Arc::new(RwLock::new(document));
         self.internal_documents.insert(uri, arc.clone());
@@ -94,7 +100,12 @@ impl Workspace {
         &self,
         document: ExternalDocument,
     ) -> Arc<RwLock<ExternalDocument>> {
-        debug!("Insert external document {document:?}");
+        debug!(
+            "Insert external document {} with {:?} length is {}",
+            document.uri,
+            document.owl_dialect,
+            document.text.len()
+        );
         let uri = document.uri.clone();
         let arc = Arc::new(RwLock::new(document));
         self.external_documents.insert(uri, arc.clone());
@@ -119,13 +130,39 @@ impl Workspace {
 
     /// This finds a frame info in the internal documents
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
-        self.internal_documents
+        let a = self
+            .internal_documents
             .iter()
             .filter_map(|dm| {
                 let dm = dm.value().read();
                 dm.frame_infos.get(iri).map(|v| v.value().clone())
             })
-            .tree_reduce(FrameInfo::merge)
+            .tree_reduce(FrameInfo::merge);
+
+        self.external_documents.iter().filter_map(|doc| {
+            let doc = doc.read();
+            match &doc.ontology {
+                ExternalOntology::RdfOntology(rdfontology) => todo!(),
+                ExternalOntology::OwlOntology(set_ontology) => {
+                    set_ontology.iter().map(|p| match &p.component {
+                        DeclareClass(c) => {
+                            let iri = &(c.0).0;
+                            let iri = iri.clone();
+                            info!("Found class! {iri} {:#?}", p.ann);
+                            todo!()
+                        }
+                        DeclareObjectProperty(declare_object_property) => todo!(),
+                        DeclareAnnotationProperty(declare_annotation_property) => todo!(),
+                        DeclareDataProperty(declare_data_property) => todo!(),
+                        DeclareNamedIndividual(declare_named_individual) => todo!(),
+                        DeclareDatatype(declare_datatype) => todo!(),
+                        _ => {}
+                    });
+                    todo!()
+                }
+            }
+        });
+        None // TODO
     }
 
     pub fn node_info(
@@ -253,7 +290,7 @@ impl Workspace {
                 match url.to_file_path() {
                     Ok(path) => {
                         // This is an abolute file path url
-                        return self.resolve_path_to_document(path);
+                        self.resolve_path_to_document(path)
                     }
                     Err(_) => {
                         // This is an external url
@@ -291,14 +328,14 @@ impl Workspace {
             "omn" => {
                 let document = InternalDocument::new(document_url, -1, document_text);
                 let doc = self.insert_internal_document(document);
-                return Ok(DocumentReference::Internal(doc));
+                Ok(DocumentReference::Internal(doc))
             }
-            "owl" => {
+            "owl" | "owx" => {
                 let document = ExternalDocument::new(document_text, document_url)?;
                 let doc = self.insert_external_document(document);
-                return Ok(DocumentReference::External(doc));
+                Ok(DocumentReference::External(doc))
             }
-            ext => return Err(anyhow!("The extention {ext} is not supported")),
+            ext => Err(anyhow!("The extention {ext} is not supported")),
         }
     }
 }
@@ -854,36 +891,33 @@ impl ExternalDocument {
         let b = horned_owl::model::Build::new_arc();
         let mut buffer = text.as_bytes();
 
-        // let owl_dialect = match &url.path() {
-        //     x if x.ends_with(".owl") => OwlDialect::Owl,
-        //     x if x.ends_with(".omn") => OwlDialect::Omn,
-        //     _ => OwlDialect::Unknown,
-        // };
-        if url.path().ends_with(".owl") {
-            let (ontology, prefix_mapping) =
-                horned_owl::io::owx::reader::read_with_build(&mut buffer, &b)
+        match url.path().rsplit_once(".") {
+            Some((_, "owl")) | Some((_, "owx")) => {
+                let (ontology, _) = horned_owl::io::owx::reader::read_with_build(&mut buffer, &b)
                     .map_err(horned_to_anyhow)?;
 
-            Ok(ExternalDocument {
-                uri: url,
-                text,
-                ontology: ExternalOntology::OwlOntology(ontology),
-                owl_dialect: OwlDialect::Owl,
-            })
-        } else {
-            let (ontology, incomplete_parse) = horned_owl::io::rdf::reader::read_with_build(
-                &mut buffer,
-                &b,
-                ParserConfiguration::default(),
-            )
-            .map_err(horned_to_anyhow)?;
+                Ok(ExternalDocument {
+                    uri: url,
+                    text,
+                    ontology: ExternalOntology::OwlOntology(ontology),
+                    owl_dialect: OwlDialect::Owl,
+                })
+            }
+            _ => {
+                let (ontology, incomplete_parse) = horned_owl::io::rdf::reader::read_with_build(
+                    &mut buffer,
+                    &b,
+                    ParserConfiguration::default(),
+                )
+                .map_err(horned_to_anyhow)?;
 
-            Ok(ExternalDocument {
-                uri: url,
-                text,
-                ontology: ExternalOntology::RdfOntology(ontology),
-                owl_dialect: OwlDialect::Rdf,
-            })
+                Ok(ExternalDocument {
+                    uri: url,
+                    text,
+                    ontology: ExternalOntology::RdfOntology(ontology),
+                    owl_dialect: OwlDialect::Rdf,
+                })
+            }
         }
     }
 
@@ -1236,11 +1270,11 @@ mod tests {
     use std::ops::Deref;
 
     use super::*;
-    use horned_owl::vocab::OWL;
+    use pretty_assertions::assert_eq;
     use test_log::test;
 
     #[test]
-    fn external_document_new_given_text_does_parse_ontology() {
+    fn external_document_new_given_owl_text_does_parse_ontology() {
         // Arrange
         let ontology_text = r#"
         <?xml version="1.0"?>
@@ -1274,6 +1308,18 @@ mod tests {
                 .deref(),
             "http://www.example.com/iri"
         );
+
+        set_ontology.iter().for_each(|ac| match &ac.component {
+            horned_owl::model::Component::DeclareClass(declare_class) => {
+                let iri = &(declare_class.0).0;
+                assert_eq!(&iri[..], "https://www.example.com/o1");
+            }
+            horned_owl::model::Component::OntologyID(ontology_id) => {
+                let iri = ontology_id.iri.clone().unwrap();
+                assert_eq!(&iri[..], "http://www.example.com/iri");
+            }
+            _ => {}
+        });
     }
 
     #[test]

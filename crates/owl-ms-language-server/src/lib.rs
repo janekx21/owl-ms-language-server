@@ -327,17 +327,6 @@ impl LanguageServer for Backend {
                         data: None,
                     })
                 }
-
-                // workspace.get_frame_info(&iri).map(|fi| InlayHint {
-                //     position: capture.node.range.end.into(),
-                //     label: InlayHintLabel::String(fi.label()),
-                //     kind: None,
-                //     text_edits: None,
-                //     tooltip: None,
-                //     padding_left: Some(true),
-                //     padding_right: None,
-                //     data: None,
-                // })
             })
             .collect_vec();
         Ok(Some(hints))

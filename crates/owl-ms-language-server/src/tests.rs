@@ -470,6 +470,111 @@ async fn backend_hover_in_multi_file_ontology_on_not_imported_iri_should_not_wor
 }
 
 #[test(tokio::test)]
+async fn backend_hover_on_external_iri_should_show_external_info() {
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![WorkspaceMember::Folder {
+            name: "ontology-a".into(),
+            children: vec![WorkspaceMember::CatalogFile(
+                Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
+                    .with_uri("http://ontology-a.org/a1", "a1.omn")
+                    .with_uri("http://ontology-a.org/a2", "http://ontology-a.org/a2.owx"),
+            )],
+        }]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test wosrkpace".into(),
+        }),
+        vec![(
+            "http://ontology-a.org/a2.owx",
+            r##"
+                <?xml version="1.0"?>
+                <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                     xml:base="http://foo.org/a"
+                     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+                     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+                     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+                     ontologyIRI="http://ontology-a.org/a2.owx">
+
+                    <Declaration>
+                        <Class IRI="#ClassA2"/>
+                    </Declaration>
+    
+                    <AnnotationAssertion>
+                        <AnnotationProperty abbreviatedIRI="rdfs:label"/>
+                        <IRI>#ClassA2</IRI>
+                        <Literal>Some class in A2</Literal>
+                    </AnnotationAssertion>
+
+                </Ontology>
+            "##,
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://ontology-a.org/a1>
+            Import: <http://ontology-a.org/a2>
+            Class: ClassA1
+                Annotations:
+                    rdfs:label "Some class in A1"
+                SubClassOf: ClassA2,ClassB2
+
+    "#;
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+
+    // Act
+    // TODO check if the arrange did not create diagnostics
+    let hover_result = service
+        .inner()
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url.clone() },
+                position: Position {
+                    line: 6,
+                    character: 32,
+                }
+                .into(),
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    let hover_result = hover_result.unwrap();
+
+    let contents = match hover_result.contents {
+        HoverContents::Scalar(MarkedString::String(str)) => str,
+        _ => panic!("Did not think of that"),
+    };
+    info!("contetns={contents}");
+    assert!(contents.contains("ClassA2"));
+    assert!(contents.contains("Some class in A2"));
+}
+
+#[test(tokio::test)]
 async fn backend_import_resolve_should_load_documents() {
     // Arrange
 
@@ -787,6 +892,99 @@ async fn backend_did_open_should_load_external_documents_via_http() {
     );
 }
 
+#[test(tokio::test)]
+async fn backend_did_open_should_load_external_documents_via_file() {
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![
+            WorkspaceMember::CatalogFile(
+                Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
+                    .with_uri("http://foo.org/a", "a.owx")
+                    .with_uri("http://foo.org/c", "c.omn"),
+            ),
+            WorkspaceMember::OwxFile {
+                name: "a.owx".into(),
+                content: r##"
+                    <?xml version="1.0"?>
+                    <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                         xml:base="http://foo.org/a"
+                         xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                         xmlns:xml="http://www.w3.org/XML/1998/namespace"
+                         xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+                         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+                         ontologyIRI="http://foo.org/a">
+
+                        <Declaration>
+                            <Class IRI="#SomeOtherClass"/>
+                        </Declaration>
+    
+                        <AnnotationAssertion>
+                            <AnnotationProperty abbreviatedIRI="rdfs:label"/>
+                            <IRI>#SomeOtherClass</IRI>
+                            <Literal>Some other class at a</Literal>
+                        </AnnotationAssertion>
+
+                    </Ontology>
+                "##
+                .into(),
+            },
+        ]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "foo".into(),
+        }),
+        vec![],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("c.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://foo.org/c>
+            Import: <http://foo.org/a>
+            Class: some-other-class-at-c
+                Annotations:
+                    rdfs:label "Some other class at c"
+    "#;
+
+    // Act
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+
+    let workspaces = service.inner().workspaces.read();
+    let workspace = workspaces
+        .iter()
+        .exactly_one()
+        .expect("Only one workspace should be crated");
+
+    assert_eq!(
+        workspace.internal_documents.len(),
+        1,
+        "One internal document should be loaded. It was given"
+    );
+    assert_eq!(
+        workspace.external_documents.len(),
+        1,
+        "One external document should be loaded"
+    );
+}
+
 //////////////////////////
 // Arrange
 //////////////////////////
@@ -802,22 +1000,26 @@ enum WorkspaceMember {
         name: String,
         content: String,
     },
+    OwxFile {
+        name: String,
+        content: String,
+    },
 }
 
 /// Create a tmp workspace for testing
 /// Example:
 /// ```
-///        vec![
-///            WorkspaceMember::CatalogFile(
-///                Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
-///                    .with_uri("http://external.org/shared.omn", "foobaronto.omn")
-///                    .with_uri("http://foobar.org/ontology/", "foo.omn"),
-///            ),
-///            WorkspaceMember::OmnFile {
-///                name: "foobaronto.omn".into(),
-///                content: "".into(),
-///            },
-///        ]
+/// vec![
+///     WorkspaceMember::CatalogFile(
+///         Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
+///             .with_uri("http://external.org/shared.omn", "foobaronto.omn")
+///             .with_uri("http://foobar.org/ontology/", "foo.omn"),
+///     ),
+///     WorkspaceMember::OmnFile {
+///         name: "foobaronto.omn".into(),
+///         content: "".into(),
+///     },
+/// ]
 /// ```
 fn arrange_workspace_folders<F>(root_member_generator: F) -> TempDir
 where
@@ -848,6 +1050,9 @@ fn arrange_workspace_member(member: WorkspaceMember, path: &Path) {
             fs::write(path.join("catalog-v001.xml"), content).unwrap();
         }
         WorkspaceMember::OmnFile { name, content } => {
+            fs::write(path.join(name), content).unwrap();
+        }
+        WorkspaceMember::OwxFile { name, content } => {
             fs::write(path.join(name), content).unwrap();
         }
     }
