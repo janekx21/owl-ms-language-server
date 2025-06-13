@@ -2,7 +2,7 @@ use anyhow::Result;
 use dashmap::DashMap;
 use log::info;
 
-// #[automock]
+/// Trait for simple http get requests. It can be mocked with the static client.
 pub trait HttpClient: Send + Sync {
     fn get(&self, url: &str) -> Result<String>;
 }

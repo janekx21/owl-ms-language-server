@@ -8,8 +8,9 @@ pub mod rope_provider;
 mod tests;
 mod web;
 mod workspace;
+
 use itertools::Itertools;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use once_cell::sync::Lazy;
 use parking_lot::{MappedRwLockWriteGuard, RwLock, RwLockWriteGuard};
 use position::Position;
@@ -33,6 +34,7 @@ use workspace::{node_text, InternalDocument, Workspace};
 pub static LANGUAGE: Lazy<Language> = Lazy::new(language);
 
 // Model
+
 pub struct Backend {
     pub client: Client,
     position_encoding: Mutex<PositionEncodingKind>,
@@ -41,7 +43,8 @@ pub struct Backend {
 }
 
 impl Backend {
-    /// Creates a new [`Backend`].
+    /// Creates a new [`Backend`] with a Ureq http client and UTF16 encoding.
+    /// The workspaces are created empty.
     pub fn new(client: Client) -> Self {
         Backend {
             client,
@@ -55,10 +58,11 @@ impl Backend {
 /// This is the main language server implamentation. It is the entry point for all requests to the language server.
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
+    /// Initilizes the language server and loads the workspaces with catalog files.
+    ///
+    /// Does not load or index the files inside the workspaces.
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        self.client
-            .log_message(MessageType::INFO, "initialize called.")
-            .await;
+        info!("Initialize language server -----------------------------");
 
         let encodings = params
             .capabilities
@@ -72,11 +76,11 @@ impl LanguageServer for Backend {
             PositionEncodingKind::UTF16
         };
 
-        let mut pg = self.position_encoding.lock().await;
-        *pg = encoding.clone();
+        let mut position_encoding = self.position_encoding.lock().await;
+        *position_encoding = encoding.clone();
 
-        let mut wf = self.workspaces.write();
-        *wf = params
+        let mut workspaces = self.workspaces.write();
+        *workspaces = params
             .workspace_folders
             .unwrap_or_default()
             .iter()
@@ -160,33 +164,16 @@ impl LanguageServer for Backend {
                     .display()
                     .to_string()
             })
-            .join(", ");
-        info!(
-            "Initialized Languag Server with workspaces: {}",
-            if workspace_paths.is_empty() {
-                "No Workspace".into()
-            } else {
-                workspace_paths
-            }
-        );
-        self.client
-            .log_message(MessageType::INFO, "server initialized!")
-            .await;
+            .collect_vec();
+
+        info!("Initialized languag server with workspaces: {workspace_paths:?}");
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let url = params.text_document.uri;
+        info!("Opend file {url}",);
 
         let workspace = self.find_workspace(&url).await;
-
-        debug!("Found workspace! Folder: {:#?}", workspace.workspace_folder);
-
-        debug!(
-            "did_open at {} with version {}",
-            url.clone(),
-            params.text_document.version.clone()
-        );
-
         let internal_document = InternalDocument::new(
             url.clone(),
             params.text_document.version,
@@ -202,8 +189,6 @@ impl LanguageServer for Backend {
             .await;
 
         let document = workspace.insert_internal_document(internal_document);
-
-        debug!("Inserted document");
 
         self.resolve_imports(document, &workspace).await;
     }
@@ -260,9 +245,9 @@ impl LanguageServer for Backend {
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let url = params.text_document_position_params.text_document.uri;
-        debug!(
-            "hover at {:?} in file {}",
-            params.text_document_position_params.position, &url
+        info!(
+            "Hover at {:?} in file {url}",
+            params.text_document_position_params.position
         );
 
         let workspace = self.find_workspace(&url).await;
@@ -271,7 +256,7 @@ impl LanguageServer for Backend {
             let document = document.read();
             let pos = params.text_document_position_params.position.into();
             let node = deepest_named_node_at_pos(&document.tree, pos);
-            let info = workspace.node_info(&node, &document);
+            let info = workspace.node_info(&node, &document, &*self.http_client);
             let range: Range = node.range().into();
             Hover {
                 contents: HoverContents::Scalar(MarkedString::String(info)),
@@ -607,9 +592,14 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
+    /// This will find a workspace or create one for a given url
     async fn find_workspace<'a>(&'a self, url: &Url) -> MappedRwLockWriteGuard<'a, Workspace> {
         let mut workspaces = self.workspaces.write();
 
+        // TODO there are problems when the workspace is changing
+        // - A document could be in its own workspace
+        // - Then a catalog file is created or modified that would place a document in that workspace
+        // - Because of the early return the document can never move to the new workspace
         let maybe_workspace = workspaces.iter().find(|workspace| {
             workspace.internal_documents.contains_key(url)
                 || workspace
@@ -618,32 +608,39 @@ impl Backend {
                     .any(|catalog| catalog.contains(&url.to_file_path().unwrap()))
         });
 
-        if maybe_workspace.is_none() {
-            let mut file_path = url.to_file_path().expect("URL should be a filepath");
-            file_path.pop();
-            warn!("Workspace for {url} could not be found. Could the entry in catalog-v001.xml be missing? Creating a new one at {}", file_path.display());
-            // Create a workspace that is a single file
-            let workspace = Workspace::new(WorkspaceFolder {
-                uri: Url::from_file_path(file_path.clone()).expect("Valid URL from filepath"), // TODO do i need the parent folder fot that?
-                name: "Single File".into(),
-            });
-            workspaces.push(workspace);
-        }
+        let folder = match maybe_workspace {
+            None => {
+                let mut file_path = url.to_file_path().expect("URL should be a filepath");
+                file_path.pop();
+                warn!("Workspace for {url} could not be found. Could the entry in catalog-v001.xml be missing? Creating a new one at {}", file_path.display());
+                let workspace_folder = WorkspaceFolder {
+                    uri: Url::from_file_path(file_path.clone()).expect("Valid URL from filepath"), // TODO do i need the parent folder fot that?
+                    name: "Single File".into(),
+                };
+                let workspace = Workspace::new(workspace_folder.clone());
+                workspaces.push(workspace);
+                workspace_folder
+            }
+            Some(w) => w.workspace_folder.clone(),
+        };
 
-        RwLockWriteGuard::map(workspaces, |f| {
-            f.iter_mut()
-                .find(|w| w.could_contain(url))
+        RwLockWriteGuard::map(workspaces, |ws| {
+            ws.iter_mut()
+                .find(|w| w.workspace_folder == folder)
                 .expect("The file to be located in a workspace, but it was not.")
         })
     }
 
+    // TODO maybe move this into document or workspace
+    /// This will try to fetch the imports of a document
     async fn resolve_imports(
         &self,
         document: Arc<RwLock<InternalDocument>>,
         workspace: &Workspace,
     ) {
+        let document = document.read();
+        info!("Resolve imports for {}", document.uri);
         let urls = document
-            .read()
             .query(&ALL_QUERIES.import_query)
             .iter()
             .filter_map(|match_| match &match_.captures[..] {
@@ -655,64 +652,10 @@ impl Backend {
             .collect_vec();
 
         for url in urls {
-            info!("Resolving url {url}");
             workspace
                 .resolve_url_to_document(&url, &*self.http_client)
-                .inspect_err(|e| error!("Resolve error: {e:?}"))
+                .inspect_err(|e| error!("Resolve imports error: {e:?}"))
                 .ok();
-
-            //     // TODO #8 filepath
-            //     if workspace.document_map.contains_key(&url) {
-            //         debug!("This document is already in the backend. URL: {}", url);
-            //     } else {
-            //         debug!("Try to resolve URL {}", url);
-            //         // Find uri in catalog
-            //         debug!("{:?}", workspace.catalogs);
-            //         for c in &workspace.catalogs {
-            //             for u in &c.uri {
-            //                 debug!("url {}  u.name {}", url, u.name);
-            //                 if u.name == url.to_string() {
-            //                     // This is an import of a local file!
-            //                     let path = Path::new(&c.locaton).parent().unwrap().join(&u.uri);
-            //                     debug!(
-            //                         "Found matching local file {:?} loading from path {}",
-            //                         u,
-            //                         path.display()
-            //                     );
-            //                     let ontology_text = fs::read_to_string(&path).unwrap();
-            //                     let document = Document::new(
-            //                         Url::from_file_path(path).unwrap(),
-            //                         -1,
-            //                         ontology_text,
-            //                         parser,
-            //                     );
-            //                     workspace.insert_document(document);
-            //                 }
-            //             }
-            //         }
-
-            //         // debug!("Resolving import of {}", url.clone());
-            //         // TODO #10
-            //         // let ontology_text = ureq::get(url.to_string())
-            //         //     .call()
-            //         //     .unwrap()
-            //         //     .body_mut()
-            //         //     .read_to_string()
-            //         //     .unwrap();
-
-            //         // debug!(
-            //         //     "Inserted imported document URL: {}, number of iris: {}, number of diagnostics: {}",
-            //         //     url,
-            //         //     document.iri_info_map.iter().count(),
-            //         //     document.diagnostics.len()
-            //         // );
-            //         // }
-            //         // } else {
-            //         // warn!("The imported URL type is not supported. URL: {}", url);
-            //         // }
-
-            //         // debug!("Resolved import {} to\n{}", url, resolved_import);
-            //     }
         }
     }
 }

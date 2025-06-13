@@ -16,21 +16,54 @@ pub fn timeit<F: FnMut() -> T, T>(name: &str, mut f: F) -> T {
     result
 }
 
+/// Write a log message to the LSP client. The [`msg`] can include log types, they will get converted.
 pub fn log_to_client(client: &Client, msg: String) -> task::JoinHandle<()> {
     let c = client.clone();
     task::spawn(async move {
-        c.log_message(MessageType::INFO, msg).await;
+        // Reformat the log message
+        let mut msg = msg;
+        let mut message_type = MessageType::LOG;
+        for (delimiter, type_) in [
+            ("ERROR", MessageType::ERROR),
+            ("WARN", MessageType::WARNING),
+            ("INFO", MessageType::INFO),
+        ] {
+            if let Some((_, m)) = msg.split_once(delimiter) {
+                msg = m.to_string();
+                message_type = type_;
+            }
+        }
+
+        c.log_message(message_type, msg.trim_end()).await;
     })
 }
 
 pub struct BackendLogger {
     pub client: Client,
+    pub client_log_line: String,
     pub file: Option<File>,
+}
+
+impl BackendLogger {
+    pub fn new(client: Client, file: Option<File>) -> Self {
+        Self {
+            client,
+            client_log_line: String::new(),
+            file,
+        }
+    }
 }
 
 impl Write for BackendLogger {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        log_to_client(&self.client, String::from_utf8_lossy(buf).into());
+        let str = String::from_utf8_lossy(buf);
+        self.client_log_line.push_str(&str);
+
+        if self.client_log_line.ends_with("\n") {
+            log_to_client(&self.client, self.client_log_line.clone());
+            self.client_log_line.clear();
+        }
+
         if let Some(f) = &mut self.file {
             f.write_all(buf).unwrap_or_else(|err| {
                 log_to_client(&self.client, format!("Could not log to file. {}", err));
@@ -50,10 +83,10 @@ pub fn init_logging(service: &LspService<Backend>) {
     let log_file_path = log_file_path.as_path();
 
     simple_logging::log_to(
-        BackendLogger {
-            client: service.inner().client.clone(),
-            file: File::create(log_file_path).ok(),
-        },
+        BackendLogger::new(
+            service.inner().client.clone(),
+            File::create(log_file_path).ok(),
+        ),
         LevelFilter::Debug,
     );
 }

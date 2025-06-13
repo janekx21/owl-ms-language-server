@@ -7,21 +7,20 @@ use crate::{
 use anyhow::Result;
 use anyhow::{anyhow, Context};
 use dashmap::DashMap;
-use horned_owl::io::rdf::reader::{RDFOntology, RcRDFOntology};
+use horned_owl::io::rdf::reader::RDFOntology;
 use horned_owl::io::ParserConfiguration;
-use horned_owl::model::{ArcAnnotatedComponent, ArcStr, RcAnnotatedComponent};
-use horned_owl::{curie::PrefixMapping, ontology::set::SetOntology};
+use horned_owl::model::{ArcAnnotatedComponent, ArcStr};
+use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use ropey::Rope;
+use std::ops::Deref;
 use std::{
     collections::{HashMap, HashSet},
-    ffi::OsStr,
     fmt::Display,
     fs,
-    ops::Deref,
     path::PathBuf,
     sync::Arc,
 };
@@ -58,8 +57,8 @@ impl Workspace {
     pub fn new(workspace_folder: WorkspaceFolder) -> Self {
         let catalogs = Catalog::load_catalogs_recursive(workspace_folder.uri.clone());
         info!(
-            "New workspace at {} with catalogs {:?}",
-            workspace_folder.uri, catalogs
+            "New workspace {} at {} with catalogs {catalogs:?}",
+            workspace_folder.name, workspace_folder.uri
         );
         Workspace {
             internal_documents: DashMap::new(),
@@ -85,6 +84,7 @@ impl Workspace {
         &self,
         document: InternalDocument,
     ) -> Arc<RwLock<InternalDocument>> {
+        debug!("Insert internal document {document:?}");
         let uri = document.uri.clone();
         let arc = Arc::new(RwLock::new(document));
         self.internal_documents.insert(uri, arc.clone());
@@ -94,6 +94,7 @@ impl Workspace {
         &self,
         document: ExternalDocument,
     ) -> Arc<RwLock<ExternalDocument>> {
+        debug!("Insert external document {document:?}");
         let uri = document.uri.clone();
         let arc = Arc::new(RwLock::new(document));
         self.external_documents.insert(uri, arc.clone());
@@ -127,7 +128,12 @@ impl Workspace {
             .tree_reduce(FrameInfo::merge)
     }
 
-    pub fn node_info(&self, node: &Node, doc: &InternalDocument) -> String {
+    pub fn node_info(
+        &self,
+        node: &Node,
+        doc: &InternalDocument,
+        http_client: &dyn HttpClient,
+    ) -> String {
         match node.kind() {
             "class_frame" | "annotation_property_frame" => {
                 let iri = &node
@@ -144,7 +150,34 @@ impl Workspace {
                 }
             }
             "full_iri" | "simple_iri" | "abbreviated_iri" => {
+                // This is without the <> things
                 let iri = node_text(node, &doc.rope).to_string();
+
+                // TODO #37 convert to query
+                let _ = http_client;
+                // let a = doc
+                //     .query_with_imports(&ALL_QUERIES.annotation_query, self, http_client)
+                //     .iter()
+                //     .filter_map(|m| match &m.captures[..] {
+                //         [frame_iri, annotation_iri, literal] if frame_iri.node.text == iri => {
+                //             debug!("Found {}", frame_iri.node.text);
+                //             Some(FrameInfo {
+                //                 iri: iri.clone(),
+                //                 annotations: HashMap::from_iter(std::iter::once((
+                //                     annotation_iri.node.text.clone(),
+                //                     vec![literal.node.text.clone()],
+                //                 ))),
+                //                 frame_type: FrameType::Invalid,
+                //                 definitions: vec![],
+                //             })
+                //         }
+                //         [_, _, _] => None,
+                //         _ => unreachable!(),
+                //     })
+                //     .collect_vec();
+
+                // debug!("A======{a:#?}");
+
                 self.get_frame_info(&iri)
                     .map(|fi| fi.info_display(self))
                     .unwrap_or(iri)
@@ -229,7 +262,7 @@ impl Workspace {
                         let document = ExternalDocument::new(document_text, url)
                             .context("External document creation")?;
                         let doc = self.insert_external_document(document);
-                        return Ok(DocumentReference::External(doc));
+                        Ok(DocumentReference::External(doc))
                     }
                 }
             }
@@ -242,9 +275,9 @@ impl Workspace {
                     return Ok(doc);
                 }
 
-                return self.resolve_path_to_document(path);
+                self.resolve_path_to_document(path)
             }
-        };
+        }
     }
 
     fn resolve_path_to_document(&self, path: PathBuf) -> Result<DocumentReference> {
@@ -572,6 +605,7 @@ impl InternalDocument {
         }
 
         result.insert(self.uri.clone());
+        debug!("Add reachable {}", self.uri);
 
         let docs = self
             .reachable_documents()
@@ -598,9 +632,9 @@ impl InternalDocument {
         self.query(&ALL_QUERIES.import_query)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri] => {
-                    Url::parse(iri.node.text.trim_end_matches(">").trim_start_matches("<")).ok()
-                }
+                [iri] => Url::parse(iri.node.text.trim_end_matches(">").trim_start_matches("<"))
+                    .inspect_err(|e| warn!("Url could not be parsed {e:#}"))
+                    .ok(),
                 _ => unimplemented!(),
             })
             .collect_vec()
@@ -815,6 +849,7 @@ pub enum ExternalOntology {
 }
 
 impl ExternalDocument {
+    /// The ontology type is currently determent by the url extention
     pub fn new(text: String, url: Url) -> Result<ExternalDocument> {
         let b = horned_owl::model::Build::new_arc();
         let mut buffer = text.as_bytes();
@@ -826,22 +861,8 @@ impl ExternalDocument {
         // };
         if url.path().ends_with(".owl") {
             let (ontology, prefix_mapping) =
-                horned_owl::io::owx::reader::read_with_build(&mut buffer, &b).map_err(
-                    |e| match e {
-                        horned_owl::error::HornedError::IOError(error) => {
-                            anyhow!("IO Error: {error}")
-                        }
-                        horned_owl::error::HornedError::ParserError(error, location) => {
-                            anyhow!("Parsing Error: {error} {location}")
-                        }
-                        horned_owl::error::HornedError::ValidityError(msg, location) => {
-                            anyhow!("Validity Error: {msg} at {location}")
-                        }
-                        horned_owl::error::HornedError::CommandError(msg) => {
-                            anyhow!("Command Error: {msg}")
-                        }
-                    },
-                )?;
+                horned_owl::io::owx::reader::read_with_build(&mut buffer, &b)
+                    .map_err(horned_to_anyhow)?;
 
             Ok(ExternalDocument {
                 uri: url,
@@ -855,20 +876,7 @@ impl ExternalDocument {
                 &b,
                 ParserConfiguration::default(),
             )
-            .map_err(|e| match e {
-                horned_owl::error::HornedError::IOError(error) => {
-                    anyhow!("IO Error: {error}")
-                }
-                horned_owl::error::HornedError::ParserError(error, location) => {
-                    anyhow!("Parsing Error: {error} {location}")
-                }
-                horned_owl::error::HornedError::ValidityError(msg, location) => {
-                    anyhow!("Validity Error: {msg} at {location}")
-                }
-                horned_owl::error::HornedError::CommandError(msg) => {
-                    anyhow!("Command Error: {msg}")
-                }
-            })?;
+            .map_err(horned_to_anyhow)?;
 
             Ok(ExternalDocument {
                 uri: url,
@@ -880,17 +888,36 @@ impl ExternalDocument {
     }
 
     fn reachable_documents(&self) -> Vec<Url> {
-        vec![]
-        // TODO RDF has no imports?
-        // self.ontology
-        //     .i()
-        //     .iter()
-        //     .filter_map(|ac| match &ac.component {
-        //         horned_owl::model::Component::Import(import) => Some(Url::parse(import.0.deref())),
-        //         _ => None,
-        //     })
-        //     .filter_map(|r| r.ok())
-        //     .collect_vec()
+        match &self.ontology {
+            ExternalOntology::RdfOntology(_) => vec![],
+            ExternalOntology::OwlOntology(set_ontology) => set_ontology
+                .iter()
+                .filter_map(|ac| match &ac.component {
+                    horned_owl::model::Component::Import(import) => {
+                        Some(Url::parse(import.0.deref()))
+                    }
+                    _ => None,
+                })
+                .filter_map(|r| r.ok())
+                .collect_vec(),
+        }
+    }
+}
+
+fn horned_to_anyhow(e: horned_owl::error::HornedError) -> anyhow::Error {
+    match e {
+        horned_owl::error::HornedError::IOError(error) => {
+            anyhow!("IO Error: {error}")
+        }
+        horned_owl::error::HornedError::ParserError(error, location) => {
+            anyhow!("Parsing Error: {error} {location}")
+        }
+        horned_owl::error::HornedError::ValidityError(msg, location) => {
+            anyhow!("Validity Error: {msg} at {location}")
+        }
+        horned_owl::error::HornedError::CommandError(msg) => {
+            anyhow!("Command Error: {msg}")
+        }
     }
 }
 
@@ -1206,6 +1233,8 @@ impl Display for FrameType {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Deref;
+
     use super::*;
     use horned_owl::vocab::OWL;
     use test_log::test;
@@ -1226,7 +1255,7 @@ mod tests {
         // Act
         let external_doc = ExternalDocument::new(
             ontology_text.clone(),
-            Url::parse("https://example.com/onto").unwrap(),
+            Url::parse("https://example.com/onto.owl").unwrap(),
         );
 
         // Assert
@@ -1263,7 +1292,7 @@ mod tests {
     .to_string();
         let external_doc = ExternalDocument::new(
             owl_ontology_text.clone(),
-            Url::parse("https://example.com/onto").unwrap(),
+            Url::parse("https://example.com/onto.owl").unwrap(),
         )
         .unwrap();
 

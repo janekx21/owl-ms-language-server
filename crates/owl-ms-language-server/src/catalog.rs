@@ -108,3 +108,87 @@ impl Catalog {
         Path::new(self.locaton.as_str()).parent().unwrap()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_deserialize_should_work() {
+        let xml = r#"
+            <?xml version="1.0" encoding="UTF-8" standalone="no"?>
+            <catalog prefer="public" xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-import-edits.owl" uri="oeo-import-edits.owl"/>
+                <uri id="Imports Wizard Entry" name="http://purl.obolibrary.org/obo/bfo/2.0/bfo.owl" uri="https://raw.githubusercontent.com/BFO-ontology/BFO/v2.0/bfo.owl"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-model.omn" uri="oeo-model.omn"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-physical.omn" uri="oeo-physical.omn"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-sector.omn" uri="oeo-sector.omn"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-social.omn" uri="oeo-social.omn"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-shared.omn" uri="oeo-shared.omn"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/iao-extracted.owl" uri="../imports/iao-extracted.owl"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/ro-extracted.owl" uri="../imports/ro-extracted.owl"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/uo-extracted.owl" uri="../imports/uo-extracted.owl"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/stato-extracted.owl" uri="../imports/stato-extracted.owl"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/cco-extracted.owl" uri="../imports/cco-extracted.owl"/>                                      
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/meno-extracted.owl" uri="../imports/meno-extracted.owl"/>
+                <group id="Folder Repository, directory=, recursive=true, Auto-Update=true, version=2" prefer="public" xml:base="">
+                    <uri id="Automatically generated entry, Timestamp=1740265509439" name="http://openenergy-platform.org/ontology/oeo/oeo-import-edits.owl" uri="oeo-import-edits.owl"/>
+                    <uri id="Automatically generated entry, Timestamp=1740265509439" name="http://openenergy-platform.org/ontology/oeo/oeo-physical-axioms/" uri="oeo-physical-axioms.owl"/>
+                </group>
+            </catalog>
+        "#;
+
+        let catalog: Catalog = from_str(xml).unwrap();
+
+        assert_eq!(catalog.all_catalog_uris().count(), 15);
+        assert_eq!(
+            catalog.all_catalog_uris().next().unwrap().uri,
+            "oeo-import-edits.owl".to_string()
+        );
+        assert_eq!(
+            catalog.all_catalog_uris().last().unwrap().uri,
+            "oeo-physical-axioms.owl".to_string()
+        );
+    }
+
+    #[test]
+    fn catalog_deserialize_without_group_should_work() {
+        // Arrange
+        let xml = r#"
+            <?xml version="1.0" encoding="UTF-8" standalone="no"?>
+            <catalog prefer="public" xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-import-edits.owl" uri="oeo-import-edits.owl"/>
+                <uri id="Imports Wizard Entry" name="http://purl.obolibrary.org/obo/bfo/2.0/bfo.owl" uri="https://raw.githubusercontent.com/BFO-ontology/BFO/v2.0/bfo.owl"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-model.omn" uri="oeo-model.omn"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-physical.omn" uri="oeo-physical.omn"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-sector.omn" uri="oeo-sector.omn"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-social.omn" uri="oeo-social.omn"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-shared.omn" uri="oeo-shared.omn"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/iao-extracted.owl" uri="../imports/iao-extracted.owl"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/ro-extracted.owl" uri="../imports/ro-extracted.owl"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/uo-extracted.owl" uri="../imports/uo-extracted.owl"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/stato-extracted.owl" uri="../imports/stato-extracted.owl"/>
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/cco-extracted.owl" uri="../imports/cco-extracted.owl"/>                                      
+                <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/meno-extracted.owl" uri="../imports/meno-extracted.owl"/>
+            </catalog>
+        "#;
+
+        // Act
+        let catalog: Catalog = from_str(xml).unwrap();
+
+        // Assert
+        assert_eq!(catalog.all_catalog_uris().count(), 13);
+    }
+
+    #[test]
+    fn catalog_serialize_with_empty_catalog_should_work() {
+        // Arrange
+        let value = Catalog::new("testing");
+
+        // Act
+        let xml = quick_xml::se::to_string(&value).unwrap();
+
+        //Assert
+        assert_eq!(xml, "<Catalog/>");
+    }
+}

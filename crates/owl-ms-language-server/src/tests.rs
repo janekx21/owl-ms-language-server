@@ -1,22 +1,31 @@
-use std::{fs, path::Path};
-
+use crate::{catalog::Catalog, web::StaticClient, *};
+use anyhow::anyhow;
 use pretty_assertions::assert_eq;
+use std::{fs, path::Path};
 use tempdir::{self, TempDir};
-
-use quick_xml::de::from_str;
 use test_log::test;
 use tower_lsp::LspService;
 use tree_sitter::Parser;
+use tree_sitter::QueryMatch;
 
-use crate::{catalog::Catalog, web::StaticClient, *};
+/// This module contains tests.
+/// Each test function name is in the form of `<function>_<thing>_<condition>_<expectation>`.
+
+/////////////////////////
+// Tree sitter tests
+/////////////////////////
 
 #[test]
-fn test_parse() {
+fn parse_ontology_should_work() {
+    // Arrange
     let mut parser = arrange_parser();
 
     let source_code = "Ontology: Foobar";
+
+    // Act
     let tree = parser.parse(source_code, None).unwrap();
 
+    // Assert
     assert_eq!(
         tree.root_node().to_sexp(),
         "(source_file (ontology (ontology_iri (simple_iri))))"
@@ -24,12 +33,15 @@ fn test_parse() {
 }
 
 #[test]
-fn test_parse_datatype() {
+fn parse_ontology_with_datatype_should_work() {
+    // Arrange
     let mut parser = arrange_parser();
 
     let source_code = "Ontology: o\nDatatype: d";
+    // Act
     let tree = parser.parse(source_code, None).unwrap();
 
+    // Assert
     assert_eq!(
         tree.root_node().to_sexp(),
         "(source_file (ontology (ontology_iri (simple_iri)) (datatype_frame (datatype_iri (simple_iri)))))"
@@ -37,9 +49,8 @@ fn test_parse_datatype() {
 }
 
 #[test]
-fn test_class_annotation_query() {
-    use tree_sitter::QueryMatch;
-
+fn query_ontology_for_class_annotation_should_yield_all_class_annotations() {
+    // Arrange
     let mut parser = arrange_parser();
     let source_code = "
 Ontology: <http://foo.bar>
@@ -59,14 +70,15 @@ Ontology: <http://foo.bar>
     let root = tree.root_node();
     let mut query_cursor = QueryCursor::new();
     let bytes: &[u8] = source_code.as_bytes();
+
+    // Act
     let matches = query_cursor
         .matches(&class_frame_query, root, bytes)
         .collect::<Vec<QueryMatch>>();
 
+    // Assert
     info!("{}", root.to_sexp());
-
     assert_eq!(matches.len(), 1);
-
     assert_eq!(
         matches[0].captures[1]
             .node
@@ -76,9 +88,60 @@ Ontology: <http://foo.bar>
     );
 }
 
+#[test]
+/// This test should initilize all queries and therefore check if they are valid
+fn deref_all_queries_should_be_valid() {
+    let _ = *ALL_QUERIES;
+}
+
+///////////////////////////////////////////
+// Backend Tests
+//////////////////////////////////////////
+
+#[test(tokio::test)]
+async fn backend_did_open_should_create_document() {
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+
+    let url = Url::parse("file:///tmp/foo.omn").expect("valid url");
+
+    // Act
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: "abc".to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+    let workspaces = service.inner().workspaces.read();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+
+    let docs = workspace.internal_documents.iter().collect_vec();
+
+    let doc = docs
+        .iter()
+        .exactly_one()
+        .map_err(|_| anyhow!("Should be exactly one"))
+        .unwrap()
+        .value()
+        .read();
+
+    assert_eq!(doc.uri, url);
+    assert_eq!(doc.version, 0);
+    assert_eq!(doc.rope.to_string(), "abc");
+    assert!(doc.tree.root_node().is_error());
+}
+
 /// This tests if the "did_change" feature works on the lsp. It takes the document DEF and adds two changes resolving in ABCDEFGHI.
 #[test(tokio::test)]
-async fn test_language_server_did_change() {
+async fn backend_did_change_should_update_internal_rope() {
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
@@ -155,91 +218,259 @@ async fn test_language_server_did_change() {
     let doc_content = doc.rope.to_string();
 
     assert_eq!(doc_content, "ABCDEFGHI");
-    // TODO check the parsed tree
-    doc.tree.root_node();
-}
-
-#[test]
-fn test_deserialize_catalog() {
-    let xml = r#"
-        <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-        <catalog prefer="public" xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-import-edits.owl" uri="oeo-import-edits.owl"/>
-            <uri id="Imports Wizard Entry" name="http://purl.obolibrary.org/obo/bfo/2.0/bfo.owl" uri="https://raw.githubusercontent.com/BFO-ontology/BFO/v2.0/bfo.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-model.omn" uri="oeo-model.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-physical.omn" uri="oeo-physical.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-sector.omn" uri="oeo-sector.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-social.omn" uri="oeo-social.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-shared.omn" uri="oeo-shared.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/iao-extracted.owl" uri="../imports/iao-extracted.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/ro-extracted.owl" uri="../imports/ro-extracted.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/uo-extracted.owl" uri="../imports/uo-extracted.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/stato-extracted.owl" uri="../imports/stato-extracted.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/cco-extracted.owl" uri="../imports/cco-extracted.owl"/>                                      
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/meno-extracted.owl" uri="../imports/meno-extracted.owl"/>
-            <group id="Folder Repository, directory=, recursive=true, Auto-Update=true, version=2" prefer="public" xml:base="">
-                <uri id="Automatically generated entry, Timestamp=1740265509439" name="http://openenergy-platform.org/ontology/oeo/oeo-import-edits.owl" uri="oeo-import-edits.owl"/>
-                <uri id="Automatically generated entry, Timestamp=1740265509439" name="http://openenergy-platform.org/ontology/oeo/oeo-physical-axioms/" uri="oeo-physical-axioms.owl"/>
-            </group>
-        </catalog>
-    "#;
-
-    let catalog: Catalog = from_str(xml).unwrap();
-
-    assert_eq!(catalog.all_catalog_uris().count(), 15);
-    assert_eq!(
-        catalog.all_catalog_uris().next().unwrap().uri,
-        "oeo-import-edits.owl".to_string()
-    );
-    assert_eq!(
-        catalog.all_catalog_uris().last().unwrap().uri,
-        "oeo-physical-axioms.owl".to_string()
-    );
-}
-
-#[test]
-fn test_deserialize_catalog_without_group() {
-    // Arrange
-    let xml = r#"
-        <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-        <catalog prefer="public" xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-import-edits.owl" uri="oeo-import-edits.owl"/>
-            <uri id="Imports Wizard Entry" name="http://purl.obolibrary.org/obo/bfo/2.0/bfo.owl" uri="https://raw.githubusercontent.com/BFO-ontology/BFO/v2.0/bfo.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-model.omn" uri="oeo-model.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-physical.omn" uri="oeo-physical.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-sector.omn" uri="oeo-sector.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-social.omn" uri="oeo-social.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/oeo-shared.omn" uri="oeo-shared.omn"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/iao-extracted.owl" uri="../imports/iao-extracted.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/ro-extracted.owl" uri="../imports/ro-extracted.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/uo-extracted.owl" uri="../imports/uo-extracted.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/stato-extracted.owl" uri="../imports/stato-extracted.owl"/>
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/cco-extracted.owl" uri="../imports/cco-extracted.owl"/>                                      
-            <uri id="Imports Wizard Entry" name="http://openenergy-platform.org/ontology/oeo/dev/imports/meno-extracted.owl" uri="../imports/meno-extracted.owl"/>
-        </catalog>
-    "#;
-
-    // Act
-    let catalog: Catalog = from_str(xml).unwrap();
-
-    // Assert
-    assert_eq!(catalog.all_catalog_uris().count(), 13);
-}
-
-#[test]
-fn test_serialize_catalog() {
-    // Arrange
-    let value = Catalog::new("testing");
-
-    // Act
-    let xml = quick_xml::se::to_string(&value).unwrap();
-
-    //Assert
-    assert_eq!(xml, "<Catalog/>");
 }
 
 #[test(tokio::test)]
-async fn test_import_resolve() {
+async fn backend_hover_on_class_should_show_class_info() {
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+
+    let url = Url::parse("file:///tmp/foo.omn").expect("valid url");
+
+    let ontology = r#"
+        Ontology: HoverOnto
+            Class: Janek
+                Annotations:
+                    rdfs:label "Janek der Coder"@de
+    "#;
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let hover_result = service
+        .inner()
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url.clone() },
+                position: Position {
+                    line: 2,
+                    character: 21,
+                }
+                .into(),
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    let hover_result = hover_result.unwrap();
+    let range = hover_result.range.unwrap();
+    assert_eq!(
+        range,
+        // Range of the "Janek" in the ontology
+        Range {
+            start: Position {
+                line: 2,
+                character: 19
+            },
+            end: Position {
+                line: 2,
+                character: 24
+            }
+        }
+        .into()
+    );
+
+    let contents = match hover_result.contents {
+        HoverContents::Scalar(MarkedString::String(str)) => str,
+        _ => panic!("Did not think of that"),
+    };
+    assert_eq!(
+        contents,
+        "Class **Janek der Coder**\n\n---\n`rdfs:label`: Janek der Coder"
+    );
+}
+
+async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![
+            WorkspaceMember::Folder {
+                name: "ontology-a".into(),
+                children: vec![
+                    WorkspaceMember::CatalogFile(
+                        Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
+                            .with_uri("http://ontology-a.org/a1.omn", "a1.omn")
+                            .with_uri("http://ontology-a.org/a2.omn", "a2.omn"),
+                    ),
+                    WorkspaceMember::OmnFile {
+                        name: "a2.omn".into(),
+                        content: r#"
+                        Ontology: <http://ontology-a.org/a2.omn>
+                            Class: ClassA2
+                                Annotations:
+                                    rdfs:label "Some class in A2",
+                                    test "test"
+                    "#
+                        .into(),
+                    },
+                ],
+            },
+            WorkspaceMember::Folder {
+                name: "ontology-b".into(),
+                children: vec![
+                    WorkspaceMember::CatalogFile(
+                        Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
+                            .with_uri("http://ontology-b.org/b1.omn", "b1.omn")
+                            .with_uri("http://ontology-b.org/b2.omn", "b2.omn"),
+                    ),
+                    WorkspaceMember::OmnFile {
+                        name: "b2.omn".into(),
+                        content: r#"
+                        Ontology: <http://ontology-b.org/b2.omn>
+                            Class: ClassB2
+                                Annotations:
+                                    rdfs:label "Some class in B2"
+                    "#
+                        .into(),
+                    },
+                ],
+            },
+        ]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test wosrkpace".into(),
+        }),
+        vec![],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://ontology-a.org/a1.omn>
+            Import: <http://ontology-a.org/a2.omn>
+            Class: ClassA1
+                Annotations:
+                    rdfs:label "Some class in A1"
+                SubClassOf: ClassA2,ClassB2
+
+    "#;
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    (service, tmp_dir)
+}
+
+#[test(tokio::test)]
+async fn backend_hover_in_multi_file_ontology_should_work() {
+    // Arrange
+    let (service, tmp_dir) = arrange_multi_file_ontology().await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+
+    // Act
+    // TODO check if the arrange did not create diagnostics
+    let hover_result = service
+        .inner()
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url.clone() },
+                position: Position {
+                    line: 6,
+                    character: 31,
+                }
+                .into(),
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    let hover_result = hover_result.unwrap();
+    let range = hover_result.range.unwrap();
+    assert_eq!(
+        range,
+        // Range of the "Janek" in the ontology
+        Range {
+            start: Position {
+                line: 6,
+                character: 28
+            },
+            end: Position {
+                line: 6,
+                character: 35
+            }
+        }
+        .into()
+    );
+
+    let contents = match hover_result.contents {
+        HoverContents::Scalar(MarkedString::String(str)) => str,
+        _ => panic!("Did not think of that"),
+    };
+    assert!(contents.contains("test"));
+    assert!(contents.contains("Some class in A2"));
+}
+
+#[test(tokio::test)]
+async fn backend_hover_in_multi_file_ontology_on_not_imported_iri_should_not_work() {
+    // Arrange
+    let (service, tmp_dir) = arrange_multi_file_ontology().await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+
+    // Act
+    // TODO check if the arrange did not create diagnostics
+    let hover_result = service
+        .inner()
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url.clone() },
+                position: Position {
+                    line: 6,
+                    character: 38,
+                }
+                .into(),
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    let hover_result = hover_result.unwrap();
+
+    let contents = match hover_result.contents {
+        HoverContents::Scalar(MarkedString::String(str)) => str,
+        _ => panic!("Did not think of that"),
+    };
+    assert!(contents.contains("ClassB2"));
+    assert!(!contents.contains("Some class"));
+    assert!(!contents.contains("b2"));
+}
+
+#[test(tokio::test)]
+async fn backend_import_resolve_should_load_documents() {
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|dir| {
@@ -294,23 +525,8 @@ async fn test_import_resolve() {
     assert_eq!(document_count, 2);
 }
 
-#[test]
-fn test_path_segment() {
-    // Arrange
-    let url = Url::parse("file://example.com/this/is/a/path.html").unwrap();
-    let mut url = url.clone();
-
-    // Act
-    url.path_segments_mut()
-        .expect("The provided url was a cannot-be-a-base url")
-        .pop();
-
-    // Assert
-    assert_eq!(url.as_str(), "file://example.com/this/is/a");
-}
-
 #[test(tokio::test)]
-async fn test_gen_frame_info_removing_infos() {
+async fn backend_did_change_should_remove_old_infos() {
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
@@ -383,7 +599,7 @@ Class: class-in-first-file
 }
 
 #[test(tokio::test)]
-async fn test_workspace_symbols() {
+async fn backend_workspace_symbols_should_work() {
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|dir| {
@@ -471,7 +687,7 @@ async fn test_workspace_symbols() {
 }
 
 #[test(tokio::test)]
-async fn test_load_external_document() {
+async fn backend_did_open_should_load_external_documents_via_http() {
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|dir| {
@@ -588,6 +804,21 @@ enum WorkspaceMember {
     },
 }
 
+/// Create a tmp workspace for testing
+/// Example:
+/// ```
+///        vec![
+///            WorkspaceMember::CatalogFile(
+///                Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
+///                    .with_uri("http://external.org/shared.omn", "foobaronto.omn")
+///                    .with_uri("http://foobar.org/ontology/", "foo.omn"),
+///            ),
+///            WorkspaceMember::OmnFile {
+///                name: "foobaronto.omn".into(),
+///                content: "".into(),
+///            },
+///        ]
+/// ```
 fn arrange_workspace_folders<F>(root_member_generator: F) -> TempDir
 where
     F: Fn(&Path) -> Vec<WorkspaceMember>,
@@ -648,8 +879,8 @@ async fn arrange_backend(
     workspace_folder: Option<WorkspaceFolder>,
     data: Vec<(&str, &str)>,
 ) -> LspService<Backend> {
-    let (service, _) = LspService::new(|a| {
-        let mut backend = Backend::new(a);
+    let (service, _) = LspService::new(|client| {
+        let mut backend = Backend::new(client);
         backend.http_client = Arc::new(StaticClient {
             data: data
                 .iter()
@@ -660,10 +891,4 @@ async fn arrange_backend(
     });
     arrange_init_backend(&service, workspace_folder).await;
     service
-}
-
-#[test]
-/// This test should initilize all queries and therefore check if they are valid
-fn test_all_queries_valid() {
-    let _ = *ALL_QUERIES;
 }
