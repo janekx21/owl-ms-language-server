@@ -9,14 +9,19 @@ use anyhow::{anyhow, Context};
 use dashmap::DashMap;
 use horned_owl::io::rdf::reader::RDFOntology;
 use horned_owl::io::ParserConfiguration;
-use horned_owl::model::{ArcAnnotatedComponent, ArcStr};
+use horned_owl::model::{ArcAnnotatedComponent, ArcStr, Build};
 use horned_owl::model::{Class, Component::*};
+use horned_owl::ontology::iri_mapped::{ArcIRIMappedOntology, IRIMappedOntology};
 use horned_owl::ontology::set::SetOntology;
+use horned_owl::visitor::immutable::entity::IRIExtract;
+use horned_owl::visitor::immutable::{Visit, Walk};
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use ropey::Rope;
+use serde::de::Visitor;
+use std::iter::{once, Once};
 use std::ops::Deref;
 use std::{
     collections::{HashMap, HashSet},
@@ -130,39 +135,56 @@ impl Workspace {
 
     /// This finds a frame info in the internal documents
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
-        let a = self
-            .internal_documents
-            .iter()
-            .filter_map(|dm| {
-                let dm = dm.value().read();
-                dm.frame_infos.get(iri).map(|v| v.value().clone())
-            })
-            .tree_reduce(FrameInfo::merge);
+        info!("Getting frame info for {iri}");
+        info!("{:#?}", self.external_documents);
 
-        self.external_documents.iter().filter_map(|doc| {
+        let b = self.external_documents.iter().flat_map(|doc| {
             let doc = doc.read();
             match &doc.ontology {
-                ExternalOntology::RdfOntology(rdfontology) => todo!(),
+                ExternalOntology::RdfOntology(_) => todo!(),
                 ExternalOntology::OwlOntology(set_ontology) => {
-                    set_ontology.iter().map(|p| match &p.component {
-                        DeclareClass(c) => {
-                            let iri = &(c.0).0;
-                            let iri = iri.clone();
-                            info!("Found class! {iri} {:#?}", p.ann);
-                            todo!()
-                        }
-                        DeclareObjectProperty(declare_object_property) => todo!(),
-                        DeclareAnnotationProperty(declare_annotation_property) => todo!(),
-                        DeclareDataProperty(declare_data_property) => todo!(),
-                        DeclareNamedIndividual(declare_named_individual) => todo!(),
-                        DeclareDatatype(declare_datatype) => todo!(),
-                        _ => {}
-                    });
-                    todo!()
+                    let mut iri_mapped = ArcIRIMappedOntology::from(set_ontology.clone());
+
+                    let build = Build::new_arc();
+                    let iri2 = doc.abbreviated_iri_to_full_iri(iri.clone());
+                    let iri3 = build.iri(iri2);
+                    let comp = iri_mapped
+                        .components_for_iri(&iri3)
+                        .filter_map(|c| match &c.component {
+                            AnnotationAssertion(aa) => Some(aa.ann.clone()),
+                            _ => None,
+                        })
+                        .filter_map(|annotation| match annotation.av {
+                            horned_owl::model::AnnotationValue::Literal(
+                                horned_owl::model::Literal::Simple { literal },
+                            ) => {
+                                let annotations =
+                                    once((annotation.ap.0.to_string(), vec![literal])).collect();
+                                Some(FrameInfo {
+                                    iri: iri.clone(),
+                                    annotations,
+                                    frame_type: FrameType::Class,
+                                    definitions: vec![],
+                                })
+                            }
+                            _ => None,
+                        })
+                        .collect_vec();
+
+                    info!("{}", doc.uri);
+                    info!("{comp:#?}");
+                    info!("{:#?}", set_ontology);
+                    comp
                 }
             }
         });
-        None // TODO
+
+        let a = self.internal_documents.iter().filter_map(|dm| {
+            let dm = dm.value().read();
+            dm.frame_infos.get(iri).map(|v| v.value().clone())
+        });
+
+        a.chain(b).tree_reduce(FrameInfo::merge)
     }
 
     pub fn node_info(
@@ -868,6 +890,14 @@ impl InternalDocument {
             gen_diagnostics(&self.tree.root_node())
         });
     }
+
+    pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: String) -> String {
+        format!(
+            "{}#{}",
+            self.uri.to_string().trim_end_matches('#'),
+            abbriviated_iri
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -935,6 +965,14 @@ impl ExternalDocument {
                 .filter_map(|r| r.ok())
                 .collect_vec(),
         }
+    }
+
+    pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: String) -> String {
+        format!(
+            "{}#{}",
+            self.uri.to_string().trim_end_matches('#'),
+            abbriviated_iri
+        )
     }
 }
 
@@ -1267,11 +1305,64 @@ impl Display for FrameType {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Deref;
-
     use super::*;
     use pretty_assertions::assert_eq;
+    use std::ops::Deref;
     use test_log::test;
+
+    #[test]
+    fn internal_document_abbreviated_iri_to_full_iri_should_convert_simple_iri() {
+        let doc = InternalDocument::new(
+            Url::parse("http://www.w3.org/2002/07/owl#").unwrap(),
+            -1,
+            "".into(),
+        );
+
+        let full_iri = doc.abbreviated_iri_to_full_iri("Nothing".into());
+
+        assert_eq!(full_iri, "http://www.w3.org/2002/07/owl#Nothing");
+    }
+
+    #[test]
+    fn internal_document_abbreviated_iri_to_full_iri_should_convert_simple_iri_with_missing_fragment(
+    ) {
+        let doc = InternalDocument::new(
+            Url::parse("http://www.w3.org/2002/07/owl").unwrap(),
+            -1,
+            "".into(),
+        );
+
+        let full_iri = doc.abbreviated_iri_to_full_iri("Nothing".into());
+
+        assert_eq!(full_iri, "http://www.w3.org/2002/07/owl#Nothing");
+    }
+
+    #[test]
+    fn external_document_abbreviated_iri_to_full_iri_should_convert_simple_iri() {
+        let doc = ExternalDocument::new(
+            "".into(),
+            Url::parse("http://www.w3.org/2002/07/owl#").unwrap(),
+        )
+        .unwrap();
+
+        let full_iri = doc.abbreviated_iri_to_full_iri("Nothing".into());
+
+        assert_eq!(full_iri, "http://www.w3.org/2002/07/owl#Nothing");
+    }
+
+    #[test]
+    fn external_document_abbreviated_iri_to_full_iri_should_convert_simple_iri_with_missing_fragment(
+    ) {
+        let doc = ExternalDocument::new(
+            "".into(),
+            Url::parse("http://www.w3.org/2002/07/owl").unwrap(),
+        )
+        .unwrap();
+
+        let full_iri = doc.abbreviated_iri_to_full_iri("Nothing".into());
+
+        assert_eq!(full_iri, "http://www.w3.org/2002/07/owl#Nothing");
+    }
 
     #[test]
     fn external_document_new_given_owl_text_does_parse_ontology() {

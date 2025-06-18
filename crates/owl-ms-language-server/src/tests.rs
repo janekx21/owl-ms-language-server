@@ -569,8 +569,8 @@ async fn backend_hover_on_external_iri_should_show_external_info() {
         HoverContents::Scalar(MarkedString::String(str)) => str,
         _ => panic!("Did not think of that"),
     };
-    info!("contetns={contents}");
-    assert!(contents.contains("ClassA2"));
+    info!("contents={contents}");
+    assert!(!contents.contains("ClassA2"));
     assert!(contents.contains("Some class in A2"));
 }
 
