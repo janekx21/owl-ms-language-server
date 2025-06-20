@@ -678,6 +678,106 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
     assert!(!contents.contains("ClassA2"));
     assert!(contents.contains("Some class in A2"));
 }
+#[test(tokio::test)]
+async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_external_info() {
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![WorkspaceMember::Folder {
+            name: "ontology-a".into(),
+            children: vec![WorkspaceMember::CatalogFile(
+                Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
+                    .with_uri("http://ontology-a.org/a1", "a1.omn")
+                    .with_uri("http://ontology-a.org/a2", "http://ontology-a.org/a2.rdf"),
+            )],
+        }]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test wosrkpace".into(),
+        }),
+        vec![(
+            "http://ontology-a.org/a2.rdf",
+            r##"
+                <?xml version="1.0"?>
+                <rdf:RDF xmlns="http://www.w3.org/2002/07/owl#"
+                     xml:base="http://www.w3.org/2002/07/owl"
+                     xmlns:owl="http://www.w3.org/2002/07/owl#"
+                     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+                     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+                     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+                    <Ontology rdf:about="http://ontology-a.org/a2.rdf"/>
+
+                    <!-- http://ontology-a.org/a2#ClassA2 -->
+
+                    <Class rdf:about="http://ontology-a.org/a2#ClassA2">
+                        <rdfs:label>Some class in A2</rdfs:label>
+                    </Class>
+                </rdf:RDF>
+            "##,
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://ontology-a.org/a1>
+            Import: <http://ontology-a.org/a2>
+            Class: ClassA1
+                Annotations:
+                    rdfs:label "Some class in A1"
+                SubClassOf: ClassA2,ClassB2
+
+    "#;
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+
+    // Act
+    // TODO check if the arrange did not create diagnostics
+    let hover_result = service
+        .inner()
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url.clone() },
+                position: Position {
+                    line: 6,
+                    character: 32,
+                }
+                .into(),
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    let hover_result = hover_result.unwrap();
+
+    let contents = match hover_result.contents {
+        HoverContents::Scalar(MarkedString::String(str)) => str,
+        _ => panic!("Did not think of that"),
+    };
+    info!("contents={contents}");
+    assert!(!contents.contains("ClassA2"));
+    assert!(contents.contains("Some class in A2"));
+}
 
 #[test(tokio::test)]
 async fn backend_import_resolve_should_load_documents() {

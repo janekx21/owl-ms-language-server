@@ -11,6 +11,7 @@ use horned_owl::io::rdf::reader::RDFOntology;
 use horned_owl::io::ParserConfiguration;
 use horned_owl::model::{ArcAnnotatedComponent, ArcStr, Build, IRI};
 use horned_owl::model::{Class, Component::*};
+use horned_owl::ontology::indexed::OntologyIndex;
 use horned_owl::ontology::iri_mapped::{ArcIRIMappedOntology, IRIMappedOntology};
 use horned_owl::ontology::set::SetOntology;
 use horned_owl::visitor::immutable::entity::IRIExtract;
@@ -140,7 +141,48 @@ impl Workspace {
         let b = self.external_documents.iter().flat_map(|doc| {
             let doc = doc.read();
             match &doc.ontology {
-                ExternalOntology::RdfOntology(_) => todo!(),
+                ExternalOntology::RdfOntology(a) => {
+                    let index = a.i().clone();
+                    // let ont = SetOntology::from_index(set);
+                    let set_ontology = SetOntology::from(index);
+
+                    error!("set ontology = {set_ontology:#?}");
+
+                    let mut iri_mapped_ontology = ArcIRIMappedOntology::from(set_ontology);
+                    //
+                    //
+
+                    let build = Build::new_arc();
+                    let iri = build.iri(iri.clone());
+
+                    let comp = iri_mapped_ontology.components_for_iri(&iri);
+                    let comp = comp
+                        .filter_map(|c| match &c.component {
+                            AnnotationAssertion(aa) => Some(aa.ann.clone()),
+                            _ => None,
+                        })
+                        .filter_map(|annotation| match annotation.av {
+                            horned_owl::model::AnnotationValue::Literal(
+                                horned_owl::model::Literal::Simple { literal },
+                            ) => {
+                                let annotations =
+                                    once((annotation.ap.0.to_string(), vec![literal])).collect();
+                                Some(FrameInfo {
+                                    iri: iri.to_string(),
+                                    annotations,
+                                    frame_type: FrameType::Class,
+                                    definitions: vec![],
+                                })
+                            }
+                            _ => None,
+                        })
+                        .collect_vec();
+
+                    debug!("{}", doc.uri);
+                    debug!("{comp:#?}");
+                    // debug!("{:#?}", set_ontology);
+                    comp
+                }
                 ExternalOntology::OwlOntology(set_ontology) => {
                     let mut iri_mapped_ontology = ArcIRIMappedOntology::from(set_ontology.clone());
                     let build = Build::new_arc();
@@ -1160,6 +1202,10 @@ impl FrameInfo {
             .or_else(|| {
                 self.annotations
                     .get("https://www.w3.org/2000/01/rdf-schema#label") // same full iri
+            })
+            .or_else(|| {
+                self.annotations
+                    .get("http://www.w3.org/2000/01/rdf-schema#label") // same full iri
             })
             // TODO #20 make this more usable by providing multiple lines with indentation
             .map(|resolved| resolved.iter().map(|s| trim_string_value(s)).join(","))
