@@ -135,12 +135,8 @@ impl Workspace {
 
     /// This finds a frame info in the internal documents
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
-        info!("Getting frame info for {iri}");
-        info!("External documents are {:#?}", self.external_documents);
+        debug!("Getting frame info for {iri}");
 
-        // The interesing bit is that when importing (A <-import------ B)
-        // A and B have different IRI's but the contained frames get passt along. Therefore chaning thair
-        // full IRI.
         let b = self.external_documents.iter().flat_map(|doc| {
             let doc = doc.read();
             match &doc.ontology {
@@ -149,9 +145,9 @@ impl Workspace {
                     let mut iri_mapped_ontology = ArcIRIMappedOntology::from(set_ontology.clone());
                     let build = Build::new_arc();
                     let iri = build.iri(iri.clone());
-                    info!("IRI = {iri:?}");
-                    info!(
-                        "comp = {:#?}",
+                    debug!("IRI = {iri:?}");
+                    debug!(
+                        "found compontents = {:#?}",
                         iri_mapped_ontology.components_for_iri(&iri).collect_vec()
                     );
 
@@ -178,9 +174,9 @@ impl Workspace {
                         })
                         .collect_vec();
 
-                    info!("{}", doc.uri);
-                    info!("{comp:#?}");
-                    info!("{:#?}", set_ontology);
+                    debug!("{}", doc.uri);
+                    debug!("{comp:#?}");
+                    debug!("{:#?}", set_ontology);
                     comp
                 }
             }
@@ -201,16 +197,10 @@ impl Workspace {
         http_client: &dyn HttpClient,
     ) -> String {
         match node.kind() {
-            "class_frame" | "annotation_property_frame" => {
-                let iri = &node
-                    .named_child(0)
-                    .map(|c| node_text(&c, &doc.rope).to_string());
-
-                if let Some(iri) = iri {
-                    self.get_frame_info(iri)
-                        .map(|fi| fi.info_display(self))
-                        .unwrap_or(iri.clone())
-                    // iri_info_display(iri, self)
+            "class_frame" | "annotation_property_frame" | "class_iri" => {
+                // Goto first named child and repeat
+                if let Some(iri_node) = &node.named_child(0) {
+                    self.node_info(iri_node, doc, http_client)
                 } else {
                     "Class Frame\nNo iri was found".to_string()
                 }
@@ -224,18 +214,21 @@ impl Workspace {
             }
             "simple_iri" | "abbreviated_iri" => {
                 let iri = trim_full_iri(node_text(node, &doc.rope));
-                info!("Getting node info for {iri} at doc {}", doc.uri);
+                debug!("Getting node info for {iri} at doc {}", doc.uri);
 
                 let mut frame_infos = vec![];
 
-                // Imprting something will replace that iri with your own. This next
+                // The interesing bit is that when importing (A <-import------ B)
+                // A and B have different IRI's but the contained frames get passt along. Therefore changing there
+                // full IRI. The solution is to replace it with when searchin for that IRI.
+                //
+                // Importing something will replace that iri with your own. This next
                 // thing will do the inverse of that.
                 for import in doc.imports() {
                     info!("Frame info with import {import}");
-                    // convert import to catalog uri
+                    // Frame info for IRI with replaced import IRI and convert to catalog uri
                     if let Some((_, catalog_uri)) = self.find_catalog_uri(&import) {
                         if let Ok(base_iri) = oxiri::Iri::parse(&catalog_uri.uri[..]) {
-                            info!("Found catalog uri {}", base_iri);
                             let iri: Iri =
                                 base_iri.resolve(&format!("#{iri}")).unwrap().into_inner();
                             let info = self.get_frame_info(&iri);
@@ -245,6 +238,7 @@ impl Workspace {
                             }
                         }
                     }
+                    // Frame info for IRI with replaced import IRI (catalog name)
                     if let Ok(base_iri) = oxiri::Iri::parse(import.to_string()) {
                         let iri: Iri = base_iri.resolve(&format!("#{iri}")).unwrap().into_inner();
                         let info = self.get_frame_info(&iri);
@@ -255,17 +249,20 @@ impl Workspace {
                     };
                 }
 
+                // Frame info with a full iri
                 if let Some(base_iri) = doc.ontology_id() {
                     if let Ok(base_iri) = oxiri::Iri::parse(base_iri) {
                         let iri: Iri = base_iri.resolve(&format!("#{iri}")).unwrap().into_inner();
-                        info!("Iri = {iri}");
-                        info!("base = {base_iri}");
-
                         let info = self.get_frame_info(&iri);
                         if let Some(info) = info {
                             frame_infos.push(info);
                         }
                     };
+                }
+
+                let info = self.get_frame_info(&iri);
+                if let Some(info) = info {
+                    frame_infos.push(info);
                 }
 
                 // TODO #37 convert to query
@@ -298,13 +295,6 @@ impl Workspace {
                 frame_infos
                     .into_iter()
                     .tree_reduce(FrameInfo::merge)
-                    .map(|fi| fi.info_display(self))
-                    .unwrap_or(iri)
-            }
-            "class_iri" => {
-                // iri_info_display(&node_text(node, &doc.rope).to_string(), backend)
-                let iri = node_text(node, &doc.rope).to_string();
-                self.get_frame_info(&iri)
                     .map(|fi| fi.info_display(self))
                     .unwrap_or(iri)
             }
@@ -583,7 +573,7 @@ impl InternalDocument {
                 0 => {
                     let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
                     let frame_iri = capture_texts.next().unwrap().to_string();
-                    let annotation_iri = capture_texts.next().unwrap().to_string();
+                    let annotation_iri = trim_full_iri(capture_texts.next().unwrap());
                     let literal = capture_texts.next().unwrap().to_string();
 
                     let parent_node = m.captures[0].node.parent().unwrap();
@@ -1166,10 +1156,14 @@ impl FrameInfo {
 
     pub fn label(&self) -> String {
         self.annotations
-            .get("rdfs:label")
+            .get("rdfs:label") // abbriviated iri // TODO load prefixes
+            .or_else(|| {
+                self.annotations
+                    .get("https://www.w3.org/2000/01/rdf-schema#label") // same full iri
+            })
             // TODO #20 make this more usable by providing multiple lines with indentation
             .map(|resolved| resolved.iter().map(|s| trim_string_value(s)).join(","))
-            .unwrap_or("(rdfs:label missing)".into())
+            .unwrap_or(self.iri.clone())
     }
 
     pub fn annoation_display(&self, iri: &Iri) -> Option<String> {

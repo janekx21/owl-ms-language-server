@@ -225,7 +225,7 @@ async fn backend_hover_on_class_should_show_class_info() {
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
-    let url = Url::parse("file:///tmp/foo.omn").expect("valid url");
+    let url = Url::parse("file:///some/folder/foo.omn").expect("valid url");
 
     let ontology = r#"
         Ontology: HoverOnto
@@ -470,7 +470,7 @@ async fn backend_hover_in_multi_file_ontology_on_not_imported_iri_should_not_wor
 }
 
 #[test(tokio::test)]
-async fn backend_hover_on_external_iri_should_show_external_info() {
+async fn backend_hover_on_external_simple_iri_should_show_external_info() {
     // Arrange
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![WorkspaceMember::Folder {
@@ -525,6 +525,111 @@ async fn backend_hover_on_external_iri_should_show_external_info() {
                 Annotations:
                     rdfs:label "Some class in A1"
                 SubClassOf: ClassA2,ClassB2
+
+    "#;
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+
+    // Act
+    // TODO check if the arrange did not create diagnostics
+    let hover_result = service
+        .inner()
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url.clone() },
+                position: Position {
+                    line: 6,
+                    character: 32,
+                }
+                .into(),
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    let hover_result = hover_result.unwrap();
+
+    let contents = match hover_result.contents {
+        HoverContents::Scalar(MarkedString::String(str)) => str,
+        _ => panic!("Did not think of that"),
+    };
+    info!("contents={contents}");
+    assert!(!contents.contains("ClassA2"));
+    assert!(contents.contains("Some class in A2"));
+}
+
+#[test(tokio::test)]
+async fn backend_hover_on_external_full_iri_should_show_external_info() {
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![WorkspaceMember::Folder {
+            name: "ontology-a".into(),
+            children: vec![WorkspaceMember::CatalogFile(
+                Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
+                    .with_uri("http://ontology-a.org/a1", "a1.omn")
+                    .with_uri("http://ontology-a.org/a2", "http://ontology-a.org/a2.owx"),
+            )],
+        }]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test wosrkpace".into(),
+        }),
+        vec![(
+            "http://ontology-a.org/a2.owx",
+            r##"
+                <?xml version="1.0"?>
+                <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                     xml:base="http://foo.org/a"
+                     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+                     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+                     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+                     ontologyIRI="http://ontology-a.org/a2.owx">
+
+                    <Declaration>
+                        <Class IRI="#ClassA2"/>
+                    </Declaration>
+    
+                    <AnnotationAssertion>
+                        <AnnotationProperty abbreviatedIRI="rdfs:label"/>
+                        <IRI>#ClassA2</IRI>
+                        <Literal>Some class in A2</Literal>
+                    </AnnotationAssertion>
+
+                </Ontology>
+            "##,
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://ontology-a.org/a1>
+            Import: <http://ontology-a.org/a2>
+            Class: ClassA1
+                Annotations:
+                    rdfs:label "Some class in A1"
+                SubClassOf: <http://ontology-a.org/a2.owx#ClassA2>,ClassB2
 
     "#;
 
