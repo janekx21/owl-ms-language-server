@@ -1,4 +1,4 @@
-use crate::catalog::CatalogUri;
+use crate::catalog::{self, CatalogUri};
 use crate::web::HttpClient;
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
@@ -9,7 +9,7 @@ use anyhow::{anyhow, Context};
 use dashmap::DashMap;
 use horned_owl::io::rdf::reader::RDFOntology;
 use horned_owl::io::ParserConfiguration;
-use horned_owl::model::{ArcAnnotatedComponent, ArcStr, Build};
+use horned_owl::model::{ArcAnnotatedComponent, ArcStr, Build, IRI};
 use horned_owl::model::{Class, Component::*};
 use horned_owl::ontology::iri_mapped::{ArcIRIMappedOntology, IRIMappedOntology};
 use horned_owl::ontology::set::SetOntology;
@@ -136,20 +136,27 @@ impl Workspace {
     /// This finds a frame info in the internal documents
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
         info!("Getting frame info for {iri}");
-        info!("{:#?}", self.external_documents);
+        info!("External documents are {:#?}", self.external_documents);
 
+        // The interesing bit is that when importing (A <-import------ B)
+        // A and B have different IRI's but the contained frames get passt along. Therefore chaning thair
+        // full IRI.
         let b = self.external_documents.iter().flat_map(|doc| {
             let doc = doc.read();
             match &doc.ontology {
                 ExternalOntology::RdfOntology(_) => todo!(),
                 ExternalOntology::OwlOntology(set_ontology) => {
-                    let mut iri_mapped = ArcIRIMappedOntology::from(set_ontology.clone());
-
+                    let mut iri_mapped_ontology = ArcIRIMappedOntology::from(set_ontology.clone());
                     let build = Build::new_arc();
-                    let iri2 = doc.abbreviated_iri_to_full_iri(iri.clone());
-                    let iri3 = build.iri(iri2);
-                    let comp = iri_mapped
-                        .components_for_iri(&iri3)
+                    let iri = build.iri(iri.clone());
+                    info!("IRI = {iri:?}");
+                    info!(
+                        "comp = {:#?}",
+                        iri_mapped_ontology.components_for_iri(&iri).collect_vec()
+                    );
+
+                    let comp = iri_mapped_ontology.components_for_iri(&iri);
+                    let comp = comp
                         .filter_map(|c| match &c.component {
                             AnnotationAssertion(aa) => Some(aa.ann.clone()),
                             _ => None,
@@ -161,7 +168,7 @@ impl Workspace {
                                 let annotations =
                                     once((annotation.ap.0.to_string(), vec![literal])).collect();
                                 Some(FrameInfo {
-                                    iri: iri.clone(),
+                                    iri: iri.to_string(),
                                     annotations,
                                     frame_type: FrameType::Class,
                                     definitions: vec![],
@@ -208,9 +215,58 @@ impl Workspace {
                     "Class Frame\nNo iri was found".to_string()
                 }
             }
-            "full_iri" | "simple_iri" | "abbreviated_iri" => {
-                // This is without the <> things
-                let iri = node_text(node, &doc.rope).to_string();
+            "full_iri" => {
+                let iri = trim_full_iri(node_text(node, &doc.rope));
+
+                self.get_frame_info(&iri)
+                    .map(|fi| fi.info_display(self))
+                    .unwrap_or(iri)
+            }
+            "simple_iri" | "abbreviated_iri" => {
+                let iri = trim_full_iri(node_text(node, &doc.rope));
+                info!("Getting node info for {iri} at doc {}", doc.uri);
+
+                let mut frame_infos = vec![];
+
+                // Imprting something will replace that iri with your own. This next
+                // thing will do the inverse of that.
+                for import in doc.imports() {
+                    info!("Frame info with import {import}");
+                    // convert import to catalog uri
+                    if let Some((_, catalog_uri)) = self.find_catalog_uri(&import) {
+                        if let Ok(base_iri) = oxiri::Iri::parse(&catalog_uri.uri[..]) {
+                            info!("Found catalog uri {}", base_iri);
+                            let iri: Iri =
+                                base_iri.resolve(&format!("#{iri}")).unwrap().into_inner();
+                            let info = self.get_frame_info(&iri);
+
+                            if let Some(info) = info {
+                                frame_infos.push(info);
+                            }
+                        }
+                    }
+                    if let Ok(base_iri) = oxiri::Iri::parse(import.to_string()) {
+                        let iri: Iri = base_iri.resolve(&format!("#{iri}")).unwrap().into_inner();
+                        let info = self.get_frame_info(&iri);
+
+                        if let Some(info) = info {
+                            frame_infos.push(info);
+                        }
+                    };
+                }
+
+                if let Some(base_iri) = doc.ontology_id() {
+                    if let Ok(base_iri) = oxiri::Iri::parse(base_iri) {
+                        let iri: Iri = base_iri.resolve(&format!("#{iri}")).unwrap().into_inner();
+                        info!("Iri = {iri}");
+                        info!("base = {base_iri}");
+
+                        let info = self.get_frame_info(&iri);
+                        if let Some(info) = info {
+                            frame_infos.push(info);
+                        }
+                    };
+                }
 
                 // TODO #37 convert to query
                 let _ = http_client;
@@ -235,12 +291,15 @@ impl Workspace {
                 //     })
                 //     .collect_vec();
 
-                // debug!("A======{a:#?}");
+                // self.get_frame_info(&iri)
+                //     .map(|fi| fi.info_display(self))
+                //     .unwrap_or(iri)
 
-                self.get_frame_info(&iri)
+                frame_infos
+                    .into_iter()
+                    .tree_reduce(FrameInfo::merge)
                     .map(|fi| fi.info_display(self))
                     .unwrap_or(iri)
-                // iri_info_display(&iri, backend)
             }
             "class_iri" => {
                 // iri_info_display(&node_text(node, &doc.rope).to_string(), backend)
@@ -667,7 +726,7 @@ impl InternalDocument {
         debug!("Add reachable {}", self.uri);
 
         let docs = self
-            .reachable_documents()
+            .imports()
             .iter()
             .filter_map(|url| {
                 workspace
@@ -687,11 +746,11 @@ impl InternalDocument {
         }
     }
 
-    fn reachable_documents(&self) -> Vec<Url> {
+    fn imports(&self) -> Vec<Url> {
         self.query(&ALL_QUERIES.import_query)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri] => Url::parse(iri.node.text.trim_end_matches(">").trim_start_matches("<"))
+                [iri] => Url::parse(&trim_full_iri(&iri.node.text)[..])
                     .inspect_err(|e| warn!("Url could not be parsed {e:#}"))
                     .ok(),
                 _ => unimplemented!(),
@@ -897,6 +956,18 @@ impl InternalDocument {
             self.uri.to_string().trim_end_matches('#'),
             abbriviated_iri
         )
+    }
+
+    pub fn ontology_id(&self) -> Option<Iri> {
+        let result = self.query(&ALL_QUERIES.ontology_id);
+        result
+            .iter()
+            .exactly_one()
+            .ok()
+            .map(|m| match &m.captures[..] {
+                [iri] => trim_full_iri(&iri.node.text),
+                _ => unreachable!(),
+            })
     }
 }
 
@@ -1303,12 +1374,47 @@ impl Display for FrameType {
     }
 }
 
+/// Takes an IRI in any form and removed the <> symbols
+pub fn trim_full_iri<T: ToString>(untrimmed_iri: T) -> Iri {
+    untrimmed_iri
+        .to_string()
+        .trim_end_matches(">")
+        .trim_start_matches("<")
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use std::ops::Deref;
     use test_log::test;
+
+    #[test]
+    fn internal_document_ontology_id_should_return_none() {
+        let doc = InternalDocument::new(Url::parse("http://foo").unwrap(), -1, "Ontology: ".into());
+
+        let iri = doc.ontology_id();
+
+        assert_eq!(iri, None);
+    }
+
+    #[test]
+    fn internal_document_ontology_id_should_return_some() {
+        let doc = InternalDocument::new(
+            Url::parse("http://foo/bar").unwrap(),
+            -1,
+            "Ontology: <http://foo/bar>
+            Class: Foo"
+                .into(),
+        );
+
+        let iri = doc.ontology_id();
+
+        info!("{}", doc.tree.root_node().to_sexp());
+
+        assert_eq!(iri, Some("http://foo/bar".to_string()));
+    }
 
     #[test]
     fn internal_document_abbreviated_iri_to_full_iri_should_convert_simple_iri() {

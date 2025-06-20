@@ -27,7 +27,7 @@ use tower_lsp::{Client, LanguageServer};
 use tree_sitter::{Language, Node, Point, Query, QueryCursor, Tree, TreeCursor};
 use tree_sitter_owl_ms::language;
 use web::{HttpClient, UreqClient};
-use workspace::{node_text, InternalDocument, Workspace};
+use workspace::{node_text, trim_full_iri, InternalDocument, Workspace};
 
 // Constants
 
@@ -633,9 +633,7 @@ impl Backend {
             .query(&ALL_QUERIES.import_query)
             .iter()
             .filter_map(|match_| match &match_.captures[..] {
-                [iri] => {
-                    Url::parse(iri.node.text.trim_end_matches(">").trim_start_matches("<")).ok()
-                }
+                [iri] => Url::parse(&trim_full_iri(&iri.node.text)[..]).ok(),
                 _ => unimplemented!(),
             })
             .collect_vec();

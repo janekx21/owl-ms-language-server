@@ -39,6 +39,7 @@ pub struct AllQueries {
     pub iri_query: Query,
     pub annotation_query: Query,
     pub frame_info_query: Query,
+    pub ontology_id: Query,
 }
 
 pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
@@ -86,6 +87,13 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
             (annotation_property_frame)
             (individual_frame)
         ] . (_ [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri))@frame
+        ",
+    )
+    .unwrap(),
+    ontology_id: Query::new(
+        *LANGUAGE,
+        "
+            (ontology (ontology_iri)@iri)
         ",
     )
     .unwrap(),
