@@ -173,7 +173,7 @@ impl LanguageServer for Backend {
         let url = params.text_document.uri;
         info!("Opend file {url}",);
 
-        let workspace = self.find_workspace(&url).await;
+        let workspace = self.find_workspace(&url);
         let internal_document = InternalDocument::new(
             url.clone(),
             params.text_document.version,
@@ -207,7 +207,7 @@ impl LanguageServer for Backend {
         );
 
         let url = &params.text_document.uri;
-        let workspace = self.find_workspace(url).await;
+        let workspace = self.find_workspace(url);
 
         if let Some(document) = workspace
             .internal_documents
@@ -250,7 +250,7 @@ impl LanguageServer for Backend {
             params.text_document_position_params.position
         );
 
-        let workspace = self.find_workspace(&url).await;
+        let workspace = self.find_workspace(&url);
 
         Ok(workspace.internal_documents.get(&url).map(|document| {
             let document = document.read();
@@ -274,7 +274,7 @@ impl LanguageServer for Backend {
             url.path_segments().unwrap().last().unwrap()
         );
 
-        let workspace = self.find_workspace(&url).await;
+        let workspace = self.find_workspace(&url);
         let document = if let Some(doc) = workspace.internal_documents.get(&url) {
             doc
         } else {
@@ -285,50 +285,8 @@ impl LanguageServer for Backend {
 
         let document = document.read();
 
-        let annotations = document.query_with_imports(
-            &ALL_QUERIES.annotation_query,
-            &workspace,
-            &*self.http_client,
-        );
+        let hints = document.inlay_hint(range, &workspace, &*self.http_client);
 
-        let matches = document.query_range(&ALL_QUERIES.iri_query, range);
-        let hints = matches
-            .into_iter()
-            .flat_map(|match_| match_.captures)
-            .filter_map(|capture| {
-                let iri = capture.node.text;
-
-                let label = annotations
-                    .iter()
-                    .filter_map(|m| match &m.captures[..] {
-                        [frame_iri, annoation_iri, literal] => {
-                            if frame_iri.node.text == iri && annoation_iri.node.text == "rdfs:label"
-                            {
-                                Some(literal.node.text_trimmed())
-                            } else {
-                                None
-                            }
-                        }
-                        _ => unreachable!(),
-                    })
-                    .join(", ");
-
-                if label.is_empty() {
-                    None
-                } else {
-                    Some(InlayHint {
-                        position: capture.node.range.end.into(),
-                        label: InlayHintLabel::String(label),
-                        kind: None,
-                        text_edits: None,
-                        tooltip: None,
-                        padding_left: Some(true),
-                        padding_right: None,
-                        data: None,
-                    })
-                }
-            })
-            .collect_vec();
         Ok(Some(hints))
     }
 
@@ -341,7 +299,7 @@ impl LanguageServer for Backend {
             params.text_document_position_params.text_document.uri
         );
         let uri = params.text_document_position_params.text_document.uri;
-        let workspace = self.find_workspace(&uri).await;
+        let workspace = self.find_workspace(&uri);
         let maybe_doc = workspace.internal_documents.get(&uri);
         if let Some(doc) = maybe_doc {
             let doc = doc.read();
@@ -380,7 +338,7 @@ impl LanguageServer for Backend {
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         debug!("code_action at {}", params.text_document.uri);
         let url = params.text_document.uri;
-        let workspace = self.find_workspace(&url).await;
+        let workspace = self.find_workspace(&url);
         let doc = workspace
             .internal_documents
             .get(&url)
@@ -416,7 +374,7 @@ impl LanguageServer for Backend {
             params.text_document_position.text_document.uri
         );
         let url = params.text_document_position.text_document.uri;
-        let workspace = self.find_workspace(&url).await;
+        let workspace = self.find_workspace(&url);
         let doc = workspace.internal_documents.get(&url);
         let pos: Position = params.text_document_position.position.into();
 
@@ -481,7 +439,7 @@ impl LanguageServer for Backend {
     ) -> Result<Option<SemanticTokensResult>> {
         debug!("semantic_tokens_full at {}", params.text_document.uri);
         let uri = params.text_document.uri;
-        let workspace = self.find_workspace(&uri).await;
+        let workspace = self.find_workspace(&uri);
         if let Some(doc) = workspace.internal_documents.get(&uri) {
             let doc = doc.read();
             let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
@@ -582,7 +540,7 @@ impl LanguageServer for Backend {
 
 impl Backend {
     /// This will find a workspace or create one for a given url
-    async fn find_workspace<'a>(&'a self, url: &Url) -> MappedRwLockWriteGuard<'a, Workspace> {
+    fn find_workspace<'a>(&'a self, url: &Url) -> MappedRwLockWriteGuard<'a, Workspace> {
         let mut workspaces = self.workspaces.write();
 
         // TODO there are problems when the workspace is changing

@@ -208,7 +208,7 @@ async fn backend_did_change_should_update_internal_rope() {
         .await;
 
     // Assert
-    let workspace = service.inner().find_workspace(&url).await;
+    let workspace = service.inner().find_workspace(&url);
 
     let doc = workspace
         .internal_documents
@@ -777,6 +777,120 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
     info!("contents={contents}");
     assert!(!contents.contains("ClassA2"));
     assert!(contents.contains("Some class in A2"));
+}
+
+#[test(tokio::test)]
+async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
+    // TODO hier
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![WorkspaceMember::Folder {
+            name: "ontology-a".into(),
+            children: vec![WorkspaceMember::CatalogFile(
+                Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
+                    .with_uri("http://ontology-a.org/a1", "a1.omn")
+                    .with_uri("http://ontology-a.org/a2", "http://ontology-a.org/a2.owx"),
+            )],
+        }]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test wosrkpace".into(),
+        }),
+        vec![(
+            "http://ontology-a.org/a2.owx",
+            r##"
+                <?xml version="1.0"?>
+                <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                     xml:base="http://foo.org/a"
+                     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+                     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+                     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+                     ontologyIRI="http://ontology-a.org/a2.owx">
+
+                    <Declaration>
+                        <Class IRI="#ClassA2"/>
+                    </Declaration>
+    
+                    <AnnotationAssertion>
+                        <AnnotationProperty abbreviatedIRI="rdfs:label"/>
+                        <IRI>#ClassA2</IRI>
+                        <Literal>Some class in A2</Literal>
+                    </AnnotationAssertion>
+
+                </Ontology>
+            "##,
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://ontology-a.org/a1>
+            Import: <http://ontology-a.org/a2>
+            Class: ClassA1
+                Annotations:
+                    rdfs:label "Some class in A1"
+                SubClassOf: ClassA2,ClassB2
+
+    "#;
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+
+    // Act
+    // TODO check if the arrange did not create diagnostics
+    let result = service
+        .inner()
+        .inlay_hint(InlayHintParams {
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            text_document: TextDocumentIdentifier { uri: url.clone() },
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 999,
+                    character: 0,
+                },
+            }
+            .into(),
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    let result = result.unwrap();
+
+    info!("result={result:#?}");
+    assert!(result.iter().any(|x| match &x.label {
+        InlayHintLabel::String(a) => a.contains("Some class in A1"),
+        InlayHintLabel::LabelParts(_) => unreachable!(),
+    }));
+
+    assert_eq!(result.len(), 2);
+    assert!(result.iter().any(|x| match &x.label {
+        InlayHintLabel::String(a) => a.contains("Some class in A2"),
+        InlayHintLabel::LabelParts(_) => unreachable!(),
+    }));
 }
 
 #[test(tokio::test)]

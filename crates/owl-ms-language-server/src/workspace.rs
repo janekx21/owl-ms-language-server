@@ -32,7 +32,8 @@ use std::{
     sync::Arc,
 };
 use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, SymbolKind, Url, WorkspaceFolder,
+    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
+    SymbolKind, Url, WorkspaceFolder,
 };
 use tree_sitter::{InputEdit, Node, Parser, Point, Query, QueryCursor, Tree};
 
@@ -134,11 +135,11 @@ impl Workspace {
             .collect_vec()
     }
 
-    /// This finds a frame info in the internal documents
+    /// This finds a frame info in the internal and external documents
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
         debug!("Getting frame info for {iri}");
 
-        let b = self.external_documents.iter().flat_map(|doc| {
+        let external_infos = self.external_documents.iter().flat_map(|doc| {
             let doc = doc.read();
             match &doc.ontology {
                 ExternalOntology::RdfOntology(a) => {
@@ -224,12 +225,15 @@ impl Workspace {
             }
         });
 
-        let a = self.internal_documents.iter().filter_map(|dm| {
+        // TODO #37 replace this with a query
+        let internal_infos = self.internal_documents.iter().filter_map(|dm| {
             let dm = dm.value().read();
             dm.frame_infos.get(iri).map(|v| v.value().clone())
         });
 
-        a.chain(b).tree_reduce(FrameInfo::merge)
+        internal_infos
+            .chain(external_infos)
+            .tree_reduce(FrameInfo::merge)
     }
 
     pub fn node_info(
@@ -1000,6 +1004,63 @@ impl InternalDocument {
                 [iri] => trim_full_iri(&iri.node.text),
                 _ => unreachable!(),
             })
+    }
+
+    pub fn inlay_hint(
+        &self,
+        range: Range,
+        workspace: &Workspace,
+        http_client: &dyn HttpClient,
+    ) -> Vec<InlayHint> {
+        let annotations =
+            self.query_with_imports(&ALL_QUERIES.annotation_query, workspace, http_client);
+
+        let hints = self
+            .query_range(&ALL_QUERIES.iri_query, range)
+            .into_iter()
+            .flat_map(|match_| match_.captures)
+            .filter_map(|capture| {
+                let iri = trim_full_iri(capture.node.text);
+
+                let label = annotations
+                    .iter()
+                    .filter_map(|m| match &m.captures[..] {
+                        [frame_iri, annoation_iri, literal] => {
+                            if frame_iri.node.text == iri && annoation_iri.node.text == "rdfs:label"
+                            {
+                                Some(literal.node.text_trimmed())
+                            } else {
+                                None
+                            }
+                        }
+                        _ => unreachable!(),
+                    })
+                    .chain(
+                        // Chain the frame info label from the workspace
+                        workspace
+                            .get_frame_info(&iri)
+                            .map(|frame_info| frame_info.label()),
+                    )
+                    .unique()
+                    .join(", ");
+
+                if label.is_empty() {
+                    None
+                } else {
+                    Some(InlayHint {
+                        position: capture.node.range.end.into(),
+                        label: InlayHintLabel::String(label),
+                        kind: None,
+                        text_edits: None,
+                        tooltip: None,
+                        padding_left: Some(true),
+                        padding_right: None,
+                        data: None,
+                    })
+                }
+            })
+            .collect_vec();
+        hints
     }
 }
 
