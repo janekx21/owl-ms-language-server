@@ -78,8 +78,6 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
                     (typed_literal)
                 ]@literal))
 
-        (prefix_declaration (prefix_name)@prefix_name (full_iri)@iri)
-
         ([
             (datatype_frame)
             (class_frame)

@@ -7,11 +7,12 @@ use crate::{
 use anyhow::Result;
 use anyhow::{anyhow, Context};
 use cached::proc_macro::cached;
+use cached::SizedCache;
+use core::fmt;
 use dashmap::DashMap;
-use horned_owl::io::rdf::reader::ConcreteRDFOntology;
 use horned_owl::io::ParserConfiguration;
+use horned_owl::model::Build;
 use horned_owl::model::Component::*;
-use horned_owl::model::{ArcAnnotatedComponent, ArcStr, Build};
 use horned_owl::ontology::iri_mapped::ArcIRIMappedOntology;
 use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
@@ -74,18 +75,6 @@ impl Workspace {
         }
     }
 
-    /// Returns a bool that specifies if the workspace url is a base for the provided url and therefore
-    /// the workspace could contain that url
-    pub fn could_contain(&self, url: &Url) -> bool {
-        let fp_folder = self
-            .workspace_folder
-            .uri
-            .to_file_path()
-            .expect("valid filepath");
-        let fp_file = url.to_file_path().expect("valid filepath");
-        fp_file.starts_with(fp_folder)
-    }
-
     pub fn insert_internal_document(
         &self,
         document: InternalDocument,
@@ -140,84 +129,41 @@ impl Workspace {
         debug!("Getting frame info for {iri}");
 
         let external_infos = self.external_documents.iter().flat_map(|doc| {
-            let doc = doc.read();
-            match &doc.ontology {
-                ExternalOntology::RdfOntology(a) => {
-                    let index = a.i().clone();
-                    let set_ontology = SetOntology::from(index);
+            let mut doc = doc.write();
 
-                    let mut iri_mapped_ontology = ArcIRIMappedOntology::from(set_ontology);
+            // let mut iri_mapped_ontology = ArcIRIMappedOntology::from(set_ontology);
+            let iri_mapped_ontology = &mut doc.ontology;
 
-                    let build = Build::new_arc();
-                    let iri = build.iri(iri.clone());
+            let build = Build::new_arc();
+            let iri = build.iri(iri.clone());
 
-                    let comp = iri_mapped_ontology.components_for_iri(&iri);
-                    let comp = comp
-                        .filter_map(|c| match &c.component {
-                            AnnotationAssertion(aa) => Some(aa.ann.clone()),
-                            _ => None,
+            iri_mapped_ontology
+                .components_for_iri(&iri)
+                .filter_map(|c| match &c.component {
+                    AnnotationAssertion(aa) => match &aa.subject {
+                        horned_owl::model::AnnotationSubject::IRI(iri_) if iri_ == &iri => {
+                            Some(aa.ann.clone())
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .filter_map(|annotation| match annotation.av {
+                    horned_owl::model::AnnotationValue::Literal(
+                        horned_owl::model::Literal::Simple { literal },
+                    ) => {
+                        let annotations =
+                            once((annotation.ap.0.to_string(), vec![literal])).collect();
+                        Some(FrameInfo {
+                            iri: iri.to_string(),
+                            annotations,
+                            frame_type: FrameType::Class,
+                            definitions: vec![],
                         })
-                        .filter_map(|annotation| match annotation.av {
-                            horned_owl::model::AnnotationValue::Literal(
-                                horned_owl::model::Literal::Simple { literal },
-                            ) => {
-                                let annotations =
-                                    once((annotation.ap.0.to_string(), vec![literal])).collect();
-                                Some(FrameInfo {
-                                    iri: iri.to_string(),
-                                    annotations,
-                                    frame_type: FrameType::Class,
-                                    definitions: vec![],
-                                })
-                            }
-                            _ => None,
-                        })
-                        .collect_vec();
-
-                    // debug!("{}", doc.uri);
-                    // debug!("{comp:#?}");
-                    // debug!("{:#?}", set_ontology);
-                    comp
-                }
-                ExternalOntology::OwlOntology(set_ontology) => {
-                    let mut iri_mapped_ontology = ArcIRIMappedOntology::from(set_ontology.clone());
-                    let build = Build::new_arc();
-                    let iri = build.iri(iri.clone());
-                    debug!("IRI = {iri:?}");
-                    debug!(
-                        "found compontents = {:#?}",
-                        iri_mapped_ontology.components_for_iri(&iri).collect_vec()
-                    );
-
-                    let comp = iri_mapped_ontology.components_for_iri(&iri);
-                    let comp = comp
-                        .filter_map(|c| match &c.component {
-                            AnnotationAssertion(aa) => Some(aa.ann.clone()),
-                            _ => None,
-                        })
-                        .filter_map(|annotation| match annotation.av {
-                            horned_owl::model::AnnotationValue::Literal(
-                                horned_owl::model::Literal::Simple { literal },
-                            ) => {
-                                let annotations =
-                                    once((annotation.ap.0.to_string(), vec![literal])).collect();
-                                Some(FrameInfo {
-                                    iri: iri.to_string(),
-                                    annotations,
-                                    frame_type: FrameType::Class,
-                                    definitions: vec![],
-                                })
-                            }
-                            _ => None,
-                        })
-                        .collect_vec();
-
-                    debug!("{}", doc.uri);
-                    debug!("{comp:#?}");
-                    debug!("{:#?}", set_ontology);
-                    comp
-                }
-            }
+                    }
+                    _ => None,
+                })
+                .collect_vec()
         });
 
         // TODO #37 replace this with a query
@@ -226,8 +172,35 @@ impl Workspace {
             dm.frame_infos.get(iri).map(|v| v.value().clone())
         });
 
+        let fixed_infos = match &iri[..] {
+            "http://www.w3.org/2000/01/rdf-schema#label" => vec![FrameInfo {
+                iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+                annotations: vec![(
+                    "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+                    vec!["label".to_string()],
+                )]
+                .into_iter()
+                .collect(),
+                frame_type: FrameType::AnnotationProperty,
+                definitions: vec![],
+            }],
+            "http://www.w3.org/2000/01/rdf-schema#comment" => vec![FrameInfo {
+                iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
+                annotations: vec![(
+                    "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+                    vec!["comment".to_string()],
+                )]
+                .into_iter()
+                .collect(),
+                frame_type: FrameType::AnnotationProperty,
+                definitions: vec![],
+            }],
+            _ => vec![],
+        };
+
         internal_infos
             .chain(external_infos)
+            .chain(fixed_infos)
             .tree_reduce(FrameInfo::merge)
     }
 
@@ -264,14 +237,6 @@ impl Workspace {
 
             _ => format!("generic node named {}", node.kind()),
         }
-    }
-
-    /// Queries in the internal documents only
-    pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
-        self.internal_documents
-            .iter()
-            .flat_map(|doc| doc.read().query(query))
-            .collect_vec()
     }
 
     fn find_catalog_uri(&self, url: &Url) -> Option<(&Catalog, &CatalogUri)> {
@@ -399,50 +364,6 @@ pub enum DocumentReference {
 
 impl DocumentReference {}
 
-// static EMTPTY_FRAME_INFO_MAP: Lazy<DashMap<Iri, FrameInfo>> = Lazy::new(|| DashMap::new());
-
-// impl Document {
-//     pub fn new_internal(url: Url, internal: InternalDocument) -> Document {
-//         Document {
-//             uri: url,
-//             inner: Document::Internal(internal),
-//         }
-//     }
-
-//     pub fn url(&self) -> Url {
-//         self.uri.clone()
-//         // match self {
-//         //     Document::Internal(internal_document) => internal_document.uri.clone(),
-//         //     Document::External(external_document) => external_document.uri.clone(),
-//         // }
-//     }
-
-//     #[deprecated = "This will not result in all data. Query the document instead."]
-//     pub fn frame_infos(&self) -> &DashMap<Iri, FrameInfo> {
-//         match &self.inner {
-//             Document::Internal(internal_document) => &internal_document.frame_infos,
-//             // This is a sub for empty data
-//             Document::External(_) => &*EMTPTY_FRAME_INFO_MAP,
-//         }
-//     }
-
-//     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
-//         match &self.inner {
-//             Document::Internal(internal_document) => internal_document.query(query),
-//             Document::External(external_document) => vec![], // TODO
-//         }
-//     }
-
-//     pub fn edit(&mut self, params: &DidChangeTextDocumentParams) {
-//         match &mut self.inner {
-//             Document::Internal(internal_document) => internal_document.edit(params),
-//             Document::External(_) => {
-//                 error!("You can not edit external documents")
-//             }
-//         }
-//     }
-// }
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum OwlDialect {
     Unknown,
@@ -463,8 +384,6 @@ pub struct InternalDocument {
 
     /// This can differ from the url file extention, so we need to track it
     pub owl_dialect: OwlDialect,
-
-    pub prefix_cache: (u64, Vec<(String, String)>),
 }
 
 impl core::hash::Hash for InternalDocument {
@@ -506,7 +425,6 @@ impl InternalDocument {
                 rope,
                 frame_infos: DashMap::new(),
                 diagnostics,
-                prefix_cache: (0, Vec::new()),
             };
             document.frame_infos = document.gen_frame_infos(None);
             document
@@ -523,7 +441,6 @@ impl InternalDocument {
 
                 frame_infos: DashMap::new(),
                 diagnostics: vec![],
-                prefix_cache: (0, Vec::new()),
             }
         }
     }
@@ -561,6 +478,7 @@ impl InternalDocument {
                     let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
                     let frame_iri = capture_texts.next().unwrap().to_string();
                     let annotation_iri = trim_full_iri(capture_texts.next().unwrap());
+                    let annotation_iri = self.abbreviated_iri_to_full_iri(annotation_iri);
                     let literal = capture_texts.next().unwrap().to_string();
 
                     let parent_node = m.captures[0].node.parent().unwrap();
@@ -607,14 +525,6 @@ impl InternalDocument {
                 }
                 1 => {
                     let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
-                    let prefix_name = capture_texts.next().unwrap().to_string();
-                    let iri = capture_texts.next().unwrap().to_string();
-
-                    // TODO requst prefix url to cache the ontology there
-                    // debug!("Prefix named {} with iri {}", prefix_name, iri);
-                }
-                2 => {
-                    let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
                     let frame_iri = capture_texts.next().unwrap().to_string();
 
                     let specific_iri_node = m.captures[0].node.parent().unwrap();
@@ -623,7 +533,6 @@ impl InternalDocument {
 
                     let frame_node = m.captures[1].node;
 
-                    // debug!("Found frame {}", frame_iri);
                     if !infos.contains_key(&frame_iri) {
                         infos.insert(
                             frame_iri.clone(),
@@ -678,7 +587,7 @@ impl InternalDocument {
             .flat_map(|doc| match doc {
                 DocumentReference::Internal(doc) => doc.read().query(query),
                 DocumentReference::External(_) => {
-                    error!("Query in external document not supported");
+                    warn!("Query in external document not supported");
                     vec![]
                 }
             })
@@ -707,7 +616,7 @@ impl InternalDocument {
         }
 
         result.insert(self.uri.clone());
-        debug!("Add reachable {}", self.uri);
+        debug!("Add reachable {} (internal)", self.uri);
 
         let docs = self
             .imports()
@@ -725,7 +634,10 @@ impl InternalDocument {
                 DocumentReference::Internal(internal_document) => internal_document
                     .read()
                     .reachable_docs_recursive_helper(workspace, result, http_client),
-                DocumentReference::External(_) => {} // TODO
+                DocumentReference::External(e) => {
+                    e.read()
+                        .reachable_docs_recursive_helper(workspace, result, http_client)
+                }
             };
         }
     }
@@ -955,7 +867,7 @@ impl InternalDocument {
                 )
             })
             .next()
-            .unwrap_or(abbriviated_iri)
+            .unwrap_or(abbriviated_iri) // Will return the simple IRI with colon
     }
 
     pub fn ontology_id(&self) -> Option<Iri> {
@@ -999,12 +911,19 @@ impl InternalDocument {
             .flat_map(|match_| match_.captures)
             .filter_map(|capture| {
                 let iri = trim_full_iri(capture.node.text);
+                let iri = self.abbreviated_iri_to_full_iri(iri);
 
                 let label = annotations
                     .iter()
                     .filter_map(|m| match &m.captures[..] {
                         [frame_iri, annoation_iri, literal] => {
-                            if frame_iri.node.text == iri && annoation_iri.node.text == "rdfs:label"
+                            // TODO no full iri :<
+
+                            let annoation_iri = self.abbreviated_iri_to_full_iri(trim_full_iri(
+                                annoation_iri.node.text.clone(),
+                            ));
+                            if frame_iri.node.text == iri
+                                && annoation_iri == "http://www.w3.org/2000/01/rdf-schema#label"
                             {
                                 Some(literal.node.text_trimmed())
                             } else {
@@ -1017,6 +936,7 @@ impl InternalDocument {
                         // Chain the frame info label from the workspace
                         workspace
                             .get_frame_info(&iri)
+                            .inspect(|fi| debug!("Found frame info {fi:#?}"))
                             .map(|frame_info| frame_info.label()),
                     )
                     .unique()
@@ -1042,19 +962,24 @@ impl InternalDocument {
     }
 }
 
-#[derive(Debug)]
 pub struct ExternalDocument {
     pub uri: Url,
     pub text: String,
-    pub ontology: ExternalOntology,
+    pub ontology: ArcIRIMappedOntology,
     /// This can differ from the url file extention, so we need to track it
     pub owl_dialect: OwlDialect,
 }
 
-#[derive(Debug)]
-pub enum ExternalOntology {
-    RdfOntology(ConcreteRDFOntology<ArcStr, ArcAnnotatedComponent>),
-    OwlOntology(SetOntology<ArcStr>),
+impl fmt::Debug for ExternalDocument {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ExternalDocument {{uri: {}, text.len(): {}}}, ontology: ..., owl_dialect: {:?}}}",
+            self.uri,
+            self.text.len(),
+            self.owl_dialect
+        )
+    }
 }
 
 impl ExternalDocument {
@@ -1072,41 +997,83 @@ impl ExternalDocument {
                 Ok(ExternalDocument {
                     uri: url,
                     text,
-                    ontology: ExternalOntology::OwlOntology(ontology),
+                    ontology,
                     owl_dialect: OwlDialect::Owl,
                 })
             }
-            Some((_, "owl")) | _ => {
-                let (ontology, incomplete_parse) = horned_owl::io::rdf::reader::read_with_build(
+            // For owl files and files without extention
+            _ => {
+                let (ontology, _) = horned_owl::io::rdf::reader::read_with_build(
                     &mut buffer,
                     &b,
                     ParserConfiguration::default(),
                 )
                 .map_err(horned_to_anyhow)?;
 
+                let ontology = SetOntology::from_index(ontology.i().clone());
+
+                let ontology = ArcIRIMappedOntology::from(ontology);
+
                 Ok(ExternalDocument {
                     uri: url,
                     text,
-                    ontology: ExternalOntology::RdfOntology(ontology),
+                    ontology,
                     owl_dialect: OwlDialect::Rdf,
                 })
             }
         }
     }
 
+    fn imports(&self) -> Vec<Url> {
+        self.ontology
+            .iter()
+            .filter_map(|ac| match &ac.component {
+                horned_owl::model::Component::Import(import) => Some(Url::parse(import.0.deref())),
+                _ => None,
+            })
+            .filter_map(|r| r.ok())
+            .collect_vec()
+    }
+
     fn reachable_documents(&self) -> Vec<Url> {
-        match &self.ontology {
-            ExternalOntology::RdfOntology(_) => vec![],
-            ExternalOntology::OwlOntology(set_ontology) => set_ontology
-                .iter()
-                .filter_map(|ac| match &ac.component {
-                    horned_owl::model::Component::Import(import) => {
-                        Some(Url::parse(import.0.deref()))
-                    }
-                    _ => None,
-                })
-                .filter_map(|r| r.ok())
-                .collect_vec(),
+        self.imports()
+    }
+
+    fn reachable_docs_recursive_helper(
+        &self,
+        workspace: &Workspace,
+        result: &mut HashSet<Url>,
+        http_client: &dyn HttpClient,
+    ) {
+        if result.contains(&self.uri) {
+            // Do nothing
+            return;
+        }
+
+        result.insert(self.uri.clone());
+        debug!("Add reachable {} (external)", self.uri);
+
+        let docs = self
+            .imports()
+            .iter()
+            .filter_map(|url| {
+                workspace
+                    .resolve_url_to_document(url, http_client)
+                    .inspect_err(|e| error!("{e:?}"))
+                    .ok()
+            })
+            .collect_vec();
+
+        for doc in docs {
+            match doc {
+                DocumentReference::Internal(internal_document) => internal_document
+                    .read()
+                    .reachable_docs_recursive_helper(workspace, result, http_client),
+                DocumentReference::External(e) => {
+                    e.read()
+                        .reachable_docs_recursive_helper(workspace, result, http_client)
+                }
+            };
         }
     }
 
@@ -1237,26 +1204,21 @@ impl FrameInfo {
     }
 
     pub fn label(&self) -> String {
-        self.annotations
-            .get("rdfs:label") // abbriviated iri // TODO load prefixes
-            .or_else(|| {
-                self.annotations
-                    .get("https://www.w3.org/2000/01/rdf-schema#label") // same full iri
-            })
-            .or_else(|| {
-                self.annotations
-                    .get("http://www.w3.org/2000/01/rdf-schema#label") // same full iri
-            })
-            // TODO #20 make this more usable by providing multiple lines with indentation
-            .map(|resolved| resolved.iter().map(|s| trim_string_value(s)).join(","))
-            .unwrap_or(self.iri.clone())
+        self.annoation_display(&"http://www.w3.org/2000/01/rdf-schema#label".to_string())
+            .unwrap_or(format!("{} (no label)", self.iri))
     }
 
     pub fn annoation_display(&self, iri: &Iri) -> Option<String> {
         self.annotations
             .get(iri)
             // TODO #20 make this more usable by providing multiple lines with indentation
-            .map(|resolved| resolved.iter().map(|s| trim_string_value(s)).join(","))
+            .map(|resolved| {
+                resolved
+                    .iter()
+                    .map(|s| trim_string_value(s))
+                    .unique()
+                    .join(", ")
+            })
     }
 
     pub fn info_display(&self, workspace: &Workspace) -> String {
@@ -1463,7 +1425,13 @@ pub fn trim_full_iri<T: ToString>(untrimmed_iri: T) -> Iri {
         .to_string()
 }
 
-use cached::SizedCache;
+// Horned owl has no default here. Lets keep it out for now.
+// static STANDART_PREFIX_NAMES: [(&str, &str); 4] = [
+//     ("rdf:", "http://www.w3.org/1999/02/22-rdf-syntax-ns#"),
+//     ("rdfs:", "http://www.w3.org/2000/01/rdf-schema#"),
+//     ("owl:", "http://www.w3.org/2002/07/owl#"),
+//     ("xsd:", "http://www.w3.org/2001/XMLSchema#"),
+// ];
 
 #[cached(
     ty = "SizedCache<u64, Vec<(String, String)>>",
@@ -1481,6 +1449,13 @@ fn prefixes_helper(doc: &InternalDocument) -> Vec<(String, String)> {
             [name, iri] => (name.node.text.clone(), trim_full_iri(iri.node.text.clone())),
             _ => unreachable!(),
         })
+        // Horned owl has no default here. Lets keep it out for now.
+        // .chain(
+        //     STANDART_PREFIX_NAMES
+        //         .iter()
+        //         .map(|(a, b)| (a.to_string(), b.to_string())),
+        // )
+        .unique()
         .collect()
 }
 
@@ -1488,7 +1463,6 @@ fn prefixes_helper(doc: &InternalDocument) -> Vec<(String, String)> {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
-    use std::ops::Deref;
     use test_log::test;
 
     #[test]
@@ -1649,21 +1623,8 @@ mod tests {
         // Assert
         let doc = external_doc.unwrap();
         assert_eq!(doc.text, ontology_text);
-        let set_ontology = match &doc.ontology {
-            ExternalOntology::OwlOntology(onto) => onto,
-            _ => panic!("Invalid ontology type"),
-        };
-        assert_eq!(
-            set_ontology
-                .i()
-                .the_ontology_id_or_default()
-                .iri
-                .unwrap()
-                .deref(),
-            "http://www.example.com/iri"
-        );
 
-        set_ontology.iter().for_each(|ac| match &ac.component {
+        doc.ontology.iter().for_each(|ac| match &ac.component {
             horned_owl::model::Component::DeclareClass(declare_class) => {
                 let iri = &(declare_class.0).0;
                 assert_eq!(&iri[..], "https://www.example.com/o1");

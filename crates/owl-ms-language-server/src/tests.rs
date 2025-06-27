@@ -228,6 +228,7 @@ async fn backend_hover_on_class_should_show_class_info() {
     let url = Url::parse("file:///some/folder/foo.omn").expect("valid url");
 
     let ontology = r#"
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
         Ontology: HoverOnto
             Class: Janek
                 Annotations:
@@ -252,7 +253,7 @@ async fn backend_hover_on_class_should_show_class_info() {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
                 position: Position {
-                    line: 2,
+                    line: 3,
                     character: 21,
                 }
                 .into(),
@@ -272,11 +273,11 @@ async fn backend_hover_on_class_should_show_class_info() {
         // Range of the "Janek" in the ontology
         Range {
             start: Position {
-                line: 2,
+                line: 3,
                 character: 19
             },
             end: Position {
-                line: 2,
+                line: 3,
                 character: 24
             }
         }
@@ -289,7 +290,7 @@ async fn backend_hover_on_class_should_show_class_info() {
     };
     assert_eq!(
         contents,
-        "Class **Janek der Coder**\n\n---\n`rdfs:label`: Janek der Coder"
+        "Class **Janek der Coder**\n\n---\n`label`: Janek der Coder"
     );
 }
 
@@ -505,6 +506,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
                      ontologyIRI="http://foo.org/ontology#">
 
                      <Prefix name="" IRI="http://foo.org/ontology#"/>
+                     <Prefix name="rdfs" IRI="http://www.w3.org/2000/01/rdf-schema#"/>
 
                     <Declaration>
                         <Class IRI="ClassA2"/>
@@ -526,6 +528,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
 
     let ontology = r#"
         Prefix: : <http://foo.org/ontology#>
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
         Ontology: <http://ontology-a.org/a1>
             Import: <http://ontology-a.org/a2>
             Class: ClassA1
@@ -557,7 +560,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
                 position: Position {
-                    line: 7,
+                    line: 8,
                     character: 32,
                 }
                 .into(),
@@ -613,6 +616,8 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
                      xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
                      ontologyIRI="http://ontology-a.org/a2.owx">
 
+                     <Prefix name="rdfs" IRI="http://www.w3.org/2000/01/rdf-schema#"/>
+
                     <Declaration>
                         <Class IRI="#ClassA2"/>
                     </Declaration>
@@ -632,6 +637,7 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     let ontology = r#"
+        Prefix: rdfs: http://www.w3.org/2000/01/rdf-schema#
         Ontology: <http://ontology-a.org/a1>
             Import: <http://ontology-a.org/a2>
             Class: ClassA1
@@ -663,7 +669,7 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
                 position: Position {
-                    line: 6,
+                    line: 7,
                     character: 32,
                 }
                 .into(),
@@ -822,6 +828,7 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
                      ontologyIRI="http://foo.org/ontology#">
 
                      <Prefix name="" IRI="http://foo.org/ontology#"/>
+                     <Prefix name="rdfs" IRI="http://www.w3.org/2000/01/rdf-schema#"/>
 
                     <Declaration>
                         <Class IRI="ClassA2"/>
@@ -843,6 +850,7 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
 
     let ontology = r#"
         Prefix: : <http://foo.org/ontology#>
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
         Ontology: <http://ontology-a.org/a1>
             Import: <http://ontology-a.org/a2>
             Class: ClassA1
@@ -894,14 +902,17 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
     let result = result.unwrap();
 
     info!("result={result:#?}");
+    assert_eq!(result.len(), 3); // the third is rdfs:label
+
     assert!(result.iter().any(|x| match &x.label {
         InlayHintLabel::String(a) => a.contains("Some class in A1"),
         InlayHintLabel::LabelParts(_) => unreachable!(),
     }));
 
-    assert_eq!(result.len(), 2);
     assert!(result.iter().any(|x| match &x.label {
-        InlayHintLabel::String(a) => a.contains("Some class in A2"),
+        InlayHintLabel::String(a) => {
+            a.contains("Some class in A2")
+        }
         InlayHintLabel::LabelParts(_) => unreachable!(),
     }));
 }

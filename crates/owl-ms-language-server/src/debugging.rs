@@ -87,6 +87,9 @@ pub fn init_logging(service: &LspService<Backend>) {
             service.inner().client.clone(),
             File::create(log_file_path).ok(),
         ),
+        #[cfg(debug_assertions)]
         LevelFilter::Debug,
+        #[cfg(not(debug_assertions))]
+        LevelFilter::Info,
     );
 }
