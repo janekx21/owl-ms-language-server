@@ -135,7 +135,9 @@ impl Workspace {
             .collect_vec()
     }
 
-    /// This finds a frame info in the internal and external documents
+    /// This finds a frame info in the internal and external documents.
+    ///
+    /// - `iri` should be a full iri
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
         debug!("Getting frame info for {iri}");
 
@@ -259,88 +261,10 @@ impl Workspace {
                     .unwrap_or(iri)
             }
             "simple_iri" | "abbreviated_iri" => {
-                let iri = trim_full_iri(node_text(node, &doc.rope));
+                let iri = node_text(node, &doc.rope);
                 debug!("Getting node info for {iri} at doc {}", doc.uri);
-
-                let mut frame_infos = vec![];
-
-                // The interesing bit is that when importing (A <-import------ B)
-                // A and B have different IRI's but the contained frames get passt along. Therefore changing there
-                // full IRI. The solution is to replace it with when searchin for that IRI.
-                //
-                // Importing something will replace that iri with your own. This next
-                // thing will do the inverse of that.
-                for import in doc.imports() {
-                    info!("Frame info with import {import}");
-                    // Frame info for IRI with replaced import IRI and convert to catalog uri
-                    if let Some((_, catalog_uri)) = self.find_catalog_uri(&import) {
-                        if let Ok(base_iri) = oxiri::Iri::parse(&catalog_uri.uri[..]) {
-                            let iri: Iri =
-                                base_iri.resolve(&format!("#{iri}")).unwrap().into_inner();
-                            let info = self.get_frame_info(&iri);
-
-                            if let Some(info) = info {
-                                frame_infos.push(info);
-                            }
-                        }
-                    }
-                    // Frame info for IRI with replaced import IRI (catalog name)
-                    if let Ok(base_iri) = oxiri::Iri::parse(import.to_string()) {
-                        let iri: Iri = base_iri.resolve(&format!("#{iri}")).unwrap().into_inner();
-                        let info = self.get_frame_info(&iri);
-
-                        if let Some(info) = info {
-                            frame_infos.push(info);
-                        }
-                    };
-                }
-
-                // Frame info with a full iri
-                if let Some(base_iri) = doc.ontology_id() {
-                    if let Ok(base_iri) = oxiri::Iri::parse(base_iri) {
-                        let iri: Iri = base_iri.resolve(&format!("#{iri}")).unwrap().into_inner();
-                        let info = self.get_frame_info(&iri);
-                        if let Some(info) = info {
-                            frame_infos.push(info);
-                        }
-                    };
-                }
-
-                let info = self.get_frame_info(&iri);
-                if let Some(info) = info {
-                    frame_infos.push(info);
-                }
-
-                // TODO #37 convert to query
-                let _ = http_client;
-                // let a = doc
-                //     .query_with_imports(&ALL_QUERIES.annotation_query, self, http_client)
-                //     .iter()
-                //     .filter_map(|m| match &m.captures[..] {
-                //         [frame_iri, annotation_iri, literal] if frame_iri.node.text == iri => {
-                //             debug!("Found {}", frame_iri.node.text);
-                //             Some(FrameInfo {
-                //                 iri: iri.clone(),
-                //                 annotations: HashMap::from_iter(std::iter::once((
-                //                     annotation_iri.node.text.clone(),
-                //                     vec![literal.node.text.clone()],
-                //                 ))),
-                //                 frame_type: FrameType::Invalid,
-                //                 definitions: vec![],
-                //             })
-                //         }
-                //         [_, _, _] => None,
-                //         _ => unreachable!(),
-                //     })
-                //     .collect_vec();
-
-                // self.get_frame_info(&iri)
-                //     .map(|fi| fi.info_display(self))
-                //     .unwrap_or(iri)
-
-                frame_infos
-                    .into_iter()
-                    .tree_reduce(FrameInfo::merge)
+                let iri = doc.abbreviated_iri_to_full_iri(iri.to_string());
+                self.get_frame_info(&iri)
                     .map(|fi| fi.info_display(self))
                     .unwrap_or(iri)
             }
@@ -589,6 +513,7 @@ impl InternalDocument {
     }
 
     /// Generate an async hash map that resolves IRIs to infos about that IRI
+    #[deprecated]
     pub fn gen_frame_infos(&self, range: Option<&Range>) -> DashMap<Iri, FrameInfo> {
         if self.owl_dialect != OwlDialect::Omn {
             error!("Only omn files are supported for frame infos");
@@ -627,6 +552,13 @@ impl InternalDocument {
                     let frame_type = FrameType::parse(parent_node.kind());
 
                     // debug!("Found frame {}", frame_iri);
+
+                    // Make this IRI absolute
+                    let frame_iri = if frame_iri.starts_with("<") {
+                        trim_full_iri(frame_iri)
+                    } else {
+                        self.abbreviated_iri_to_full_iri(frame_iri)
+                    };
 
                     if !infos.contains_key(&frame_iri) {
                         infos.insert(
@@ -987,11 +919,27 @@ impl InternalDocument {
     }
 
     pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: String) -> String {
-        format!(
-            "{}#{}",
-            self.uri.to_string().trim_end_matches('#'),
-            abbriviated_iri
-        )
+        let mut abbriviated_iri = abbriviated_iri.clone();
+        // Simple IRIs get a free colon prependet
+        // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
+        if !abbriviated_iri.contains(':') {
+            abbriviated_iri = format!(":{abbriviated_iri}");
+        }
+        let prefixes = self.prefixes();
+        prefixes
+            .into_iter()
+            .filter_map(|(name, iri)| {
+                abbriviated_iri.split_once(&name).and_then(|(pre, post)|
+                // pre must be empty because the prefix is at the start
+                if pre.is_empty() {
+                    Some(iri + post)
+                } else {
+                    None
+                }
+                )
+            })
+            .next()
+            .unwrap_or(abbriviated_iri)
     }
 
     pub fn ontology_id(&self) -> Option<Iri> {
@@ -1004,6 +952,26 @@ impl InternalDocument {
                 [iri] => trim_full_iri(&iri.node.text),
                 _ => unreachable!(),
             })
+    }
+
+    /// Returns the prefixes of a document
+    ///
+    /// Some prefixes should always be defined
+    ///
+    /// ```owl-ms
+    /// Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+    /// Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+    /// Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+    /// Prefix: owl: <http://www.w3.org/2002/07/owl#>
+    /// ```
+    pub fn prefixes(&self) -> Vec<(String, String)> {
+        self.query(&ALL_QUERIES.prefix)
+            .into_iter()
+            .map(|m| match &m.captures[..] {
+                [name, iri] => (name.node.text.clone(), trim_full_iri(iri.node.text.clone())),
+                _ => unreachable!(),
+            })
+            .collect()
     }
 
     pub fn inlay_hint(
@@ -1518,30 +1486,86 @@ mod tests {
     }
 
     #[test]
-    fn internal_document_abbreviated_iri_to_full_iri_should_convert_simple_iri() {
+    fn internal_document_abbreviated_iri_to_full_iri_should_convert_abbriviated_iri() {
         let doc = InternalDocument::new(
-            Url::parse("http://www.w3.org/2002/07/owl#").unwrap(),
+            Url::parse("http://this/is/not/relevant").unwrap(),
             -1,
-            "".into(),
+            "
+                Prefix: owl: <http://www.w3.org/2002/07/owl#>
+                Prefix: ja: <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3/>
+            "
+            .into(),
         );
 
-        let full_iri = doc.abbreviated_iri_to_full_iri("Nothing".into());
+        let full_iri = doc.abbreviated_iri_to_full_iri("owl:Nothing".into());
+        let full_iri_2 = doc.abbreviated_iri_to_full_iri("ja:Janek".into());
 
         assert_eq!(full_iri, "http://www.w3.org/2002/07/owl#Nothing");
+        assert_eq!(
+            full_iri_2,
+            "http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3/Janek"
+        );
     }
 
     #[test]
-    fn internal_document_abbreviated_iri_to_full_iri_should_convert_simple_iri_with_missing_fragment(
-    ) {
+    fn internal_document_abbreviated_iri_to_full_iri_should_convert_simple_iri() {
+        let doc = InternalDocument::new(
+            Url::parse("http://this/is/not/relevant").unwrap(),
+            -1,
+            "
+                Prefix: : <http://www.w3.org/2002/07/owl#>
+            "
+            .into(),
+        );
+
+        let full_iri = doc.abbreviated_iri_to_full_iri(":Nothing".into());
+        let full_iri_2 = doc.abbreviated_iri_to_full_iri("Nothing".into());
+
+        assert_eq!(full_iri, "http://www.w3.org/2002/07/owl#Nothing");
+        assert_eq!(full_iri_2, "http://www.w3.org/2002/07/owl#Nothing");
+    }
+
+    #[test]
+    fn internal_document_prefix_should_return_all_prefixes() {
         let doc = InternalDocument::new(
             Url::parse("http://www.w3.org/2002/07/owl").unwrap(),
             -1,
-            "".into(),
+            "
+                Prefix: : <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3/>
+                Prefix: owl: <http://www.w3.org/2002/07/owl#>
+                Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+                Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                Prefix: xml: <http://www.w3.org/XML/1998/namespace>
+                Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+
+                Ontology: <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3>
+            "
+            .into(),
         );
 
-        let full_iri = doc.abbreviated_iri_to_full_iri("Nothing".into());
+        let prefixes = doc.prefixes();
 
-        assert_eq!(full_iri, "http://www.w3.org/2002/07/owl#Nothing");
+        assert_eq!(
+            prefixes,
+            vec![
+                (
+                    ":".into(),
+                    "http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3/"
+                        .into()
+                ),
+                ("owl:".into(), "http://www.w3.org/2002/07/owl#".into()),
+                (
+                    "rdf:".into(),
+                    "http://www.w3.org/1999/02/22-rdf-syntax-ns#".into()
+                ),
+                (
+                    "rdfs:".into(),
+                    "http://www.w3.org/2000/01/rdf-schema#".into()
+                ),
+                ("xml:".into(), "http://www.w3.org/XML/1998/namespace".into()),
+                ("xsd:".into(), "http://www.w3.org/2001/XMLSchema#".into())
+            ]
+        );
     }
 
     #[test]

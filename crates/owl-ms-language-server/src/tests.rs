@@ -307,6 +307,7 @@ async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
                     WorkspaceMember::OmnFile {
                         name: "a2.omn".into(),
                         content: r#"
+                        Prefix: : <http://ontology-a.org/ontology#>
                         Ontology: <http://ontology-a.org/a2.omn>
                             Class: ClassA2
                                 Annotations:
@@ -328,6 +329,7 @@ async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
                     WorkspaceMember::OmnFile {
                         name: "b2.omn".into(),
                         content: r#"
+                        Prefix: : <http://ontology-a.org/ontology#>
                         Ontology: <http://ontology-b.org/b2.omn>
                             Class: ClassB2
                                 Annotations:
@@ -352,6 +354,7 @@ async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     let ontology = r#"
+        Prefix: : <http://ontology-a.org/ontology#>
         Ontology: <http://ontology-a.org/a1.omn>
             Import: <http://ontology-a.org/a2.omn>
             Class: ClassA1
@@ -391,7 +394,7 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
                 position: Position {
-                    line: 6,
+                    line: 7,
                     character: 31,
                 }
                 .into(),
@@ -411,11 +414,11 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
         // Range of the "Janek" in the ontology
         Range {
             start: Position {
-                line: 6,
+                line: 7,
                 character: 28
             },
             end: Position {
-                line: 6,
+                line: 7,
                 character: 35
             }
         }
@@ -426,6 +429,7 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
         HoverContents::Scalar(MarkedString::String(str)) => str,
         _ => panic!("Did not think of that"),
     };
+    info!("{:#?}", service.inner().workspaces.read());
     assert!(contents.contains("test"));
     assert!(contents.contains("Some class in A2"));
 }
@@ -445,7 +449,7 @@ async fn backend_hover_in_multi_file_ontology_on_not_imported_iri_should_not_wor
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
                 position: Position {
-                    line: 6,
+                    line: 7,
                     character: 38,
                 }
                 .into(),
@@ -493,20 +497,22 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
             r##"
                 <?xml version="1.0"?>
                 <Ontology xmlns="http://www.w3.org/2002/07/owl#"
-                     xml:base="http://foo.org/a"
+                     xml:base="http://foo.org/ontology"
                      xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
                      xmlns:xml="http://www.w3.org/XML/1998/namespace"
                      xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
                      xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
                      ontologyIRI="http://ontology-a.org/a2.owx">
 
+                     <Prefix name="" IRI="http://foo.org/ontology#"/>
+
                     <Declaration>
-                        <Class IRI="#ClassA2"/>
+                        <Class IRI="ClassA2"/>
                     </Declaration>
     
                     <AnnotationAssertion>
                         <AnnotationProperty abbreviatedIRI="rdfs:label"/>
-                        <IRI>#ClassA2</IRI>
+                        <IRI>ClassA2</IRI>
                         <Literal>Some class in A2</Literal>
                     </AnnotationAssertion>
 
@@ -519,6 +525,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     let ontology = r#"
+        Prefix: : <http://foo.org/ontology#>
         Ontology: <http://ontology-a.org/a1>
             Import: <http://ontology-a.org/a2>
             Class: ClassA1
@@ -569,6 +576,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
         HoverContents::Scalar(MarkedString::String(str)) => str,
         _ => panic!("Did not think of that"),
     };
+    info!("{:#?}", service.inner().workspaces.read());
     info!("contents={contents}");
     assert!(!contents.contains("ClassA2"));
     assert!(contents.contains("Some class in A2"));
