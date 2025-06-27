@@ -1131,7 +1131,7 @@ async fn backend_did_open_should_load_external_documents_via_http() {
         vec![
             WorkspaceMember::CatalogFile(
                 Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
-                    .with_uri("http://foo.org/a.omn", "http://foo.org/version/file.owl")
+                    .with_uri("http://foo.org/a.omn", "http://foo.org/version/file.owx")
                     .with_uri("http://foo.org/c.omn", "c.omn"),
             ),
             WorkspaceMember::OmnFile {
@@ -1153,7 +1153,7 @@ async fn backend_did_open_should_load_external_documents_via_http() {
             name: "foo".into(),
         }),
         vec![(
-            "http://foo.org/version/file.owl",
+            "http://foo.org/version/file.owx",
             r##"
                 <?xml version="1.0"?>
                 <Ontology xmlns="http://www.w3.org/2002/07/owl#"
@@ -1315,6 +1315,49 @@ async fn backend_did_open_should_load_external_documents_via_file() {
         1,
         "One external document should be loaded"
     );
+}
+
+#[test(tokio::test)]
+async fn backend_goto_definition_in_multi_file_ontology_should_work() {
+    // Arrange
+    let (service, tmp_dir) = arrange_multi_file_ontology().await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+
+    // Act
+    // TODO check if the arrange did not create diagnostics
+    let result = service
+        .inner()
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url.clone() },
+                position: Position {
+                    line: 7,
+                    character: 31,
+                }
+                .into(),
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    info!("{:#?}", service.inner().workspaces.read());
+    let url2 = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a2.omn")).unwrap();
+    let result = result.unwrap();
+    match result {
+        GotoDefinitionResponse::Array(locations) => {
+            let location = locations.into_iter().exactly_one().unwrap();
+            assert_eq!(location.uri, url2);
+        }
+        _ => todo!(),
+    }
 }
 
 //////////////////////////

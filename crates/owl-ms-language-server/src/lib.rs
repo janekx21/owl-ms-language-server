@@ -294,11 +294,8 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        debug!(
-            "goto_definition at {}",
-            params.text_document_position_params.text_document.uri
-        );
         let uri = params.text_document_position_params.text_document.uri;
+        debug!("goto_definition at {}", uri);
         let workspace = self.find_workspace(&uri);
         let maybe_doc = workspace.internal_documents.get(&uri);
         if let Some(doc) = maybe_doc {
@@ -307,13 +304,12 @@ impl LanguageServer for Backend {
 
             let leaf_node = deepest_named_node_at_pos(&doc.tree, pos);
             if ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind()) {
-                let iri = node_text(&leaf_node, &doc.rope).to_string();
+                let iri = trim_full_iri(node_text(&leaf_node, &doc.rope));
+                let iri = doc.abbreviated_iri_to_full_iri(iri);
 
                 debug!("Try goto definition of {}", iri);
 
                 let frame_info = workspace.get_frame_info(&iri);
-
-                // debug!("Found frame info {:#?}", frame_info);
 
                 if let Some(frame_info) = frame_info {
                     let locations = frame_info
