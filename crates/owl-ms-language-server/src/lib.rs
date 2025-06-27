@@ -10,7 +10,7 @@ mod web;
 mod workspace;
 
 use itertools::Itertools;
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
 use parking_lot::{MappedRwLockWriteGuard, RwLock, RwLockWriteGuard};
 use position::Position;

@@ -1,11 +1,5 @@
 use crate::{catalog::Catalog, web::StaticClient, *};
 use anyhow::anyhow;
-use horned_owl::curie::PrefixMapping;
-use horned_owl::io::rdf::reader::ConcreteRDFOntology;
-use horned_owl::io::rdf::reader::IncompleteParse;
-use horned_owl::io::RDFParserConfiguration;
-use horned_owl::model::AnnotatedComponent;
-use horned_owl::ontology::set::SetOntology;
 use pretty_assertions::assert_eq;
 use std::{fs, path::Path};
 use tempdir::{self, TempDir};

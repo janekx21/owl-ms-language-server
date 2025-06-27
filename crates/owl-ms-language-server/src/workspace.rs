@@ -1,4 +1,4 @@
-use crate::catalog::{self, CatalogUri};
+use crate::catalog::{CatalogUri};
 use crate::web::HttpClient;
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
@@ -7,22 +7,18 @@ use crate::{
 use anyhow::Result;
 use anyhow::{anyhow, Context};
 use dashmap::DashMap;
-use horned_owl::io::rdf::reader::{ConcreteRDFOntology, RDFOntology};
+use horned_owl::io::rdf::reader::ConcreteRDFOntology;
 use horned_owl::io::ParserConfiguration;
-use horned_owl::model::{ArcAnnotatedComponent, ArcStr, Build, IRI};
-use horned_owl::model::{Class, Component::*};
-use horned_owl::ontology::indexed::OntologyIndex;
-use horned_owl::ontology::iri_mapped::{ArcIRIMappedOntology, IRIMappedOntology};
+use horned_owl::model::{ArcAnnotatedComponent, ArcStr, Build};
+use horned_owl::model::Component::*;
+use horned_owl::ontology::iri_mapped::ArcIRIMappedOntology;
 use horned_owl::ontology::set::SetOntology;
-use horned_owl::visitor::immutable::entity::IRIExtract;
-use horned_owl::visitor::immutable::{Visit, Walk};
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use ropey::Rope;
-use serde::de::Visitor;
-use std::iter::{once, Once};
+use std::iter::once;
 use std::ops::Deref;
 use std::{
     collections::{HashMap, HashSet},
