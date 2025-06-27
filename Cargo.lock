@@ -662,9 +662,9 @@ dependencies = [
 
 [[package]]
 name = "horned-owl"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e4d53d3910dae4fe34a666edeff1591be225829f0d6a650c66ffc3d3a947276"
+checksum = "8587bf7d7bd1fe6aa28294a5dc508cc4cd4f6bd8a4c275eebbe7b1bd809c1acb"
 dependencies = [
  "curie",
  "enum_meta",
@@ -675,7 +675,7 @@ dependencies = [
  "pest",
  "pest_derive",
  "pretty_rdf",
- "quick-xml 0.26.0",
+ "quick-xml 0.31.0",
  "rio_api",
  "rio_xml",
  "thiserror 1.0.69",
@@ -1220,12 +1220,12 @@ dependencies = [
 
 [[package]]
 name = "pretty_rdf"
-version = "0.6.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95fd0da3f0833def8a0447bf63cff3cda7ec985da6230d66ff787d1ee3942316"
+checksum = "5b52331f084f2fad9eafdd9c89c7ed923ace20d04658e19fa4a5f80e3249f3e2"
 dependencies = [
  "indexmap 1.9.3",
- "quick-xml 0.26.0",
+ "quick-xml 0.31.0",
  "rio_api",
 ]
 
@@ -1240,9 +1240,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.26.0"
+version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f50b1c63b38611e7d4d7f68b82d3ad0cc71a2ad2e7f61fc10f1328d917c93cd"
+checksum = "1004a344b30a54e2ee58d66a71b32d2db2feb0a31f9a2d302bf0536f15de2a33"
 dependencies = [
  "memchr",
 ]

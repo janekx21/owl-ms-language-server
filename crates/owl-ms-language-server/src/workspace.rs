@@ -7,7 +7,7 @@ use crate::{
 use anyhow::Result;
 use anyhow::{anyhow, Context};
 use dashmap::DashMap;
-use horned_owl::io::rdf::reader::RDFOntology;
+use horned_owl::io::rdf::reader::{ConcreteRDFOntology, RDFOntology};
 use horned_owl::io::ParserConfiguration;
 use horned_owl::model::{ArcAnnotatedComponent, ArcStr, Build, IRI};
 use horned_owl::model::{Class, Component::*};
@@ -1043,7 +1043,7 @@ pub struct ExternalDocument {
 
 #[derive(Debug)]
 pub enum ExternalOntology {
-    RdfOntology(RDFOntology<ArcStr, ArcAnnotatedComponent>),
+    RdfOntology(ConcreteRDFOntology<ArcStr, ArcAnnotatedComponent>),
     OwlOntology(SetOntology<ArcStr>),
 }
 

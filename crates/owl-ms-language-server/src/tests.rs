@@ -1,5 +1,11 @@
 use crate::{catalog::Catalog, web::StaticClient, *};
 use anyhow::anyhow;
+use horned_owl::curie::PrefixMapping;
+use horned_owl::io::rdf::reader::ConcreteRDFOntology;
+use horned_owl::io::rdf::reader::IncompleteParse;
+use horned_owl::io::RDFParserConfiguration;
+use horned_owl::model::AnnotatedComponent;
+use horned_owl::ontology::set::SetOntology;
 use pretty_assertions::assert_eq;
 use std::{fs, path::Path};
 use tempdir::{self, TempDir};
@@ -502,7 +508,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
                      xmlns:xml="http://www.w3.org/XML/1998/namespace"
                      xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
                      xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
-                     ontologyIRI="http://ontology-a.org/a2.owx">
+                     ontologyIRI="http://foo.org/ontology#">
 
                      <Prefix name="" IRI="http://foo.org/ontology#"/>
 
@@ -557,7 +563,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
                 position: Position {
-                    line: 6,
+                    line: 7,
                     character: 32,
                 }
                 .into(),
@@ -720,7 +726,7 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
 
                     <!-- http://ontology-a.org/a2#ClassA2 -->
 
-                    <Class rdf:about="http://ontology-a.org/a2#ClassA2">
+                    <Class rdf:about="http://foo.org/ontology#ClassA2">
                         <rdfs:label>Some class in A2</rdfs:label>
                     </Class>
                 </rdf:RDF>
@@ -732,6 +738,7 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     let ontology = r#"
+        Prefix: : <http://foo.org/ontology#>
         Ontology: <http://ontology-a.org/a1>
             Import: <http://ontology-a.org/a2>
             Class: ClassA1
@@ -763,7 +770,7 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
                 position: Position {
-                    line: 6,
+                    line: 7,
                     character: 32,
                 }
                 .into(),
@@ -782,6 +789,7 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
         HoverContents::Scalar(MarkedString::String(str)) => str,
         _ => panic!("Did not think of that"),
     };
+    info!("{:#?}", service.inner().workspaces.read());
     info!("contents={contents}");
     assert!(!contents.contains("ClassA2"));
     assert!(contents.contains("Some class in A2"));
@@ -817,15 +825,17 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
                      xmlns:xml="http://www.w3.org/XML/1998/namespace"
                      xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
                      xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
-                     ontologyIRI="http://ontology-a.org/a2.owx">
+                     ontologyIRI="http://foo.org/ontology#">
+
+                     <Prefix name="" IRI="http://foo.org/ontology#"/>
 
                     <Declaration>
-                        <Class IRI="#ClassA2"/>
+                        <Class IRI="ClassA2"/>
                     </Declaration>
     
                     <AnnotationAssertion>
                         <AnnotationProperty abbreviatedIRI="rdfs:label"/>
-                        <IRI>#ClassA2</IRI>
+                        <IRI>ClassA2</IRI>
                         <Literal>Some class in A2</Literal>
                     </AnnotationAssertion>
 
@@ -838,6 +848,7 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     let ontology = r#"
+        Prefix: : <http://foo.org/ontology#>
         Ontology: <http://ontology-a.org/a1>
             Import: <http://ontology-a.org/a2>
             Class: ClassA1
