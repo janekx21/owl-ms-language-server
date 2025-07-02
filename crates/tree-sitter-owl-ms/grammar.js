@@ -5,11 +5,11 @@ module.exports = grammar({
     [$.data_property_iri, $.object_property_iri],
     [$.datatype_iri, $.class_iri],
   ],
-  extras: ($) => [/[ \t\n\r]/, $._comment],
+  extras: ($) => [/[ \t\n\r]/, $.comment],
   rules: {
     // My rules
     source_file: ($) => $._ontology_document,
-    _comment: _ => token(seq('#', /.*/)), // https://github.com/tree-sitter/tree-sitter-rust/blob/master/grammar.js
+    comment: _ => token(seq('#', /.*/)), // https://github.com/tree-sitter/tree-sitter-rust/blob/master/grammar.js
 
     // https://www.w3.org/TR/owl2-manchester-syntax/
 

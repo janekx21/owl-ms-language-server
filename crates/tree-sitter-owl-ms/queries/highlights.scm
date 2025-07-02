@@ -89,3 +89,5 @@
 (abbreviated_iri) @variable
 (simple_iri) @variable
 (prefix_name) @variable
+
+(comment) @comment

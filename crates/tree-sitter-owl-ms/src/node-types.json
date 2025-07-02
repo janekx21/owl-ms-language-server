@@ -1165,6 +1165,11 @@
     "named": false
   },
   {
+    "type": "comment",
+    "named": true,
+    "extra": true
+  },
+  {
     "type": "decimal",
     "named": false
   },
