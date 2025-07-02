@@ -309,6 +309,7 @@ async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
                         name: "a2.omn".into(),
                         content: r#"
                         Prefix: : <http://ontology-a.org/ontology#>
+                        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
                         Ontology: <http://ontology-a.org/a2.omn>
                             Class: ClassA2
                                 Annotations:
@@ -331,6 +332,7 @@ async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
                         name: "b2.omn".into(),
                         content: r#"
                         Prefix: : <http://ontology-a.org/ontology#>
+                        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
                         Ontology: <http://ontology-b.org/b2.omn>
                             Class: ClassB2
                                 Annotations:
@@ -431,6 +433,7 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
         _ => panic!("Did not think of that"),
     };
     info!("{:#?}", service.inner().workspaces.read());
+    info!("{contents}");
     assert!(contents.contains("test"));
     assert!(contents.contains("Some class in A2"));
 }

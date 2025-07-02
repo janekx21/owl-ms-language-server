@@ -20,6 +20,7 @@ use log::{debug, error, info, trace, warn};
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use ropey::Rope;
+use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter::once;
 use std::ops::Deref;
@@ -89,9 +90,8 @@ impl Workspace {
         document: InternalDocument,
     ) -> Arc<RwLock<InternalDocument>> {
         debug!(
-            "Insert internal document {} with {:?} length is {}",
+            "Insert internal document {} length is {}",
             document.uri,
-            document.owl_dialect,
             document.rope.len_chars()
         );
         let uri = document.uri.clone();
@@ -104,9 +104,8 @@ impl Workspace {
         document: ExternalDocument,
     ) -> Arc<RwLock<ExternalDocument>> {
         debug!(
-            "Insert external document {} with {:?} length is {}",
+            "Insert external document {} length is {}",
             document.uri,
-            document.owl_dialect,
             document.text.len()
         );
         let uri = document.uri.clone();
@@ -122,10 +121,10 @@ impl Workspace {
             .iter()
             .flat_map(|dm| {
                 let dm = &*dm.value().read();
-                dm.frame_infos
+                dm.get_all_frame_infos()
                     .iter()
-                    .filter(|item| item.key().contains(partial_text))
-                    .map(|kv| (kv.key().clone(), kv.value().clone()))
+                    .filter(|item| item.iri.contains(partial_text))
+                    .map(|kv| (kv.iri.clone(), kv.clone()))
                     .collect_vec()
             })
             .collect_vec()
@@ -142,12 +141,9 @@ impl Workspace {
             doc.get_frame_info(iri)
         });
 
-        // TODO #37 replace this with a query
         let internal_infos = self.internal_documents.iter().filter_map(|dm| {
             let dm = dm.value().read();
-
             dm.get_frame_info(iri)
-            // dm.frame_infos.get(iri).map(|v| v.value().clone())
         });
 
         let fixed_infos = match &iri[..] {
@@ -342,14 +338,6 @@ pub enum DocumentReference {
 
 impl DocumentReference {}
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum OwlDialect {
-    Unknown,
-    Omn,
-    Owl,
-    Rdf,
-}
-
 #[derive(Debug)]
 pub struct InternalDocument {
     pub uri: Url,
@@ -357,11 +345,6 @@ pub struct InternalDocument {
     pub rope: Rope,
     pub version: i32,
     pub diagnostics: Vec<Diagnostic>,
-    #[deprecated = "Will not be filled with data. Query the AST directly with the query functions"]
-    pub frame_infos: DashMap<Iri, FrameInfo>,
-
-    /// This can differ from the url file extention, so we need to track it
-    pub owl_dialect: OwlDialect,
 }
 
 impl core::hash::Hash for InternalDocument {
@@ -379,58 +362,31 @@ impl PartialEq for InternalDocument {
 
 impl InternalDocument {
     pub fn new(uri: Url, version: i32, text: String) -> InternalDocument {
-        let owl_dialect = match &uri.path() {
-            x if x.ends_with(".owl") => OwlDialect::Owl,
-            x if x.ends_with(".omn") => OwlDialect::Omn,
-            _ => OwlDialect::Unknown,
+        let tree = timeit("create_document / parse", || {
+            lock_global_parser()
+                .parse(&text, None)
+                .expect("language to be set, no timeout to be used, no cancelation flag")
+        });
+
+        let rope = Rope::from(text);
+        let diagnostics = timeit("create_document / gen_diagnostics", || {
+            gen_diagnostics(&tree.root_node())
+        });
+        let mut document = InternalDocument {
+            uri,
+            version,
+            tree,
+            rope,
+            // frame_infos: DashMap::new(),
+            diagnostics,
         };
-
-        if owl_dialect == OwlDialect::Omn {
-            let tree = timeit("create_document / parse", || {
-                lock_global_parser()
-                    .parse(&text, None)
-                    .expect("language to be set, no timeout to be used, no cancelation flag")
-            });
-
-            let rope = Rope::from(text);
-            let diagnostics = timeit("create_document / gen_diagnostics", || {
-                gen_diagnostics(&tree.root_node())
-            });
-            let mut document = InternalDocument {
-                uri,
-                owl_dialect,
-                version,
-                tree,
-                rope,
-                frame_infos: DashMap::new(),
-                diagnostics,
-            };
-            document.frame_infos = document.gen_frame_infos(None);
-            document
-        } else {
-            warn!("Only omn files are supported");
-            InternalDocument {
-                uri,
-                owl_dialect,
-                version,
-                tree: lock_global_parser()
-                    .parse(&text, None)
-                    .expect("language to be set, no timeout to be used, no cancelation flag"),
-                rope: Rope::from(text),
-
-                frame_infos: DashMap::new(),
-                diagnostics: vec![],
-            }
-        }
+        // document.frame_infos = document.gen_frame_infos(None);
+        document
     }
 
     /// Generate an async hash map that resolves IRIs to infos about that IRI
     #[deprecated]
     pub fn gen_frame_infos(&self, range: Option<&Range>) -> DashMap<Iri, FrameInfo> {
-        if self.owl_dialect != OwlDialect::Omn {
-            error!("Only omn files are supported for frame infos");
-            return DashMap::new();
-        }
         debug!("Generating frame infos");
 
         let tree = &self.tree;
@@ -648,6 +604,7 @@ impl InternalDocument {
                 captures: m
                     .captures
                     .iter()
+                    .sorted_by_key(|c| c.index)
                     .map(|c| UnwrappedQueryCapture {
                         node: UnwrappedNode {
                             id: c.node.id(),
@@ -757,18 +714,18 @@ impl InternalDocument {
         debug!("New tree {}", tree.root_node().to_sexp());
         self.tree = tree;
 
-        for (_, _, new_range) in change_ranges.iter() {
-            // TODO #32 prune
-            // document
-            //     .frame_infos
-            //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
+        // for (_, _, new_range) in change_ranges.iter() {
+        // TODO #32 prune
+        // document
+        //     .frame_infos
+        //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
 
-            let frame_infos = timeit("gen_class_iri_label_map", || {
-                self.gen_frame_infos(Some(new_range))
-            });
+        // let frame_infos = timeit("gen_class_iri_label_map", || {
+        //     self.gen_frame_infos(Some(new_range))
+        // });
 
-            self.frame_infos.extend(frame_infos);
-        }
+        // self.frame_infos.extend(frame_infos);
+        // }
 
         // TODO #30 prune
         // Remove all old diagnostics with an overlapping range. They will need to be recreated
@@ -893,50 +850,19 @@ impl InternalDocument {
         workspace: &Workspace,
         http_client: &dyn HttpClient,
     ) -> Vec<InlayHint> {
-        // let annotations = timeit("Annotation query", || {
-        //     self.query_with_imports(&ALL_QUERIES.annotation_query, workspace, http_client)
-        // });
-
-        let hints = self
-            .query_range(&ALL_QUERIES.iri_query, range)
+        self.query_range(&ALL_QUERIES.iri_query, range)
             .into_iter()
             .flat_map(|match_| match_.captures)
             .filter_map(|capture| {
                 let iri = trim_full_iri(capture.node.text);
                 let iri = self.abbreviated_iri_to_full_iri(iri);
 
-                let label =
-                    // annotations
-                    // .iter()
-                    // .filter_map(|m| match &m.captures[..] {
-                    //     [frame_iri, annoation_iri, literal] => {
-                    //         // TODO no full iri :<
-
-                    //         let annoation_iri = self.abbreviated_iri_to_full_iri(trim_full_iri(
-                    //             annoation_iri.node.text.clone(),
-                    //         ));
-                    //         if frame_iri.node.text == iri
-                    //             && annoation_iri == "http://www.w3.org/2000/01/rdf-schema#label"
-                    //         {
-                    //             Some(literal.node.text_trimmed())
-                    //         } else {
-                    //             None
-                    //         }
-                    //     }
-                    //     _ => unreachable!(),
-                    // })
-                    // .chain(
-                        // Chain the frame info label from the workspace
-                        timeit("Workspace get frame info", || {
-                            workspace.get_frame_info(&iri)
-                        })
-                        .inspect(|fi| debug!("Found frame info {fi:#?}"))
-                        .map(|frame_info| frame_info.label())
-                        .unwrap_or_default();
-                // .into_iter()
-                // )
-                // .unique()
-                // .join(", ");
+                let label = timeit("Workspace get frame info", || {
+                    workspace.get_frame_info(&iri)
+                })
+                .inspect(|fi| debug!("Found frame info {fi:#?}"))
+                .map(|frame_info| frame_info.label())
+                .unwrap_or_default();
 
                 if label.is_empty() {
                     None
@@ -953,22 +879,155 @@ impl InternalDocument {
                     })
                 }
             })
-            .collect_vec();
-        hints
+            .collect_vec()
     }
 
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
-        // TODO query
-        self.frame_infos.get(iri).map(|v| v.value().clone())
+        get_frame_info_helper(self, iri)
+    }
+
+    pub fn get_all_frame_infos(&self) -> Vec<FrameInfo> {
+        document_all_frame_infos(self)
+            .values()
+            .cloned()
+            .collect_vec()
     }
 }
 
+#[cached(
+    size = 20,
+    key = "u64",
+    convert = r#"{
+            let mut hasher = DefaultHasher::new();
+            doc.hash(&mut hasher);
+            hasher.finish()
+     } "#
+)]
+fn document_all_frame_infos(doc: &InternalDocument) -> HashMap<Iri, FrameInfo> {
+    let mut infos: HashMap<String, FrameInfo> = HashMap::new();
+
+    for ele in document_annotations(doc)
+        .into_iter()
+        .map(|(frame_iri, annoation_iri, literal)| FrameInfo {
+            iri: frame_iri.clone(),
+            annotations: HashMap::from([(annoation_iri, vec![literal])]),
+            frame_type: FrameType::Unknown,
+            definitions: Vec::new(),
+        })
+    {
+        if let Some(fi) = infos.get_mut(&ele.iri) {
+            fi.extend(ele);
+        } else {
+            infos.insert(ele.iri.clone(), ele);
+        }
+    }
+
+    for ele in document_definitions(doc)
+        .into_iter()
+        .map(|(frame_iri, range, kind)| FrameInfo {
+            iri: frame_iri.clone(),
+            annotations: HashMap::new(),
+            frame_type: FrameType::parse(&kind),
+            definitions: vec![Location {
+                uri: doc.uri.clone(),
+                range,
+            }],
+        })
+    {
+        if let Some(fi) = infos.get_mut(&ele.iri) {
+            fi.extend(ele);
+        } else {
+            infos.insert(ele.iri.clone(), ele);
+        }
+    }
+
+    infos
+}
+
+#[cached(
+    size = 200,
+    key = "u64",
+    convert = r#"{
+            let mut hasher = DefaultHasher::new();
+            doc.hash(&mut hasher);
+            iri.hash(&mut hasher);
+            hasher.finish()
+     } "#
+)]
+fn get_frame_info_helper(doc: &InternalDocument, iri: &Iri) -> Option<FrameInfo> {
+    document_all_frame_infos(doc).get(iri).cloned()
+    // let annotation_infos = timeit("Annotation infos", || {
+    //     let a = document_annotations(doc);
+    //     info!("Annotations {a:#?}");
+    //     a.get_key_value(iri)
+    //         .map(|(frame_iri, (annoation_iri, literal))| FrameInfo {
+    //             iri: frame_iri.clone(),
+    //             annotations: HashMap::from([(annoation_iri.clone(), vec![literal.clone()])]),
+    //             frame_type: FrameType::Unknown,
+    //             definitions: Vec::new(),
+    //         })
+    // });
+
+    // let definition_infos = timeit("Definition infos", || {
+    //     let a = document_definitions(doc);
+    //     info!("Definitions {a:#?}");
+    //     a.get_key_value(iri)
+    //         .map(|(frame_iri, (range, kind))| FrameInfo {
+    //             iri: frame_iri.clone(),
+    //             annotations: HashMap::new(),
+    //             frame_type: FrameType::parse(&kind),
+    //             definitions: vec![Location {
+    //                 uri: doc.uri.clone(),
+    //                 range: range.clone(),
+    //             }],
+    //         })
+    // });
+
+    // annotation_infos
+    //     .into_iter()
+    //     .chain(definition_infos)
+    //     .tree_reduce(FrameInfo::merge)
+}
+
+fn document_annotations(doc: &InternalDocument) -> Vec<(String, String, String)> {
+    doc.query(&ALL_QUERIES.annotation_query)
+        .iter()
+        .map(|m| match &m.captures[..] {
+            [frame_iri, annoation_iri, literal] => {
+                let frame_iri =
+                    doc.abbreviated_iri_to_full_iri(trim_full_iri(frame_iri.node.text.clone()));
+                let annoation_iri =
+                    doc.abbreviated_iri_to_full_iri(trim_full_iri(annoation_iri.node.text.clone()));
+                let literal = trim_string_value(&literal.node.text);
+
+                (frame_iri, annoation_iri, literal)
+            }
+            _ => unreachable!(),
+        })
+        .collect_vec()
+}
+
+fn document_definitions(doc: &InternalDocument) -> Vec<(String, Range, String)> {
+    doc.query(&ALL_QUERIES.frame_query)
+        .iter()
+        .map(|m| match &m.captures[..] {
+            [frame_iri, frame] => {
+                info!("{frame_iri:#?}   -   {frame:#?}");
+                let frame_iri =
+                    doc.abbreviated_iri_to_full_iri(trim_full_iri(frame_iri.node.text.clone()));
+
+                (frame_iri, frame.node.range, frame.node.kind.clone())
+            }
+            _ => unreachable!(),
+        })
+        .collect()
+}
+
+/// External documents are ontologies that are not expected to change in any way.
 pub struct ExternalDocument {
     pub uri: Url,
     pub text: String,
     pub ontology: ArcIRIMappedOntology,
-    /// This can differ from the url file extention, so we need to track it
-    pub owl_dialect: OwlDialect,
 }
 
 impl Hash for ExternalDocument {
@@ -979,13 +1038,10 @@ impl Hash for ExternalDocument {
 
 impl fmt::Debug for ExternalDocument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "ExternalDocument {{uri: {}, text.len(): {}}}, ontology: ..., owl_dialect: {:?}}}",
-            self.uri,
-            self.text.len(),
-            self.owl_dialect
-        )
+        f.debug_struct("ExternalDocument")
+            .field("uri", &self.uri)
+            .field("text.len()", &self.text.len())
+            .finish()
     }
 }
 
@@ -1005,7 +1061,6 @@ impl ExternalDocument {
                     uri: url,
                     text,
                     ontology,
-                    owl_dialect: OwlDialect::Owl,
                 })
             }
             // For owl files and files without extention
@@ -1025,7 +1080,6 @@ impl ExternalDocument {
                     uri: url,
                     text,
                     ontology,
-                    owl_dialect: OwlDialect::Rdf,
                 })
             }
         }
@@ -1084,54 +1138,14 @@ impl ExternalDocument {
         }
     }
 
-    pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: String) -> String {
-        format!(
-            "{}#{}",
-            self.uri.to_string().trim_end_matches('#'),
-            abbriviated_iri
-        )
-    }
-
-    pub fn get_frame_info(&mut self, iri: &Iri) -> Vec<FrameInfo> {
-        timeit("Get frame infos", || get_frame_info_helper(self, iri))
-
-        //     let iri_mapped_ontology = &mut self.ontology;
-
-        //     let build = lock_global_build_arc();
-        //     let iri = build.iri(iri.clone());
-
-        //     iri_mapped_ontology
-        //         .components_for_iri(&iri)
-        //         .filter_map(|c| match &c.component {
-        //             AnnotationAssertion(aa) => match &aa.subject {
-        //                 horned_owl::model::AnnotationSubject::IRI(iri_) if iri_ == &iri => {
-        //                     Some(aa.ann.clone())
-        //                 }
-        //                 _ => None,
-        //             },
-        //             _ => None,
-        //         })
-        //         .filter_map(|annotation| match annotation.av {
-        //             horned_owl::model::AnnotationValue::Literal(
-        //                 horned_owl::model::Literal::Simple { literal },
-        //             ) => {
-        //                 let annotations = once((annotation.ap.0.to_string(), vec![literal])).collect();
-        //                 Some(FrameInfo {
-        //                     iri: iri.to_string(),
-        //                     annotations,
-        //                     frame_type: FrameType::Class,
-        //                     definitions: vec![],
-        //                 })
-        //             }
-        //             _ => None,
-        //         })
-        //         .collect_vec()
+    pub fn get_frame_info(&mut self, iri: &Iri) -> Option<FrameInfo> {
+        timeit("Get frame infos", || get_frame_info_helper_ex(self, iri))
     }
 }
 
 #[cached(
-    ty = "SizedCache<u64, Vec<FrameInfo>>",
-    create = "{ SizedCache::with_size(200) }",
+    size = 200,
+    key = "u64",
     convert = r#"{
             let mut hasher = DefaultHasher::new();
             doc.hash(&mut hasher);
@@ -1139,7 +1153,7 @@ impl ExternalDocument {
             hasher.finish()
      } "#
 )]
-fn get_frame_info_helper(doc: &mut ExternalDocument, iri: &Iri) -> Vec<FrameInfo> {
+fn get_frame_info_helper_ex(doc: &mut ExternalDocument, iri: &Iri) -> Option<FrameInfo> {
     let iri_mapped_ontology = &mut doc.ontology;
 
     let build = lock_global_build_arc();
@@ -1170,7 +1184,7 @@ fn get_frame_info_helper(doc: &mut ExternalDocument, iri: &Iri) -> Vec<FrameInfo
             }
             _ => None,
         })
-        .collect_vec()
+        .tree_reduce(FrameInfo::merge)
 }
 
 fn horned_to_anyhow(e: horned_owl::error::HornedError) -> anyhow::Error {
@@ -1238,7 +1252,7 @@ pub struct FrameInfo {
     pub definitions: Vec<Location>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Location {
     uri: Url,
     range: Range,
@@ -1264,30 +1278,26 @@ impl From<tower_lsp::lsp_types::Location> for Location {
 
 impl FrameInfo {
     fn merge(a: FrameInfo, b: FrameInfo) -> FrameInfo {
-        let mut annotations = b.annotations.clone();
-        for (key_a, values_a) in a.annotations {
-            if let Some(values_b) = annotations.get_mut(&key_a) {
+        let mut c = a.clone();
+        c.extend(b);
+        c
+    }
+
+    fn extend(&mut self, b: FrameInfo) {
+        for (key_a, values_a) in b.annotations {
+            if let Some(values_b) = self.annotations.get_mut(&key_a) {
                 values_b.extend(values_a);
             } else {
-                annotations.insert(key_a, values_a);
+                self.annotations.insert(key_a, values_a);
             }
         }
-        let definitions = b
-            .definitions
-            .iter()
-            .chain(a.definitions.iter())
-            .cloned()
-            .collect_vec();
-        FrameInfo {
-            iri: a.iri,
-            frame_type: if a.frame_type == b.frame_type {
-                a.frame_type
-            } else {
-                FrameType::Invalid
-            },
-            annotations,
-            definitions,
-        }
+        self.definitions.extend(b.definitions);
+        self.frame_type = match (self.frame_type, b.frame_type) {
+            (a, b) if a == b => a,
+            (FrameType::Unknown, b) => b,
+            (a, FrameType::Unknown) => a,
+            _ => FrameType::Invalid, // a != b and not one of them is unknown => conflict
+        };
     }
 
     pub fn label(&self) -> String {
@@ -1451,7 +1461,8 @@ pub enum FrameType {
     AnnotationProperty,
     Individual,
     Ontology,
-    Invalid, // The frame type of an IRI that has no valid frame
+    Invalid, // The frame type of an IRI that has no valid frame (this can be because of conflicts)
+    Unknown, // The frame type of an IRI that has no frame at all (can be overriten)
 }
 
 impl FrameType {
@@ -1464,6 +1475,13 @@ impl FrameType {
             "ontology_iri" => FrameType::Ontology,
             "data_property_iri" => FrameType::DataProperty,
             "object_property_iri" => FrameType::ObjectProperty,
+            "class_frame" => FrameType::Class,
+            "datatype_frame" => FrameType::DataType,
+            "annotation_property_frame" => FrameType::AnnotationProperty,
+            "individual_frame" => FrameType::Individual,
+            "ontology_frame" => FrameType::Ontology,
+            "data_property_frame" => FrameType::DataProperty,
+            "object_property_frame" => FrameType::ObjectProperty,
             kind => {
                 error!("Implement {kind}");
                 FrameType::Invalid
@@ -1483,6 +1501,7 @@ impl From<FrameType> for tower_lsp::lsp_types::SymbolKind {
             FrameType::Individual => SymbolKind::OBJECT,
             FrameType::Ontology => SymbolKind::MODULE,
             FrameType::Invalid => SymbolKind::NULL,
+            FrameType::Unknown => SymbolKind::NULL,
         }
     }
 }
@@ -1498,6 +1517,7 @@ impl Display for FrameType {
             FrameType::Individual => "Named Individual",
             FrameType::Ontology => "Ontology",
             FrameType::Invalid => "Invalid Frame Type",
+            FrameType::Unknown => "Unknown Frame Type",
         };
         write!(f, "{name}")
     }
@@ -1551,6 +1571,8 @@ fn prefixes_helper(doc: &InternalDocument) -> HashMap<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::position::Position;
+
     use super::*;
     use pretty_assertions::assert_eq;
     use test_log::test;
@@ -1665,30 +1687,45 @@ mod tests {
     }
 
     #[test]
-    fn external_document_abbreviated_iri_to_full_iri_should_convert_simple_iri() {
-        let doc = ExternalDocument::new(
-            "".into(),
-            Url::parse("http://www.w3.org/2002/07/owl#").unwrap(),
-        )
-        .unwrap();
+    fn internal_document_get_frame_info_should_show_definitions() {
+        // Arrange
+        let doc = InternalDocument::new(
+            Url::parse("http://foo/14329076").unwrap(),
+            -1,
+            r#"
+                Ontology:
+                    Class: A
+                        Annotations: rdfs:label "This class is in the first file"
 
-        let full_iri = doc.abbreviated_iri_to_full_iri("Nothing".into());
+                        SubClassOf: class-in-other-file
+             "#
+            .into(),
+        );
 
-        assert_eq!(full_iri, "http://www.w3.org/2002/07/owl#Nothing");
-    }
+        // Act
+        let info = doc.get_frame_info(&"A".to_string());
 
-    #[test]
-    fn external_document_abbreviated_iri_to_full_iri_should_convert_simple_iri_with_missing_fragment(
-    ) {
-        let doc = ExternalDocument::new(
-            "".into(),
-            Url::parse("http://www.w3.org/2002/07/owl").unwrap(),
-        )
-        .unwrap();
+        // Assert
+        info!("{doc:#?}");
+        let info = info.unwrap();
 
-        let full_iri = doc.abbreviated_iri_to_full_iri("Nothing".into());
-
-        assert_eq!(full_iri, "http://www.w3.org/2002/07/owl#Nothing");
+        assert_eq!(info.iri, "A".to_string());
+        assert_eq!(
+            info.definitions,
+            vec![Location {
+                uri: "http://foo/14329076".parse().unwrap(),
+                range: Range {
+                    start: Position {
+                        line: 2,
+                        character: 20
+                    },
+                    end: Position {
+                        line: 5,
+                        character: 55
+                    },
+                }
+            }]
+        );
     }
 
     #[test]

@@ -505,18 +505,13 @@ impl LanguageServer for Backend {
         let all_frame_infos = workspaces
             .iter()
             .flat_map(|workspace| workspace.internal_documents.iter())
-            .flat_map(|doc| doc.read().frame_infos.clone())
+            .flat_map(|doc| doc.read().get_all_frame_infos())
             .collect_vec();
-
-        info!(
-            "All frame infos: {:#?}",
-            all_frame_infos.iter().map(|v| v.0.clone()).collect_vec()
-        );
 
         let symbols = all_frame_infos
             .iter()
-            .filter(|(_, fi)| fi.iri.contains(query.as_str()))
-            .flat_map(|(_, fi)| {
+            .filter(|fi| fi.iri.contains(query.as_str()))
+            .flat_map(|fi| {
                 fi.definitions.iter().map(|definition| SymbolInformation {
                     name: fi.iri.clone(),
                     kind: fi.frame_type.into(),
