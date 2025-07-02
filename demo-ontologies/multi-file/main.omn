@@ -3,6 +3,7 @@ Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 Ontology: <http://a.b/multi-file>
 
 Import: <http://a.b/multi-file/other>
+Import: <http://a.b/multi-file/other-func>
 
 Class: class-in-first-file
     Annotations: rdfs:label "This class is in the first file"

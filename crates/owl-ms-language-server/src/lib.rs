@@ -555,7 +555,8 @@ impl Backend {
                 file_path.pop();
                 warn!("Workspace for {url} could not be found. Could the entry in catalog-v001.xml be missing? Creating a new one at {}", file_path.display());
                 let workspace_folder = WorkspaceFolder {
-                    uri: Url::from_file_path(file_path.clone()).expect("Valid URL from filepath"), // TODO do i need the parent folder fot that?
+                    // The workspace folder IS the single file. This is not ideal but should work for now.
+                    uri: Url::from_file_path(file_path).expect("Valid URL from filepath"),
                     name: "Single File".into(),
                 };
                 let workspace = Workspace::new(workspace_folder.clone());
