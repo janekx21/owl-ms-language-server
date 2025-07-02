@@ -39,23 +39,20 @@ pub struct AllQueries {
     pub iri_query: Query,
     pub annotation_query: Query,
     pub frame_query: Query,
-    pub frame_info_query: Query,
     pub ontology_id: Query,
     pub prefix: Query,
 }
 
-pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| {
-    AllQueries {
-        import_query: Query::new(
-            *LANGUAGE,
-            "(import [(full_iri) (simple_iri) (abbreviated_iri)]@iri)",
-        )
-        .unwrap(),
-        iri_query: Query::new(*LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri")
-            .unwrap(),
-        annotation_query: Query::new(
-            *LANGUAGE,
-            "
+pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
+    import_query: Query::new(
+        *LANGUAGE,
+        "(import [(full_iri) (simple_iri) (abbreviated_iri)]@iri)",
+    )
+    .unwrap(),
+    iri_query: Query::new(*LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri").unwrap(),
+    annotation_query: Query::new(
+        *LANGUAGE,
+        "
         (_ . (_ . [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri)
             (annotation
                 (annotation_property_iri)@iri
@@ -65,11 +62,11 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| {
                     (typed_literal)
                 ]@literal))
         ",
-        )
-        .unwrap(),
-        frame_query: Query::new(
-            *LANGUAGE,
-            "
+    )
+    .unwrap(),
+    frame_query: Query::new(
+        *LANGUAGE,
+        "
             [
                 (datatype_frame (datatype_iri)@frame_iri)
                 (class_frame (class_iri)@frame_iri)
@@ -79,49 +76,22 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| {
                 (individual_frame (individual_iri)@frame_iri)
             ]@frame
         ",
-        )
-        .unwrap(),
-        // TODO check frame [(datatype_frame) (class_frame) (object_property_frame) (data_property_frame) (annotation_property_frame) (individual_frame)]
-        // the typed literal is for the string type
-        #[deprecated = "Use the annotation_query and iri_query directly"]
-        frame_info_query: Query::new(
-            *LANGUAGE,
-            "
-        (_ . (_ . [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri)
-            (annotation
-                (annotation_property_iri)@iri
-                [
-                    (string_literal_no_language)
-                    (string_literal_with_language)
-                    (typed_literal)
-                ]@literal))
-
-        ([
-            (datatype_frame)
-            (class_frame)
-            (object_property_frame)
-            (data_property_frame)
-            (annotation_property_frame)
-            (individual_frame)
-        ] . (_ [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri))@frame
-        ",
-        )
-        .unwrap(),
-        ontology_id: Query::new(
-            *LANGUAGE,
-            "
+    )
+    .unwrap(),
+    ontology_id: Query::new(
+        *LANGUAGE,
+        "
             (ontology (ontology_iri)@iri)
         ",
-        )
-        .unwrap(),
-        prefix: Query::new(
-            *LANGUAGE,
-            "
+    )
+    .unwrap(),
+    prefix: Query::new(
+        *LANGUAGE,
+        "
             (prefix_declaration (prefix_name)@name (full_iri)@iri)
         ",
-        )
-        .unwrap(),
-    }
+    )
+    .unwrap(),
 });
 
 #[cfg(test)]

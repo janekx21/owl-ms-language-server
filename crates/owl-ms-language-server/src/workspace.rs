@@ -146,35 +146,31 @@ impl Workspace {
             dm.get_frame_info(iri)
         });
 
-        let fixed_infos = match &iri[..] {
-            "http://www.w3.org/2000/01/rdf-schema#label" => vec![FrameInfo {
-                iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                annotations: vec![(
-                    "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                    vec!["label".to_string()],
-                )]
-                .into_iter()
-                .collect(),
-                frame_type: FrameType::AnnotationProperty,
-                definitions: vec![],
-            }],
-            "http://www.w3.org/2000/01/rdf-schema#comment" => vec![FrameInfo {
-                iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
-                annotations: vec![(
-                    "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                    vec!["comment".to_string()],
-                )]
-                .into_iter()
-                .collect(),
-                frame_type: FrameType::AnnotationProperty,
-                definitions: vec![],
-            }],
-            _ => vec![],
-        };
-
         internal_infos
             .chain(external_infos)
-            .chain(fixed_infos)
+            .chain(get_fixed_infos(iri))
+            .tree_reduce(FrameInfo::merge)
+    }
+
+    pub fn get_frame_info_recursive(
+        &self,
+        iri: &Iri,
+        doc: &InternalDocument,
+        http_client: &dyn HttpClient,
+    ) -> Option<FrameInfo> {
+        doc.reachable_docs_recusive(self, http_client)
+            .iter()
+            .filter_map(|url| {
+                if let Ok(doc) = self.resolve_url_to_document(url, http_client) {
+                    match &doc {
+                        DocumentReference::Internal(rw_lock) => rw_lock.read().get_frame_info(iri),
+                        DocumentReference::External(rw_lock) => rw_lock.write().get_frame_info(iri),
+                    }
+                } else {
+                    None
+                }
+            })
+            .chain(get_fixed_infos(iri))
             .tree_reduce(FrameInfo::merge)
     }
 
@@ -320,6 +316,34 @@ impl Workspace {
     }
 }
 
+pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
+    match &iri[..] {
+        "http://www.w3.org/2000/01/rdf-schema#label" => vec![FrameInfo {
+            iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+            annotations: vec![(
+                "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+                vec!["label".to_string()],
+            )]
+            .into_iter()
+            .collect(),
+            frame_type: FrameType::AnnotationProperty,
+            definitions: vec![],
+        }],
+        "http://www.w3.org/2000/01/rdf-schema#comment" => vec![FrameInfo {
+            iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
+            annotations: vec![(
+                "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+                vec!["comment".to_string()],
+            )]
+            .into_iter()
+            .collect(),
+            frame_type: FrameType::AnnotationProperty,
+            definitions: vec![],
+        }],
+        _ => vec![],
+    }
+}
+
 fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
     info!("Loading file from disk {}", path.display());
 
@@ -372,121 +396,14 @@ impl InternalDocument {
         let diagnostics = timeit("create_document / gen_diagnostics", || {
             gen_diagnostics(&tree.root_node())
         });
-        let mut document = InternalDocument {
+
+        InternalDocument {
             uri,
             version,
             tree,
             rope,
-            // frame_infos: DashMap::new(),
             diagnostics,
-        };
-        // document.frame_infos = document.gen_frame_infos(None);
-        document
-    }
-
-    /// Generate an async hash map that resolves IRIs to infos about that IRI
-    #[deprecated]
-    pub fn gen_frame_infos(&self, range: Option<&Range>) -> DashMap<Iri, FrameInfo> {
-        debug!("Generating frame infos");
-
-        let tree = &self.tree;
-        let rope = &self.rope;
-
-        let mut query_cursor = QueryCursor::new();
-
-        // if let Some(range) = range {
-        //     query_cursor.set_point_range((*range).into());
-        // }
-
-        let matches = query_cursor.matches(
-            &ALL_QUERIES.frame_info_query,
-            tree.root_node(),
-            RopeProvider::new(rope),
-        );
-
-        let infos = DashMap::<Iri, FrameInfo>::new();
-
-        for m in matches {
-            // info!("Found match {:#?}", m);
-            match m.pattern_index {
-                0 => {
-                    let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
-                    let frame_iri = capture_texts.next().unwrap().to_string();
-                    let annotation_iri = trim_full_iri(capture_texts.next().unwrap());
-                    let annotation_iri = self.abbreviated_iri_to_full_iri(annotation_iri);
-                    let literal = capture_texts.next().unwrap().to_string();
-
-                    let parent_node = m.captures[0].node.parent().unwrap();
-
-                    let frame_type = FrameType::parse(parent_node.kind());
-
-                    // debug!("Found frame {}", frame_iri);
-
-                    // Make this IRI absolute
-                    let frame_iri = if frame_iri.starts_with("<") {
-                        trim_full_iri(frame_iri)
-                    } else {
-                        self.abbreviated_iri_to_full_iri(frame_iri)
-                    };
-
-                    if !infos.contains_key(&frame_iri) {
-                        infos.insert(
-                            frame_iri.clone(),
-                            FrameInfo {
-                                iri: frame_iri.clone(),
-                                annotations: HashMap::new(),
-                                frame_type,
-                                definitions: vec![Location {
-                                    uri: self.uri.clone(),
-                                    // This node should be the total frame
-                                    range: parent_node
-                                        .parent()
-                                        .unwrap_or(parent_node)
-                                        .range()
-                                        .into(),
-                                }],
-                            },
-                        );
-                    }
-
-                    let mut info = infos.get_mut(&frame_iri).unwrap();
-
-                    if let Some(vec) = info.annotations.get_mut(&annotation_iri) {
-                        vec.push(literal);
-                    } else {
-                        info.annotations
-                            .insert(annotation_iri.clone(), vec![literal]);
-                    }
-                }
-                1 => {
-                    let mut capture_texts = m.captures.iter().map(|c| node_text(&c.node, rope));
-                    let frame_iri = capture_texts.next().unwrap().to_string();
-
-                    let specific_iri_node = m.captures[0].node.parent().unwrap();
-
-                    let frame_type = FrameType::parse(specific_iri_node.kind());
-
-                    let frame_node = m.captures[1].node;
-
-                    if !infos.contains_key(&frame_iri) {
-                        infos.insert(
-                            frame_iri.clone(),
-                            FrameInfo {
-                                iri: frame_iri.clone(),
-                                annotations: HashMap::new(),
-                                frame_type,
-                                definitions: vec![Location {
-                                    uri: self.uri.clone(),
-                                    range: frame_node.range().into(),
-                                }],
-                            },
-                        );
-                    }
-                }
-                i => todo!("pattern index {} not implemented", i),
-            }
         }
-        infos
     }
 
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
@@ -714,19 +631,6 @@ impl InternalDocument {
         debug!("New tree {}", tree.root_node().to_sexp());
         self.tree = tree;
 
-        // for (_, _, new_range) in change_ranges.iter() {
-        // TODO #32 prune
-        // document
-        //     .frame_infos
-        //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
-
-        // let frame_infos = timeit("gen_class_iri_label_map", || {
-        //     self.gen_frame_infos(Some(new_range))
-        // });
-
-        // self.frame_infos.extend(frame_infos);
-        // }
-
         // TODO #30 prune
         // Remove all old diagnostics with an overlapping range. They will need to be recreated
         // for (_, _, old_range) in change_ranges.iter() {
@@ -800,21 +704,6 @@ impl InternalDocument {
                     abbriviated_iri.clone()
                 }
             }
-
-            // prefixes
-            //     .into_iter()
-            //     .filter_map(|(name, iri)| {
-            //         abbriviated_iri.split_once(&name).and_then(|(pre, post)|
-            //     // pre must be empty because the prefix is at the start
-            //     if pre.is_empty() {
-            //         Some(iri + post)
-            //     } else {
-            //         None
-            //     }
-            //     )
-            //     })
-            //     .next()
-            //     .unwrap_or(abbriviated_iri) // Will return the simple IRI with colon
         })
     }
 
@@ -858,7 +747,7 @@ impl InternalDocument {
                 let iri = self.abbreviated_iri_to_full_iri(iri);
 
                 let label = timeit("Workspace get frame info", || {
-                    workspace.get_frame_info(&iri)
+                    workspace.get_frame_info_recursive(&iri, self, http_client)
                 })
                 .inspect(|fi| debug!("Found frame info {fi:#?}"))
                 .map(|frame_info| frame_info.label())
@@ -1229,12 +1118,6 @@ pub struct UnwrappedNode {
     /// This informtion can be outdated
     pub range: Range,
     pub kind: String,
-}
-
-impl UnwrappedNode {
-    pub fn text_trimmed(&self) -> String {
-        trim_string_value(&self.text)
-    }
 }
 
 /// This represents informations about a frame.

@@ -1,4 +1,9 @@
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
 Ontology: <http://a.b/multi-file/other>
+
+Import: <http://a.b/multi-file/other-2>
 
 Class: class-in-other-file
     Annotations: rdfs:label "This class is in the other file"
+    SubClassOf: class-in-other-2-file
