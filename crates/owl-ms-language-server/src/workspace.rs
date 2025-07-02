@@ -134,8 +134,6 @@ impl Workspace {
     ///
     /// - `iri` should be a full iri
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
-        debug!("Getting frame info for {iri}");
-
         let external_infos = self.external_documents.iter().flat_map(|doc| {
             let mut doc = doc.write();
             doc.get_frame_info(iri)
@@ -433,8 +431,6 @@ impl InternalDocument {
             })
             .collect_vec();
 
-        info!("Query in documents with additional {}", docs.len());
-
         docs.iter()
             .flat_map(|doc| match doc {
                 DocumentReference::Internal(doc) => doc.read().query(query),
@@ -468,7 +464,6 @@ impl InternalDocument {
         }
 
         result.insert(self.uri.clone());
-        debug!("Add reachable {} (internal)", self.uri);
 
         let docs = self
             .imports()
@@ -687,24 +682,22 @@ impl InternalDocument {
     }
 
     pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: String) -> String {
-        timeit("abbreviated_iri_to_full_iri", || {
-            let prefixes = self.prefixes();
-            if let Some((prefix, simple_iri)) = abbriviated_iri.split_once(':') {
-                if let Some(resolved_prefix) = prefixes.get(prefix) {
-                    resolved_prefix.clone() + simple_iri
-                } else {
-                    abbriviated_iri.clone()
-                }
+        let prefixes = self.prefixes();
+        if let Some((prefix, simple_iri)) = abbriviated_iri.split_once(':') {
+            if let Some(resolved_prefix) = prefixes.get(prefix) {
+                resolved_prefix.clone() + simple_iri
             } else {
-                // Simple IRIs get a free colon prependet
-                // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
-                if let Some(resolved_prefix) = prefixes.get("") {
-                    resolved_prefix.clone() + &abbriviated_iri
-                } else {
-                    abbriviated_iri.clone()
-                }
+                abbriviated_iri.clone()
             }
-        })
+        } else {
+            // Simple IRIs get a free colon prependet
+            // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
+            if let Some(resolved_prefix) = prefixes.get("") {
+                resolved_prefix.clone() + &abbriviated_iri
+            } else {
+                abbriviated_iri.clone()
+            }
+        }
     }
 
     pub fn ontology_id(&self) -> Option<Iri> {
@@ -730,7 +723,7 @@ impl InternalDocument {
     /// Prefix: owl: <http://www.w3.org/2002/07/owl#>
     /// ```
     pub fn prefixes(&self) -> HashMap<String, String> {
-        timeit("prefixes", || prefixes_helper(self))
+        prefixes_helper(self)
     }
 
     pub fn inlay_hint(
@@ -746,12 +739,10 @@ impl InternalDocument {
                 let iri = trim_full_iri(capture.node.text);
                 let iri = self.abbreviated_iri_to_full_iri(iri);
 
-                let label = timeit("Workspace get frame info", || {
-                    workspace.get_frame_info_recursive(&iri, self, http_client)
-                })
-                .inspect(|fi| debug!("Found frame info {fi:#?}"))
-                .map(|frame_info| frame_info.label())
-                .unwrap_or_default();
+                let label = workspace
+                    .get_frame_info_recursive(&iri, self, http_client)
+                    .map(|frame_info| frame_info.label())
+                    .unwrap_or_default();
 
                 if label.is_empty() {
                     None
@@ -901,7 +892,6 @@ fn document_definitions(doc: &InternalDocument) -> Vec<(String, Range, String)> 
         .iter()
         .map(|m| match &m.captures[..] {
             [frame_iri, frame] => {
-                info!("{frame_iri:#?}   -   {frame:#?}");
                 let frame_iri =
                     doc.abbreviated_iri_to_full_iri(trim_full_iri(frame_iri.node.text.clone()));
 
@@ -1001,7 +991,6 @@ impl ExternalDocument {
         }
 
         result.insert(self.uri.clone());
-        debug!("Add reachable {} (external)", self.uri);
 
         let docs = self
             .imports()
@@ -1028,7 +1017,7 @@ impl ExternalDocument {
     }
 
     pub fn get_frame_info(&mut self, iri: &Iri) -> Option<FrameInfo> {
-        timeit("Get frame infos", || get_frame_info_helper_ex(self, iri))
+        get_frame_info_helper_ex(self, iri)
     }
 }
 

@@ -310,9 +310,7 @@ impl LanguageServer for Backend {
 
                 debug!("Try goto definition of {}", iri);
 
-                let frame_info = timeit("Workspace get frame info", || {
-                    workspace.get_frame_info(&iri)
-                });
+                let frame_info = workspace.get_frame_info(&iri);
 
                 if let Some(frame_info) = frame_info {
                     let locations = frame_info
@@ -510,7 +508,13 @@ impl LanguageServer for Backend {
 
         let symbols = all_frame_infos
             .iter()
-            .filter(|fi| fi.iri.contains(query.as_str()))
+            .filter(|fi| {
+                fi.iri.contains(query.as_str())
+                    || fi
+                        .annotations
+                        .values()
+                        .any(|v| v.iter().any(|l| l.contains(query.as_str())))
+            })
             .flat_map(|fi| {
                 fi.definitions.iter().map(|definition| SymbolInformation {
                     name: fi.iri.clone(),
@@ -581,7 +585,7 @@ impl Backend {
         workspace: &Workspace,
     ) {
         let document = document.read();
-        info!("Resolve imports for {}", document.uri);
+        debug!("Resolve imports for {}", document.uri);
         let urls = document
             .query(&ALL_QUERIES.import_query)
             .iter()

@@ -1,4 +1,4 @@
-use log::{info, LevelFilter};
+use log::{debug, LevelFilter};
 use std::io::Write;
 use std::{env, fs::File};
 use tokio::task;
@@ -12,7 +12,7 @@ pub fn timeit<F: FnMut() -> T, T>(name: &str, mut f: F) -> T {
     let result = f();
     let end = Instant::now();
     let duration = end.duration_since(start);
-    info!("⏲ {} took {:?}", name, duration);
+    debug!("⏲ {} took {:?}", name, duration);
     result
 }
 
