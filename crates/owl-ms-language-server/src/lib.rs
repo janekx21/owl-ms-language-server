@@ -9,6 +9,7 @@ mod tests;
 mod web;
 mod workspace;
 
+use debugging::timeit;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
@@ -309,7 +310,9 @@ impl LanguageServer for Backend {
 
                 debug!("Try goto definition of {}", iri);
 
-                let frame_info = workspace.get_frame_info(&iri);
+                let frame_info = timeit("Workspace get frame info", || {
+                    workspace.get_frame_info(&iri)
+                });
 
                 if let Some(frame_info) = frame_info {
                     let locations = frame_info

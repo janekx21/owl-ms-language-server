@@ -11,8 +11,8 @@ use cached::SizedCache;
 use core::fmt;
 use dashmap::DashMap;
 use horned_owl::io::ParserConfiguration;
-use horned_owl::model::Build;
 use horned_owl::model::Component::*;
+use horned_owl::model::{ArcStr, Build};
 use horned_owl::ontology::iri_mapped::ArcIRIMappedOntology;
 use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
@@ -49,6 +49,15 @@ static GLOBAL_PARSER: Lazy<Mutex<Parser>> = Lazy::new(|| {
 
 pub fn lock_global_parser() -> MutexGuard<'static, Parser> {
     (*GLOBAL_PARSER).lock()
+}
+
+static GLOBAL_BUILD_ARC: Lazy<Mutex<Build<ArcStr>>> = Lazy::new(|| {
+    let build = Build::new_arc();
+    Mutex::new(build)
+});
+
+pub fn lock_global_build_arc() -> MutexGuard<'static, Build<ArcStr>> {
+    (*GLOBAL_BUILD_ARC).lock()
 }
 
 #[derive(Debug)]
@@ -130,46 +139,15 @@ impl Workspace {
 
         let external_infos = self.external_documents.iter().flat_map(|doc| {
             let mut doc = doc.write();
-
-            // let mut iri_mapped_ontology = ArcIRIMappedOntology::from(set_ontology);
-            let iri_mapped_ontology = &mut doc.ontology;
-
-            let build = Build::new_arc();
-            let iri = build.iri(iri.clone());
-
-            iri_mapped_ontology
-                .components_for_iri(&iri)
-                .filter_map(|c| match &c.component {
-                    AnnotationAssertion(aa) => match &aa.subject {
-                        horned_owl::model::AnnotationSubject::IRI(iri_) if iri_ == &iri => {
-                            Some(aa.ann.clone())
-                        }
-                        _ => None,
-                    },
-                    _ => None,
-                })
-                .filter_map(|annotation| match annotation.av {
-                    horned_owl::model::AnnotationValue::Literal(
-                        horned_owl::model::Literal::Simple { literal },
-                    ) => {
-                        let annotations =
-                            once((annotation.ap.0.to_string(), vec![literal])).collect();
-                        Some(FrameInfo {
-                            iri: iri.to_string(),
-                            annotations,
-                            frame_type: FrameType::Class,
-                            definitions: vec![],
-                        })
-                    }
-                    _ => None,
-                })
-                .collect_vec()
+            doc.get_frame_info(iri)
         });
 
         // TODO #37 replace this with a query
         let internal_infos = self.internal_documents.iter().filter_map(|dm| {
             let dm = dm.value().read();
-            dm.frame_infos.get(iri).map(|v| v.value().clone())
+
+            dm.get_frame_info(iri)
+            // dm.frame_infos.get(iri).map(|v| v.value().clone())
         });
 
         let fixed_infos = match &iri[..] {
@@ -388,7 +366,8 @@ pub struct InternalDocument {
 
 impl core::hash::Hash for InternalDocument {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.rope.hash(state);
+        self.uri.hash(state);
+        self.version.hash(state);
     }
 }
 impl Eq for InternalDocument {}
@@ -847,27 +826,39 @@ impl InternalDocument {
     }
 
     pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: String) -> String {
-        let mut abbriviated_iri = abbriviated_iri.clone();
-        // Simple IRIs get a free colon prependet
-        // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
-        if !abbriviated_iri.contains(':') {
-            abbriviated_iri = format!(":{abbriviated_iri}");
-        }
-        let prefixes = self.prefixes();
-        prefixes
-            .into_iter()
-            .filter_map(|(name, iri)| {
-                abbriviated_iri.split_once(&name).and_then(|(pre, post)|
-                // pre must be empty because the prefix is at the start
-                if pre.is_empty() {
-                    Some(iri + post)
+        timeit("abbreviated_iri_to_full_iri", || {
+            let prefixes = self.prefixes();
+            if let Some((prefix, simple_iri)) = abbriviated_iri.split_once(':') {
+                if let Some(resolved_prefix) = prefixes.get(prefix) {
+                    resolved_prefix.clone() + simple_iri
                 } else {
-                    None
+                    abbriviated_iri.clone()
                 }
-                )
-            })
-            .next()
-            .unwrap_or(abbriviated_iri) // Will return the simple IRI with colon
+            } else {
+                // Simple IRIs get a free colon prependet
+                // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
+                if let Some(resolved_prefix) = prefixes.get("") {
+                    resolved_prefix.clone() + &abbriviated_iri
+                } else {
+                    abbriviated_iri.clone()
+                }
+            }
+
+            // prefixes
+            //     .into_iter()
+            //     .filter_map(|(name, iri)| {
+            //         abbriviated_iri.split_once(&name).and_then(|(pre, post)|
+            //     // pre must be empty because the prefix is at the start
+            //     if pre.is_empty() {
+            //         Some(iri + post)
+            //     } else {
+            //         None
+            //     }
+            //     )
+            //     })
+            //     .next()
+            //     .unwrap_or(abbriviated_iri) // Will return the simple IRI with colon
+        })
     }
 
     pub fn ontology_id(&self) -> Option<Iri> {
@@ -892,8 +883,8 @@ impl InternalDocument {
     /// Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
     /// Prefix: owl: <http://www.w3.org/2002/07/owl#>
     /// ```
-    pub fn prefixes(&self) -> Vec<(String, String)> {
-        prefixes_helper(self)
+    pub fn prefixes(&self) -> HashMap<String, String> {
+        timeit("prefixes", || prefixes_helper(self))
     }
 
     pub fn inlay_hint(
@@ -902,8 +893,9 @@ impl InternalDocument {
         workspace: &Workspace,
         http_client: &dyn HttpClient,
     ) -> Vec<InlayHint> {
-        let annotations =
-            self.query_with_imports(&ALL_QUERIES.annotation_query, workspace, http_client);
+        // let annotations = timeit("Annotation query", || {
+        //     self.query_with_imports(&ALL_QUERIES.annotation_query, workspace, http_client)
+        // });
 
         let hints = self
             .query_range(&ALL_QUERIES.iri_query, range)
@@ -913,34 +905,38 @@ impl InternalDocument {
                 let iri = trim_full_iri(capture.node.text);
                 let iri = self.abbreviated_iri_to_full_iri(iri);
 
-                let label = annotations
-                    .iter()
-                    .filter_map(|m| match &m.captures[..] {
-                        [frame_iri, annoation_iri, literal] => {
-                            // TODO no full iri :<
+                let label =
+                    // annotations
+                    // .iter()
+                    // .filter_map(|m| match &m.captures[..] {
+                    //     [frame_iri, annoation_iri, literal] => {
+                    //         // TODO no full iri :<
 
-                            let annoation_iri = self.abbreviated_iri_to_full_iri(trim_full_iri(
-                                annoation_iri.node.text.clone(),
-                            ));
-                            if frame_iri.node.text == iri
-                                && annoation_iri == "http://www.w3.org/2000/01/rdf-schema#label"
-                            {
-                                Some(literal.node.text_trimmed())
-                            } else {
-                                None
-                            }
-                        }
-                        _ => unreachable!(),
-                    })
-                    .chain(
+                    //         let annoation_iri = self.abbreviated_iri_to_full_iri(trim_full_iri(
+                    //             annoation_iri.node.text.clone(),
+                    //         ));
+                    //         if frame_iri.node.text == iri
+                    //             && annoation_iri == "http://www.w3.org/2000/01/rdf-schema#label"
+                    //         {
+                    //             Some(literal.node.text_trimmed())
+                    //         } else {
+                    //             None
+                    //         }
+                    //     }
+                    //     _ => unreachable!(),
+                    // })
+                    // .chain(
                         // Chain the frame info label from the workspace
-                        workspace
-                            .get_frame_info(&iri)
-                            .inspect(|fi| debug!("Found frame info {fi:#?}"))
-                            .map(|frame_info| frame_info.label()),
-                    )
-                    .unique()
-                    .join(", ");
+                        timeit("Workspace get frame info", || {
+                            workspace.get_frame_info(&iri)
+                        })
+                        .inspect(|fi| debug!("Found frame info {fi:#?}"))
+                        .map(|frame_info| frame_info.label())
+                        .unwrap_or_default();
+                // .into_iter()
+                // )
+                // .unique()
+                // .join(", ");
 
                 if label.is_empty() {
                     None
@@ -960,6 +956,11 @@ impl InternalDocument {
             .collect_vec();
         hints
     }
+
+    pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
+        // TODO query
+        self.frame_infos.get(iri).map(|v| v.value().clone())
+    }
 }
 
 pub struct ExternalDocument {
@@ -968,6 +969,12 @@ pub struct ExternalDocument {
     pub ontology: ArcIRIMappedOntology,
     /// This can differ from the url file extention, so we need to track it
     pub owl_dialect: OwlDialect,
+}
+
+impl Hash for ExternalDocument {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.uri.hash(state);
+    }
 }
 
 impl fmt::Debug for ExternalDocument {
@@ -1084,6 +1091,86 @@ impl ExternalDocument {
             abbriviated_iri
         )
     }
+
+    pub fn get_frame_info(&mut self, iri: &Iri) -> Vec<FrameInfo> {
+        timeit("Get frame infos", || get_frame_info_helper(self, iri))
+
+        //     let iri_mapped_ontology = &mut self.ontology;
+
+        //     let build = lock_global_build_arc();
+        //     let iri = build.iri(iri.clone());
+
+        //     iri_mapped_ontology
+        //         .components_for_iri(&iri)
+        //         .filter_map(|c| match &c.component {
+        //             AnnotationAssertion(aa) => match &aa.subject {
+        //                 horned_owl::model::AnnotationSubject::IRI(iri_) if iri_ == &iri => {
+        //                     Some(aa.ann.clone())
+        //                 }
+        //                 _ => None,
+        //             },
+        //             _ => None,
+        //         })
+        //         .filter_map(|annotation| match annotation.av {
+        //             horned_owl::model::AnnotationValue::Literal(
+        //                 horned_owl::model::Literal::Simple { literal },
+        //             ) => {
+        //                 let annotations = once((annotation.ap.0.to_string(), vec![literal])).collect();
+        //                 Some(FrameInfo {
+        //                     iri: iri.to_string(),
+        //                     annotations,
+        //                     frame_type: FrameType::Class,
+        //                     definitions: vec![],
+        //                 })
+        //             }
+        //             _ => None,
+        //         })
+        //         .collect_vec()
+    }
+}
+
+#[cached(
+    ty = "SizedCache<u64, Vec<FrameInfo>>",
+    create = "{ SizedCache::with_size(200) }",
+    convert = r#"{
+            let mut hasher = DefaultHasher::new();
+            doc.hash(&mut hasher);
+            iri.hash(&mut hasher);
+            hasher.finish()
+     } "#
+)]
+fn get_frame_info_helper(doc: &mut ExternalDocument, iri: &Iri) -> Vec<FrameInfo> {
+    let iri_mapped_ontology = &mut doc.ontology;
+
+    let build = lock_global_build_arc();
+    let iri = build.iri(iri.clone());
+
+    iri_mapped_ontology
+        .components_for_iri(&iri)
+        .filter_map(|c| match &c.component {
+            AnnotationAssertion(aa) => match &aa.subject {
+                horned_owl::model::AnnotationSubject::IRI(iri_) if iri_ == &iri => {
+                    Some(aa.ann.clone())
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .filter_map(|annotation| match annotation.av {
+            horned_owl::model::AnnotationValue::Literal(horned_owl::model::Literal::Simple {
+                literal,
+            }) => {
+                let annotations = once((annotation.ap.0.to_string(), vec![literal])).collect();
+                Some(FrameInfo {
+                    iri: iri.to_string(),
+                    annotations,
+                    frame_type: FrameType::Class,
+                    definitions: vec![],
+                })
+            }
+            _ => None,
+        })
+        .collect_vec()
 }
 
 fn horned_to_anyhow(e: horned_owl::error::HornedError) -> anyhow::Error {
@@ -1434,7 +1521,7 @@ pub fn trim_full_iri<T: ToString>(untrimmed_iri: T) -> Iri {
 // ];
 
 #[cached(
-    ty = "SizedCache<u64, Vec<(String, String)>>",
+    ty = "SizedCache<u64, HashMap<String, String>>",
     create = "{ SizedCache::with_size(20) }",
     convert = r#"{
             let mut hasher = DefaultHasher::new();
@@ -1442,11 +1529,14 @@ pub fn trim_full_iri<T: ToString>(untrimmed_iri: T) -> Iri {
             hasher.finish()
      } "#
 )]
-fn prefixes_helper(doc: &InternalDocument) -> Vec<(String, String)> {
+fn prefixes_helper(doc: &InternalDocument) -> HashMap<String, String> {
     doc.query(&ALL_QUERIES.prefix)
         .into_iter()
         .map(|m| match &m.captures[..] {
-            [name, iri] => (name.node.text.clone(), trim_full_iri(iri.node.text.clone())),
+            [name, iri] => (
+                name.node.text.trim_end_matches(':').to_string(),
+                trim_full_iri(iri.node.text.clone()),
+            ),
             _ => unreachable!(),
         })
         // Horned owl has no default here. Lets keep it out for now.
@@ -1494,7 +1584,7 @@ mod tests {
     #[test]
     fn internal_document_abbreviated_iri_to_full_iri_should_convert_abbriviated_iri() {
         let doc = InternalDocument::new(
-            Url::parse("http://this/is/not/relevant").unwrap(),
+            Url::parse("http://this/is/not/relevant/1").unwrap(),
             -1,
             "
                 Prefix: owl: <http://www.w3.org/2002/07/owl#>
@@ -1516,7 +1606,7 @@ mod tests {
     #[test]
     fn internal_document_abbreviated_iri_to_full_iri_should_convert_simple_iri() {
         let doc = InternalDocument::new(
-            Url::parse("http://this/is/not/relevant").unwrap(),
+            Url::parse("http://this/is/not/relevant/2").unwrap(),
             -1,
             "
                 Prefix: : <http://www.w3.org/2002/07/owl#>
@@ -1549,27 +1639,27 @@ mod tests {
             .into(),
         );
 
-        let prefixes = doc.prefixes();
+        let prefixes = doc.prefixes().into_iter().sorted().collect_vec();
 
         assert_eq!(
             prefixes,
             vec![
                 (
-                    ":".into(),
+                    "".into(),
                     "http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3/"
                         .into()
                 ),
-                ("owl:".into(), "http://www.w3.org/2002/07/owl#".into()),
+                ("owl".into(), "http://www.w3.org/2002/07/owl#".into()),
                 (
-                    "rdf:".into(),
+                    "rdf".into(),
                     "http://www.w3.org/1999/02/22-rdf-syntax-ns#".into()
                 ),
                 (
-                    "rdfs:".into(),
+                    "rdfs".into(),
                     "http://www.w3.org/2000/01/rdf-schema#".into()
                 ),
-                ("xml:".into(), "http://www.w3.org/XML/1998/namespace".into()),
-                ("xsd:".into(), "http://www.w3.org/2001/XMLSchema#".into())
+                ("xml".into(), "http://www.w3.org/XML/1998/namespace".into()),
+                ("xsd".into(), "http://www.w3.org/2001/XMLSchema#".into())
             ]
         );
     }
