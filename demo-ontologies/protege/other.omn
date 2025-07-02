@@ -1,0 +1,31 @@
+Prefix: : <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-4/>
+Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xml: <http://www.w3.org/XML/1998/namespace>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+
+
+
+Ontology: <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-4>
+
+Import: <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3>
+
+AnnotationProperty: rdfs:label
+
+    
+Datatype: rdf:PlainLiteral
+
+    
+Class: <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3#00001>
+
+    
+Class: <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-4#00004>
+
+    Annotations: 
+        rdfs:label "Tutor"@en
+    
+    SubClassOf: 
+        <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3#00001>
+    
+    

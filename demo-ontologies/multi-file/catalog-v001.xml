@@ -2,6 +2,8 @@
 <catalog prefer="public" xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
     <group>
         <uri id="Imports Wizard Entry" name="http://a.b/multi-file/other" uri="other.omn"/>
+        <uri id="Imports Wizard Entry" name="http://a.b/multi-file/other-2" uri="other-2.omn"/>
+        <uri id="Imports Wizard Entry" name="http://a.b/multi-file/other-func" uri="other-func.ofn"/>
     </group>
     <uri id="Imports Wizard Entry" name="http://a.b/multi-file/main" uri="main.omn"/>
 </catalog>

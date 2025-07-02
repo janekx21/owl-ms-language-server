@@ -38,7 +38,9 @@ pub struct AllQueries {
     pub import_query: Query,
     pub iri_query: Query,
     pub annotation_query: Query,
-    pub frame_info_query: Query,
+    pub frame_query: Query,
+    pub ontology_id: Query,
+    pub prefix: Query,
 }
 
 pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
@@ -62,31 +64,72 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
         ",
     )
     .unwrap(),
-    // TODO check frame [(datatype_frame) (class_frame) (object_property_frame) (data_property_frame) (annotation_property_frame) (individual_frame)]
-    // the typed literal is for the string type
-    frame_info_query: Query::new(
+    frame_query: Query::new(
         *LANGUAGE,
         "
-        (_ . (_ . [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri)
-            (annotation
-                (annotation_property_iri)@iri
-                [
-                    (string_literal_no_language)
-                    (string_literal_with_language)
-                    (typed_literal)
-                ]@literal))
-
-        (prefix_declaration (prefix_name)@prefix_name (full_iri)@iri)
-
-        ([
-            (datatype_frame)
-            (class_frame)
-            (object_property_frame)
-            (data_property_frame)
-            (annotation_property_frame)
-            (individual_frame)
-        ] . (_ [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri))@frame
+            [
+                (datatype_frame (datatype_iri)@frame_iri)
+                (class_frame (class_iri)@frame_iri)
+                (object_property_frame (object_property_iri)@frame_iri)
+                (data_property_frame (data_property_iri)@frame_iri)
+                (annotation_property_frame (annotation_property_iri)@frame_iri)
+                (individual_frame (individual_iri)@frame_iri)
+            ]@frame
+        ",
+    )
+    .unwrap(),
+    ontology_id: Query::new(
+        *LANGUAGE,
+        "
+            (ontology (ontology_iri)@iri)
+        ",
+    )
+    .unwrap(),
+    prefix: Query::new(
+        *LANGUAGE,
+        "
+            (prefix_declaration (prefix_name)@name (full_iri)@iri)
         ",
     )
     .unwrap(),
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::workspace::lock_global_parser;
+
+    use super::*;
+    use itertools::Itertools;
+    use log::info;
+    use pretty_assertions::assert_eq;
+    use test_log::test;
+    use tree_sitter::QueryCursor;
+
+    #[test]
+    fn query_frame_query() {
+        // Arrange
+        let text = r#"
+            
+                Ontology:
+                    Class: A
+                        Annotations: rdfs:label "This class is in the first file"
+
+                        SubClassOf: class-in-other-file
+        "#;
+        let mut parser_guard = lock_global_parser();
+        let tree = parser_guard.parse(text, None).unwrap();
+        let mut query_cursor = QueryCursor::new();
+
+        // Act
+        let q = &ALL_QUERIES.frame_query;
+        let matches = query_cursor.matches(q, tree.root_node(), text.as_bytes());
+
+        // Assert
+        let m = matches.into_iter().collect_vec();
+
+        info!("{:#?}", tree.root_node().to_sexp());
+        info!("{m:#?}");
+
+        assert_eq!(m.len(), 1);
+    }
+}

@@ -4,7 +4,7 @@
     {
       "type": "extensionHost",
       "request": "launch",
-      "name": "Launch Client",
+      "name": "Launch Client | Debug",
       "runtimeExecutable": "${execPath}",
       "args": [
         "--extensionDevelopmentPath=${workspaceRoot}"
@@ -18,6 +18,25 @@
       },
       "env": {
         "__OWL_MS_LSP_SERVER_DEBUG": "${workspaceRoot}/../../target/debug/owl-ms-language-server"
+      }
+    },
+    {
+      "type": "extensionHost",
+      "request": "launch",
+      "name": "Launch Client | Release",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceRoot}"
+      ],
+      "outFiles": [
+        "${workspaceRoot}/client/out/**/*.js"
+      ],
+      "preLaunchTask": {
+        "type": "npm",
+        "script": "watch"
+      },
+      "env": {
+        "__OWL_MS_LSP_SERVER_DEBUG": "${workspaceRoot}/../../target/release/owl-ms-language-server"
       }
     },
     {

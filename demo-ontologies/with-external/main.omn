@@ -1,0 +1,8 @@
+Ontology: <http://a.b/multi-file>
+
+Import: <http://purl.obolibrary.org/obo/bfo/2.0/bfo.owl>
+
+Class: class-in-first-file
+    Annotations: rdfs:label "This class is in the first file"
+
+    SubClassOf: class-in-other-file

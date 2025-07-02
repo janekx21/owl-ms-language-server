@@ -1,0 +1,15 @@
+Prefix(:=<http://a.b/multi-file/other-func#>)
+Prefix(o:=<http://a.b/multi-file/other-func#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://a.b/multi-file/other-func>
+<http://a.b/multi-file/other-func>
+
+Declaration(Class(o:class-in-other-func))
+
+)

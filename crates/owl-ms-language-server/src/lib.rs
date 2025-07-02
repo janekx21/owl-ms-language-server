@@ -6,62 +6,64 @@ mod range;
 pub mod rope_provider;
 #[cfg(test)]
 mod tests;
+mod web;
 mod workspace;
 
-use core::panic;
 use debugging::timeit;
 use itertools::Itertools;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
+use parking_lot::{MappedRwLockWriteGuard, RwLock, RwLockWriteGuard};
 use position::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
 use range::Range;
 use rope_provider::RopeProvider;
 use std::collections::HashMap;
-use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
-use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree, TreeCursor};
+use tree_sitter::{Language, Node, Point, Query, QueryCursor, Tree, TreeCursor};
 use tree_sitter_owl_ms::language;
-use workspace::{gen_diagnostics, node_text, Document, Workspace};
+use web::{HttpClient, UreqClient};
+use workspace::{node_text, trim_full_iri, InternalDocument, Workspace};
 
 // Constants
 
 pub static LANGUAGE: Lazy<Language> = Lazy::new(language);
 
 // Model
+
 pub struct Backend {
     pub client: Client,
-    parser: Mutex<Parser>, // stateful because of resume behavior after fail, timeout or cancellation
     position_encoding: Mutex<PositionEncodingKind>,
-    workspaces: Mutex<Vec<Workspace>>,
+    workspaces: RwLock<Vec<Workspace>>,
+    pub http_client: Arc<dyn HttpClient>,
 }
 
 impl Backend {
-    /// Creates a new [`Backend`].
-    pub fn new(client: Client, parser: Parser) -> Self {
+    /// Creates a new [`Backend`] with a Ureq http client and UTF16 encoding.
+    /// The workspaces are created empty.
+    pub fn new(client: Client) -> Self {
         Backend {
             client,
-            parser: Mutex::new(parser),
             position_encoding: PositionEncodingKind::UTF16.into(),
-            workspaces: Mutex::new(vec![]),
+            workspaces: RwLock::new(vec![]),
+            http_client: Arc::new(UreqClient),
         }
-    }
-
-    async fn lock_workspaces(&self) -> MappedMutexGuard<Vec<Workspace>> {
-        MutexGuard::map(self.workspaces.lock().await, |w| w)
     }
 }
 
 /// This is the main language server implamentation. It is the entry point for all requests to the language server.
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
+    /// Initilizes the language server and loads the workspaces with catalog files.
+    ///
+    /// Does not load or index the files inside the workspaces.
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        self.client
-            .log_message(MessageType::INFO, "initialize called.")
-            .await;
+        info!("Initialize language server -----------------------------");
 
         let encodings = params
             .capabilities
@@ -75,24 +77,16 @@ impl LanguageServer for Backend {
             PositionEncodingKind::UTF16
         };
 
-        let mut pg = self.position_encoding.lock().await;
-        *pg = encoding.clone();
+        let mut position_encoding = self.position_encoding.lock().await;
+        *position_encoding = encoding.clone();
 
-        {
-            let mut parser = self.parser.lock().await;
-
-            let mut wf = self.workspaces.lock().await;
-            *wf = params
-                .workspace_folders
-                .unwrap_or_default()
-                .iter()
-                .map(|wf| {
-                    let w = Workspace::new(wf.clone());
-                    w.load_catalog_documents(&mut parser);
-                    w
-                })
-                .collect();
-        }
+        let mut workspaces = self.workspaces.write();
+        *workspaces = params
+            .workspace_folders
+            .unwrap_or_default()
+            .iter()
+            .map(|wf| Workspace::new(wf.clone()))
+            .collect();
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -159,8 +153,9 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _params: InitializedParams) {
-        let workspaces = self.workspaces.lock().await;
-        let workspace_paths = workspaces
+        let workspace_paths = self
+            .workspaces
+            .read()
             .iter()
             .map(|w| {
                 w.workspace_folder
@@ -170,56 +165,33 @@ impl LanguageServer for Backend {
                     .display()
                     .to_string()
             })
-            .join(", ");
-        info!(
-            "Initialized Languag Server with workspaces: {}",
-            if workspace_paths.is_empty() {
-                "No Workspace".into()
-            } else {
-                workspace_paths
-            }
-        );
-        self.client
-            .log_message(MessageType::INFO, "server initialized!")
-            .await;
+            .collect_vec();
+
+        info!("Initialized languag server with workspaces: {workspace_paths:?}");
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let url = params.text_document.uri;
+        info!("Opend file {url}",);
 
-        let workspace = self.find_workspace(&url).await;
-
-        debug!("Found workspace! Folder: {:#?}", workspace.workspace_folder);
-
-        debug!(
-            "did_open at {} with version {}",
-            url.clone(),
-            params.text_document.version.clone()
-        );
-
-        let mut parser_guard = self.parser.lock().await;
-
-        let document = Document::new(
+        let workspace = self.find_workspace(&url);
+        let internal_document = InternalDocument::new(
             url.clone(),
             params.text_document.version,
             params.text_document.text,
-            &mut parser_guard,
         );
 
         self.client
             .publish_diagnostics(
                 url.clone(),
-                document.diagnostics.clone(),
-                Some(document.version),
+                internal_document.diagnostics.clone(),
+                Some(internal_document.version),
             )
             .await;
 
-        let document = workspace.insert_document(document);
+        let document = workspace.insert_internal_document(internal_document);
 
-        debug!("Inserted document");
-
-        self.resolve_imports(&document, &workspace, &mut parser_guard)
-            .await;
+        self.resolve_imports(document, &workspace).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -236,169 +208,14 @@ impl LanguageServer for Backend {
         );
 
         let url = &params.text_document.uri;
-        let workspace = self.find_workspace(url).await;
+        let workspace = self.find_workspace(url);
 
-        if let Some(mut document) = workspace.document_map.get_mut(&params.text_document.uri) {
-            if document.version >= params.text_document.version {
-                return; // no change needed
-            }
-
-            if params
-                .content_changes
-                .iter()
-                .any(|change| change.range.is_none())
-            {
-                // Change the whole file
-                panic!("Whole file changes are not supported yet");
-            }
-
-            // This range is relative to the *old* document not the new one
-            let change_ranges = params
-                .content_changes
-                .iter()
-                .rev() // See https://github.com/helix-editor/helix/blob/0815b52e0959e21ec792ea41d508a050b552f850/helix-core/src/syntax.rs#L1293C1-L1297C26
-                .map(|change| {
-                    if let Some(range) = change.range {
-                        let old_range: Range = range.into();
-                        let start_char = document
-                            .rope
-                            .try_line_to_char(old_range.start.line as usize)
-                            .expect("line_idx out of bounds")
-                            + (old_range.start.character as usize);
-
-                        let old_end_char = document
-                            .rope
-                            .try_line_to_char(old_range.end.line as usize)
-                            .expect("line_idx out of bounds")
-                            + (old_range.end.character as usize); // exclusive
-
-                        // must come before the rope is changed!
-                        let old_end_byte = document.rope.char_to_byte(old_end_char);
-
-                        // rope replace
-                        timeit("rope operations", || {
-                            document.rope.remove(start_char..old_end_char);
-                            document.rope.insert(start_char, &change.text);
-                        });
-
-                        // this must come after the rope was changed!
-                        let start_byte = document.rope.char_to_byte(start_char);
-                        let new_end_byte = start_byte + change.text.len();
-                        let new_end_line = document.rope.byte_to_line(new_end_byte);
-                        let new_end_character = document.rope.byte_to_char(new_end_byte)
-                            - document.rope.line_to_char(new_end_line);
-
-                        let edit = InputEdit {
-                            start_byte,
-                            old_end_byte,
-                            new_end_byte: start_byte + change.text.len(),
-                            start_position: old_range.start.into(),
-                            old_end_position: old_range.end.into(),
-                            new_end_position: Point {
-                                row: new_end_line,
-                                column: new_end_character,
-                            },
-                        };
-                        timeit("tree edit", || document.tree.edit(&edit));
-
-                        document.version = params.text_document.version;
-
-                        let new_range = Range {
-                            start: edit.start_position.into(),
-                            end: edit.new_end_position.into(),
-                        };
-
-                        (old_range, edit, new_range)
-                    } else {
-                        unreachable!("Change should have range {:#?}", change);
-                    }
-                })
-                .collect::<Vec<(Range, InputEdit, Range)>>();
-
-            debug!("Change ranges {:#?}", change_ranges);
-
-            let rope_provider = RopeProvider::new(&document.rope);
-
-            let tree = {
-                let mut parser_guard = self.parser.lock().await;
-                timeit("parsing", || {
-                    parser_guard
-                        .parse_with(
-                            &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
-                            Some(&document.tree),
-                        )
-                        .expect("language to be set, no timeout to be used, no cancelation flag")
-                })
-            };
-            debug!("New tree {}", tree.root_node().to_sexp());
-            document.tree = tree;
-
-            for (_, _, new_range) in change_ranges.iter() {
-                // TODO #32 prune
-                // document
-                //     .frame_infos
-                //     .retain(|k, v| !range_overlaps(&v.range.into(), &range));
-
-                let frame_infos = timeit("gen_class_iri_label_map", || {
-                    document.gen_frame_infos(Some(new_range))
-                });
-
-                document.frame_infos.extend(frame_infos);
-            }
-
-            // TODO #30 prune
-            // Remove all old diagnostics with an overlapping range. They will need to be recreated
-            // for (_, _, old_range) in change_ranges.iter() {
-            //     document
-            //         .diagnostics
-            //         .retain(|d| !lines_overlap(&d.range.into(), old_range));
-            // }
-            // Move all other diagnostics
-            // for diagnostic in &mut document.diagnostics {
-            //     for (new_range, edit, old_range) in change_ranges.iter() {
-            //         let mut range_to_end = *old_range;
-            //         range_to_end.end = Position {
-            //             line: u32::MAX,
-            //             character: u32::MAX,
-            //         };
-            //         if lines_overlap(&diagnostic.range.into(), &range_to_end) {
-            //             debug!("old {} -> new {}", old_range, new_range);
-            //             let delta = new_range.end.line as i32 - old_range.end.line as i32;
-            //             diagnostic.range.start.line =
-            //                 (diagnostic.range.start.line as i32 + delta) as u32;
-            //             diagnostic.range.start.line =
-            //                 (diagnostic.range.end.line as i32 + delta) as u32;
-            //         }
-            //     }
-            // }
-            // for (_, _, _) in change_ranges.iter() {
-            //     let cursor = document.tree.walk();
-            //     // TODO #30
-            //     // while range_exclusive_inside(new_range, &cursor.node().range().into()) {
-            //     //     if cursor
-            //     //         .goto_first_child_for_point(new_range.start.into())
-            //     //         .is_none()
-            //     //     {
-            //     //         break;
-            //     //     }
-            //     // }
-            //     // cursor.goto_parent();
-            //     let node_that_has_change = cursor.node();
-            //     drop(cursor);
-            //     // while range_overlaps(&ts_range_to_lsp_range(cursor.node().range()), &range) {}
-            //     // document.diagnostics =
-            //     let additional_diagnostics = timeit("did_change > gen_diagnostics", || {
-            //         gen_diagnostics(&node_that_has_change)
-            //     })
-            //     .into_iter();
-            //     // .filter(|d| lines_overlap(&d.range.into(), new_range)); // should be exclusive to other diagnostics
-            //     document.diagnostics.extend(additional_diagnostics);
-            // }
-
-            // TODO #30 replace with above
-            document.diagnostics = timeit("did_change > gen_diagnostics", || {
-                gen_diagnostics(&document.tree.root_node())
-            });
+        if let Some(document) = workspace
+            .internal_documents
+            .get_mut(&params.text_document.uri)
+        {
+            let mut document = document.write();
+            document.edit(&params);
 
             let uri = params.text_document.uri.clone();
             let diagnostics = document.diagnostics.clone();
@@ -429,17 +246,18 @@ impl LanguageServer for Backend {
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let url = params.text_document_position_params.text_document.uri;
-        debug!(
-            "hover at {:?} in file {}",
-            params.text_document_position_params.position, &url
+        info!(
+            "Hover at {:?} in file {url}",
+            params.text_document_position_params.position
         );
 
-        let workspace = self.find_workspace(&url).await;
+        let workspace = self.find_workspace(&url);
 
-        Ok(workspace.document_map.get(&url).map(|document| {
+        Ok(workspace.internal_documents.get(&url).map(|document| {
+            let document = document.read();
             let pos = params.text_document_position_params.position.into();
             let node = deepest_named_node_at_pos(&document.tree, pos);
-            let info = workspace.node_info(&node, &document);
+            let info = workspace.node_info(&node, &document, &*self.http_client);
             let range: Range = node.range().into();
             Hover {
                 contents: HoverContents::Scalar(MarkedString::String(info)),
@@ -452,15 +270,13 @@ impl LanguageServer for Backend {
         let url = params.text_document.uri;
         let range = params.range.into();
 
-        let mut parser = self.parser.lock().await;
-
         debug!(
             "inlay_hint at {}:{range}",
             url.path_segments().unwrap().last().unwrap()
         );
 
-        let workspace = self.find_workspace(&url).await;
-        let document = if let Some(doc) = workspace.document_map.get(&url) {
+        let workspace = self.find_workspace(&url);
+        let document = if let Some(doc) = workspace.internal_documents.get(&url) {
             doc
         } else {
             return Err(tower_lsp::jsonrpc::Error::invalid_params(
@@ -468,58 +284,10 @@ impl LanguageServer for Backend {
             ));
         };
 
-        let annotations =
-            document.query_with_imports(&ALL_QUERIES.annotation_query, &workspace, &mut parser);
+        let document = document.read();
 
-        let matches = document.query_range(&ALL_QUERIES.iri_query, range);
-        let hints = matches
-            .into_iter()
-            .flat_map(|match_| match_.captures)
-            .filter_map(|capture| {
-                let iri = capture.node.text;
+        let hints = document.inlay_hint(range, &workspace, &*self.http_client);
 
-                let label = annotations
-                    .iter()
-                    .filter_map(|m| match &m.captures[..] {
-                        [frame_iri, annoation_iri, literal] => {
-                            if frame_iri.node.text == iri && annoation_iri.node.text == "rdfs:label"
-                            {
-                                Some(literal.node.text_trimmed())
-                            } else {
-                                None
-                            }
-                        }
-                        _ => unreachable!(),
-                    })
-                    .join(", ");
-
-                if label.is_empty() {
-                    None
-                } else {
-                    Some(InlayHint {
-                        position: capture.node.range.end.into(),
-                        label: InlayHintLabel::String(label),
-                        kind: None,
-                        text_edits: None,
-                        tooltip: None,
-                        padding_left: Some(true),
-                        padding_right: None,
-                        data: None,
-                    })
-                }
-
-                // workspace.get_frame_info(&iri).map(|fi| InlayHint {
-                //     position: capture.node.range.end.into(),
-                //     label: InlayHintLabel::String(fi.label()),
-                //     kind: None,
-                //     text_edits: None,
-                //     tooltip: None,
-                //     padding_left: Some(true),
-                //     padding_right: None,
-                //     data: None,
-                // })
-            })
-            .collect_vec();
         Ok(Some(hints))
     }
 
@@ -527,25 +295,22 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        debug!(
-            "goto_definition at {}",
-            params.text_document_position_params.text_document.uri
-        );
         let uri = params.text_document_position_params.text_document.uri;
-        let workspace = self.find_workspace(&uri).await;
-        let maybe_doc = workspace.document_map.get(&uri);
+        debug!("goto_definition at {}", uri);
+        let workspace = self.find_workspace(&uri);
+        let maybe_doc = workspace.internal_documents.get(&uri);
         if let Some(doc) = maybe_doc {
+            let doc = doc.read();
             let pos: Position = params.text_document_position_params.position.into();
 
             let leaf_node = deepest_named_node_at_pos(&doc.tree, pos);
             if ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind()) {
-                let iri = node_text(&leaf_node, &doc.rope).to_string();
+                let iri = trim_full_iri(node_text(&leaf_node, &doc.rope));
+                let iri = doc.abbreviated_iri_to_full_iri(iri);
 
                 debug!("Try goto definition of {}", iri);
 
                 let frame_info = workspace.get_frame_info(&iri);
-
-                debug!("Found frame info {:#?}", frame_info);
 
                 if let Some(frame_info) = frame_info {
                     let locations = frame_info
@@ -570,8 +335,12 @@ impl LanguageServer for Backend {
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         debug!("code_action at {}", params.text_document.uri);
         let url = params.text_document.uri;
-        let workspace = self.find_workspace(&url).await;
-        let doc = workspace.document_map.get(&url).unwrap();
+        let workspace = self.find_workspace(&url);
+        let doc = workspace
+            .internal_documents
+            .get(&url)
+            .ok_or(tower_lsp::jsonrpc::Error::invalid_request())?;
+        let doc = doc.read();
         let end: Position = doc.tree.root_node().range().end_point.into();
 
         Ok(Some(vec![CodeActionOrCommand::CodeAction(CodeAction {
@@ -602,11 +371,12 @@ impl LanguageServer for Backend {
             params.text_document_position.text_document.uri
         );
         let url = params.text_document_position.text_document.uri;
-        let workspace = self.find_workspace(&url).await;
-        let doc = workspace.document_map.get(&url);
+        let workspace = self.find_workspace(&url);
+        let doc = workspace.internal_documents.get(&url);
         let pos: Position = params.text_document_position.position.into();
 
         Ok(doc.map(|doc| {
+            let doc = doc.read();
             // generate keyword list that can be applied. Note that this is missing some keywords because of limitations in the grammar.
             let mut cursor = doc.tree.walk();
             cursor_goto_pos(&mut cursor, pos);
@@ -666,8 +436,9 @@ impl LanguageServer for Backend {
     ) -> Result<Option<SemanticTokensResult>> {
         debug!("semantic_tokens_full at {}", params.text_document.uri);
         let uri = params.text_document.uri;
-        let workspace = self.find_workspace(&uri).await;
-        if let Some(doc) = workspace.document_map.get(&uri) {
+        let workspace = self.find_workspace(&uri);
+        if let Some(doc) = workspace.internal_documents.get(&uri) {
+            let doc = doc.read();
             let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
 
             let query = Query::new(*LANGUAGE, query_source).expect("valid query expect");
@@ -728,30 +499,27 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<SymbolInformation>>> {
         let query = params.query;
         info!("symbol with query:{query}");
-        let workspaces = self.workspaces.lock().await;
-        let c = workspaces
+        let workspaces = self.workspaces.read();
+        let all_frame_infos = workspaces
             .iter()
-            .flat_map(|w| {
-                w.document_map.iter()
-                // .map(|d| d.value().clone())
-                // .flat_map(|d| d.frame_infos.iter().map(|i| i.value())) //.iter().map(|i| i.value()))
-            })
+            .flat_map(|workspace| workspace.internal_documents.iter())
+            .flat_map(|doc| doc.read().get_all_frame_infos())
             .collect_vec();
-        let d = c.iter().flat_map(|a| a.frame_infos.iter()).collect_vec();
 
-        info!(
-            "All frame infos: {:#?}",
-            d.iter().map(|v| v.value()).collect_vec()
-        );
-
-        let symbols = d
+        let symbols = all_frame_infos
             .iter()
-            .filter(|i| i.iri.contains(query.as_str()))
+            .filter(|fi| {
+                fi.iri.contains(query.as_str())
+                    || fi
+                        .annotations
+                        .values()
+                        .any(|v| v.iter().any(|l| l.contains(query.as_str())))
+            })
             .flat_map(|fi| {
                 fi.definitions.iter().map(|definition| SymbolInformation {
                     name: fi.iri.clone(),
                     kind: fi.frame_type.into(),
-                    tags: Some(vec![]), // TODO #38 add support for depricated entities
+                    tags: None,
                     deprecated: None,
                     location: definition.clone().into(),
                     container_name: None,
@@ -759,7 +527,6 @@ impl LanguageServer for Backend {
             })
             .collect_vec();
 
-        // .flat_map(|d| d.value().frame_infos.iter());
         Ok(Some(symbols))
     }
 
@@ -770,65 +537,69 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
-    /// LSP clients can open multiple workspaces at a time. To find the one that a particular file is located in
-    /// this functions searches in all openend workspaces.
-    async fn has_document(&self, url: &Url) -> bool {
-        let workspaces = self.lock_workspaces().await;
-        workspaces.iter().any(|w| w.document_map.contains_key(url))
-    }
+    /// This will find a workspace or create one for a given url
+    fn find_workspace<'a>(&'a self, url: &Url) -> MappedRwLockWriteGuard<'a, Workspace> {
+        let mut workspaces = self.workspaces.write();
 
-    async fn find_workspace<'a>(&'a self, url: &Url) -> MappedMutexGuard<'a, Workspace> {
-        let mut workspaces = self.workspaces.lock().await;
-
+        // TODO there are problems when the workspace is changing
+        // - A document could be in its own workspace
+        // - Then a catalog file is created or modified that would place a document in that workspace
+        // - Because of the early return the document can never move to the new workspace
         let maybe_workspace = workspaces.iter().find(|workspace| {
-            workspace.document_map.contains_key(url)
+            workspace.internal_documents.contains_key(url)
                 || workspace
                     .catalogs
                     .iter()
                     .any(|catalog| catalog.contains(&url.to_file_path().unwrap()))
         });
 
-        if maybe_workspace.is_none() {
-            info!("Workspace for {url} could not be found. Creating a new one.");
-            // Create a workspace that is a single file
-            let mut file_path = url.to_file_path().expect("URL should be a filepath");
-            file_path.pop();
-            let workspace = Workspace::new(WorkspaceFolder {
-                uri: Url::from_file_path(file_path.clone()).expect("Valid URL from filepath"), // TODO do i need the parent folder fot that?
-                name: "Single File".into(),
-            });
-            workspaces.push(workspace);
-        }
+        let folder = match maybe_workspace {
+            None => {
+                let mut file_path = url.to_file_path().expect("URL should be a filepath");
+                file_path.pop();
+                warn!("Workspace for {url} could not be found. Could the entry in catalog-v001.xml be missing? Creating a new one at {}", file_path.display());
+                let workspace_folder = WorkspaceFolder {
+                    // The workspace folder IS the single file. This is not ideal but should work for now.
+                    uri: Url::from_file_path(file_path).expect("Valid URL from filepath"),
+                    name: "Single File".into(),
+                };
+                let workspace = Workspace::new(workspace_folder.clone());
+                workspaces.push(workspace);
+                workspace_folder
+            }
+            Some(w) => w.workspace_folder.clone(),
+        };
 
-        MutexGuard::map(workspaces, |f| {
-            f.iter_mut()
-                .find(|w| w.could_contain(url))
+        RwLockWriteGuard::map(workspaces, |ws| {
+            ws.iter_mut()
+                .find(|w| w.workspace_folder == folder)
                 .expect("The file to be located in a workspace, but it was not.")
         })
     }
 
+    // TODO maybe move this into document or workspace
+    /// This will try to fetch the imports of a document
     async fn resolve_imports(
         &self,
-        document: &Document,
+        document: Arc<RwLock<InternalDocument>>,
         workspace: &Workspace,
-        parser: &mut Parser,
     ) {
+        let document = document.read();
+        debug!("Resolve imports for {}", document.uri);
         let urls = document
             .query(&ALL_QUERIES.import_query)
             .iter()
             .filter_map(|match_| match &match_.captures[..] {
-                [iri] => {
-                    Url::parse(iri.node.text.trim_end_matches(">").trim_start_matches("<")).ok()
-                }
+                [iri] => Url::parse(&trim_full_iri(&iri.node.text)[..]).ok(),
                 _ => unimplemented!(),
             })
             .collect_vec();
 
         for url in urls {
-            info!("Resolving url {url}");
-            let _ = workspace
-                .resolve_url_to_document(&url, parser)
-                .inspect_err(|e| error!("Error while resolving imports: {e}"));
+            workspace
+                .resolve_url_to_document(&url, &*self.http_client)
+                .inspect_err(|e| error!("Resolve imports error: {e:?}"))
+                .ok();
         }
     }
 }

@@ -1,0 +1,67 @@
+Prefix: : <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3/>
+Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xml: <http://www.w3.org/XML/1998/namespace>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+
+
+
+Ontology: <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3>
+
+
+Annotations: 
+    rdfs:comment "Das ist ein Beispiel aus Protege",
+    rdfs:label "Beispiel Ontology"
+
+AnnotationProperty: rdfs:comment
+
+    
+AnnotationProperty: rdfs:label
+
+    
+Datatype: rdf:PlainLiteral
+
+    
+Datatype: xsd:string
+
+    
+Class: <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3#00001>
+
+    Annotations: 
+        rdfs:label "Student"
+    
+    SubClassOf: 
+        <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3#00002>
+    
+    DisjointWith: 
+        <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3#00003>
+    
+    
+Class: <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3#00002>
+
+    Annotations: 
+        rdfs:label "Person"
+    
+    
+Class: <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3#00003>
+
+    Annotations: 
+        rdfs:label "Professor"@en
+    
+    SubClassOf: 
+        <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3#00002>
+    
+    DisjointWith: 
+        <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3#00001>
+    
+    
+Individual: <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3#00000>
+
+    Annotations: 
+        rdfs:label "Janek"@en
+    
+    Types: 
+        <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3#00001>
+    
+    
