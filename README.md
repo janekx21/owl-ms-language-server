@@ -2,7 +2,7 @@
 <img src="https://raw.githubusercontent.com/janekx21/owl-ms-language-server/refs/heads/main/img/icon.png" height="128"><br>Owl Mancherster Syntax Language Server</h2>
 <p align="center"><strong>Owl 2 Mancherster Syntax language server support for Visual Studio Code</strong></p>
 
-<img src="https://raw.githubusercontent.com/janekx21/owl-ms-language-server/refs/heads/main/img/vscode_demo.gif" height="512">
+<img src="https://raw.githubusercontent.com/janekx21/owl-ms-language-server/refs/heads/main/img/vscode_demo.gif">
 
 
 An incremental analysis assistant for writing ontologies with the [OWL 2 Web Ontology Language | Manchester Syntax](https://www.w3.org/TR/owl2-manchester-syntax/).
