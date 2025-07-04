@@ -1,13 +1,13 @@
 {
 	"name": "vscode-owl-ms",
-	"description": "Owl 2 manchester syntax plugin for vscode",
+	"description": "OWL 2 manchester syntax plugin for vscode",
 	"author": "Janek Winkler",
 	"license": "MIT",
 	"version": "0.0.1",
 	"publisher": "JanekWinkler",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/janek/vscode-owl-ms"
+		"url": "https://github.com/janek/owl-ms-language-server"
 	},
 	"engines": {
 		"vscode": "^1.75.0"
