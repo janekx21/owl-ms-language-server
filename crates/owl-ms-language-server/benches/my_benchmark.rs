@@ -2,10 +2,9 @@ use std::{hint::black_box, time::Duration};
 
 // use crate::Backend;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use owl_ms_language_server::rope_provider::RopeProvider;
+use owl_ms_language_server::{rope_provider::RopeProvider, LANGUAGE};
 use ropey::Rope;
-use tree_sitter::{InputEdit, Parser, Point, Query, QueryCursor, Tree};
-use tree_sitter_owl_ms::language;
+use tree_sitter::{InputEdit, Parser, Point, Query, QueryCursor, StreamingIterator, Tree};
 
 fn parse_helper(source_code: &String, parser: &mut Parser) {
     parser.reset();
@@ -16,9 +15,10 @@ fn re_parse_helper(source_code: &Rope, parser: &mut Parser, old_tree: &Tree) {
     let rope_provider = RopeProvider::new(source_code);
     parser.reset();
     parser
-        .parse_with(
+        .parse_with_options(
             &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
             Some(old_tree),
+            None,
         )
         .unwrap();
 }
@@ -35,7 +35,7 @@ Ontology: <http://foo.bar>
 ";
 
                 let mut parser = Parser::new();
-                parser.set_language(language()).unwrap();
+                parser.set_language(&LANGUAGE).unwrap();
                 (source_code.to_string(), parser)
             },
             |(source, parser)| parse_helper(source, parser),
@@ -59,7 +59,7 @@ fn ontology_size_bench(c: &mut Criterion) {
                     );
 
                     let mut parser = Parser::new();
-                    parser.set_language(language()).unwrap();
+                    parser.set_language(&LANGUAGE).unwrap();
                     (source_code.to_string(), parser)
                 },
                 |(source, parser)| parse_helper(source, parser),
@@ -88,11 +88,11 @@ fn ontology_change_bench(c: &mut Criterion) {
                     );
 
                     let mut parser = Parser::new();
-                    parser.set_language(language()).unwrap();
+                    parser.set_language(&LANGUAGE).unwrap();
                     let mut rope = Rope::from_str(source_code.as_str());
                     let rope_provider = RopeProvider::new(&rope);
                     let mut old_tree = parser
-                        .parse_with(&mut |i, _| rope_provider.chunk_callback(i), None)
+                        .parse_with_options(&mut |i, _| rope_provider.chunk_callback(i), None, None)
                         .unwrap();
 
                     let edit = InputEdit {
@@ -136,25 +136,25 @@ fn ontology_query_bench(c: &mut Criterion) {
                     );
 
                     let mut parser = Parser::new();
-                    parser.set_language(language()).unwrap();
+                    parser.set_language(&LANGUAGE).unwrap();
                     let rope = Rope::from_str(source_code.as_str());
                     let rope_provider = RopeProvider::new(&rope);
                     let tree = parser
-                        .parse_with(&mut |i, _| rope_provider.chunk_callback(i), None)
+                        .parse_with_options(&mut |i, _| rope_provider.chunk_callback(i), None, None)
                         .unwrap();
 
                     let qc = QueryCursor::new();
-                    let query = Query::new(
-                        language(),
-                        "[(full_iri) (simple_iri) (abbreviated_iri)]@iri",
-                    )
-                    .unwrap();
+                    let query =
+                        Query::new(&LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri")
+                            .unwrap();
                     (rope, tree, query, qc)
                 },
                 |(rope, tree, query, qc)| {
-                    let matches = qc.matches(query, tree.root_node(), RopeProvider::new(rope));
-                    matches.map(black_box).count();
-                    // matches.collect_vec();
+                    let mut matches = qc.matches(query, tree.root_node(), RopeProvider::new(rope));
+
+                    while let Some(item) = matches.next() {
+                        black_box(item);
+                    }
                 },
                 criterion::BatchSize::SmallInput,
             )

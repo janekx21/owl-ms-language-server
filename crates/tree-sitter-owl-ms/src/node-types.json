@@ -62,10 +62,21 @@
   {
     "type": "annotation_property_frame",
     "named": true,
-    "fields": {},
+    "fields": {
+      "iri": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "annotation_property_iri",
+            "named": true
+          }
+        ]
+      }
+    },
     "children": {
       "multiple": true,
-      "required": true,
+      "required": false,
       "types": [
         {
           "type": "abbreviated_iri",
@@ -116,17 +127,24 @@
   {
     "type": "class_frame",
     "named": true,
-    "fields": {},
+    "fields": {
+      "iri": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "class_iri",
+            "named": true
+          }
+        ]
+      }
+    },
     "children": {
       "multiple": true,
-      "required": true,
+      "required": false,
       "types": [
         {
           "type": "annotation",
-          "named": true
-        },
-        {
-          "type": "class_iri",
           "named": true
         },
         {
@@ -178,10 +196,21 @@
   {
     "type": "data_property_frame",
     "named": true,
-    "fields": {},
+    "fields": {
+      "iri": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "data_property_iri",
+            "named": true
+          }
+        ]
+      }
+    },
     "children": {
       "multiple": true,
-      "required": true,
+      "required": false,
       "types": [
         {
           "type": "annotation",
@@ -294,7 +323,34 @@
   {
     "type": "datatype_frame",
     "named": true,
-    "fields": {},
+    "fields": {
+      "iri": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "datatype_iri",
+            "named": true
+          },
+          {
+            "type": "decimal",
+            "named": false
+          },
+          {
+            "type": "float",
+            "named": false
+          },
+          {
+            "type": "integer",
+            "named": false
+          },
+          {
+            "type": "string",
+            "named": false
+          }
+        ]
+      }
+    },
     "children": {
       "multiple": true,
       "required": false,
@@ -305,10 +361,6 @@
         },
         {
           "type": "datatype_equavalent_to",
-          "named": true
-        },
-        {
-          "type": "datatype_iri",
           "named": true
         }
       ]
@@ -572,10 +624,25 @@
   {
     "type": "individual_frame",
     "named": true,
-    "fields": {},
+    "fields": {
+      "iri": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "individual_iri",
+            "named": true
+          },
+          {
+            "type": "node_id",
+            "named": true
+          }
+        ]
+      }
+    },
     "children": {
       "multiple": true,
-      "required": true,
+      "required": false,
       "types": [
         {
           "type": "annotation",
@@ -704,10 +771,21 @@
   {
     "type": "object_property_frame",
     "named": true,
-    "fields": {},
+    "fields": {
+      "iri": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "object_property_iri",
+            "named": true
+          }
+        ]
+      }
+    },
     "children": {
       "multiple": true,
-      "required": true,
+      "required": false,
       "types": [
         {
           "type": "annotation",

@@ -222,7 +222,7 @@ module.exports = grammar({
     datatype_frame: ($) =>
       seq(
         "Datatype:",
-        $._datatype,
+        field("iri",$._datatype),
         repeat($._annotations),
         optional($.datatype_equavalent_to),
         repeat($._annotations),
@@ -234,7 +234,7 @@ module.exports = grammar({
     class_frame: ($) =>
       seq(
         "Class:",
-        $.class_iri,
+        field("iri", $.class_iri),
         repeat(
           choice(
             $._annotations,
@@ -264,7 +264,7 @@ module.exports = grammar({
     object_property_frame: ($) =>
       seq(
         "ObjectProperty:",
-        $.object_property_iri,
+        field("iri", $.object_property_iri),
         repeat(
           choice(
             $._annotations,
@@ -301,7 +301,7 @@ module.exports = grammar({
     data_property_frame: ($) =>
       seq(
         "DataProperty:",
-        $.data_property_iri,
+        field("iri", $.data_property_iri),
         repeat(
           choice(
             $._annotations,
@@ -318,7 +318,7 @@ module.exports = grammar({
     annotation_property_frame: ($) =>
       seq(
         "AnnotationProperty:",
-        $.annotation_property_iri,
+        field("iri",$.annotation_property_iri),
         repeat(
           choice(
             $._annotations,
@@ -332,7 +332,7 @@ module.exports = grammar({
     individual_frame: ($) =>
       seq(
         "Individual:",
-        $._individual,
+        field("iri", $._individual),
         repeat(
           choice(
             $._annotations,

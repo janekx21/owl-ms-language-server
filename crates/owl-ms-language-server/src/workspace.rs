@@ -35,11 +35,11 @@ use tower_lsp::lsp_types::{
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
     SymbolKind, Url, WorkspaceFolder,
 };
-use tree_sitter::{InputEdit, Node, Parser, Point, Query, QueryCursor, Tree};
+use tree_sitter::{InputEdit, Node, Parser, Point, Query, QueryCursor, StreamingIterator, Tree};
 
 static GLOBAL_PARSER: Lazy<Mutex<Parser>> = Lazy::new(|| {
     let mut parser = Parser::new();
-    parser.set_language(*LANGUAGE).unwrap();
+    parser.set_language(&*LANGUAGE).unwrap();
     parser.set_logger(Some(Box::new(|type_, str| match type_ {
         tree_sitter::LogType::Parse => trace!(target: "tree-sitter-parse", "{}", str),
         tree_sitter::LogType::Lex => trace!(target: "tree-sitter-lex", "{}", str),
@@ -510,7 +510,7 @@ impl InternalDocument {
 
         query_cursor
             .matches(query, self.tree.root_node(), rope_provider)
-            .map(|m| UnwrappedQueryMatch {
+            .map_deref(|m| UnwrappedQueryMatch {
                 _pattern_index: m.pattern_index,
                 _id: m.id(),
                 captures: m
@@ -616,9 +616,10 @@ impl InternalDocument {
             let mut parser_guard = lock_global_parser();
             timeit("parsing", || {
                 parser_guard
-                    .parse_with(
+                    .parse_with_options(
                         &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
                         Some(&self.tree),
+                        None,
                     )
                     .expect("language to be set, no timeout to be used, no cancelation flag")
             })

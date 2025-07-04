@@ -2043,6 +2043,7 @@ version = "0.5.4"
 dependencies = [
  "cc",
  "tree-sitter",
+ "tree-sitter-language",
 ]
 
 [[package]]
