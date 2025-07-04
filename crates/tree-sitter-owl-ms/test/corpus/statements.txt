@@ -720,10 +720,15 @@ Ontology: # Comment
 
 ---
 (source_file
+  (comment)
   (ontology
+	(comment)
+	(comment)
     (individual_frame
       (individual_iri
-        (simple_iri)))))
+        (simple_iri))))
+  (comment)
+  (comment))
 
 ====================
 Imports

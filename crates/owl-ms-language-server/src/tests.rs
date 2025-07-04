@@ -6,7 +6,6 @@ use tempdir::{self, TempDir};
 use test_log::test;
 use tower_lsp::LspService;
 use tree_sitter::Parser;
-use tree_sitter::QueryMatch;
 
 /// This module contains tests.
 /// Each test function name is in the form of `<function>_<thing>_<condition>_<expectation>`.
@@ -44,47 +43,7 @@ fn parse_ontology_with_datatype_should_work() {
     // Assert
     assert_eq!(
         tree.root_node().to_sexp(),
-        "(source_file (ontology (ontology_iri (simple_iri)) (datatype_frame (datatype_iri (simple_iri)))))"
-    );
-}
-
-#[test]
-fn query_ontology_for_class_annotation_should_yield_all_class_annotations() {
-    // Arrange
-    let mut parser = arrange_parser();
-    let source_code = "
-Ontology: <http://foo.bar>
-    Class: <http://foo.bar/0>
-        Annotations:
-            rdfs:label \"Fizz\"
-";
-    let tree = parser.parse(source_code, None).unwrap();
-
-    let query_source = "
-                            (class_frame (class_iri (full_iri)@iri)\
-                                (annotation\
-                                    (annotation_property_iri (abbreviated_iri)@abbriviated-iri)\
-                                    (string_literal_no_language)@literal))";
-
-    let class_frame_query = Query::new(*LANGUAGE, query_source).unwrap();
-    let root = tree.root_node();
-    let mut query_cursor = QueryCursor::new();
-    let bytes: &[u8] = source_code.as_bytes();
-
-    // Act
-    let matches = query_cursor
-        .matches(&class_frame_query, root, bytes)
-        .collect::<Vec<QueryMatch>>();
-
-    // Assert
-    info!("{}", root.to_sexp());
-    assert_eq!(matches.len(), 1);
-    assert_eq!(
-        matches[0].captures[1]
-            .node
-            .utf8_text(bytes)
-            .expect("valid utf-8"),
-        "rdfs:label"
+        "(source_file (ontology (ontology_iri (simple_iri)) (datatype_frame iri: (datatype_iri (simple_iri)))))"
     );
 }
 
@@ -308,13 +267,21 @@ async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
                     WorkspaceMember::OmnFile {
                         name: "a2.omn".into(),
                         content: r#"
-                        Prefix: : <http://ontology-a.org/ontology#>
-                        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-                        Ontology: <http://ontology-a.org/a2.omn>
-                            Class: ClassA2
-                                Annotations:
-                                    rdfs:label "Some class in A2",
-                                    test "test"
+                        Prefix: #comment
+                            : #comment
+                            <http://ontology-a.org/ontology#> #comment
+                        Prefix: #comment
+                            rdfs: #comment
+                            <http://www.w3.org/2000/01/rdf-schema#> #comment
+                        Ontology: #comment
+                            <http://ontology-a.org/a2.omn> #comment
+                            Class: #comment
+                                ClassA2 #comment
+                                Annotations: #comment
+                                    rdfs:label #comment
+                                    "Some class in A2", #comment
+                                    test #comment
+                                    "test" #comment
                     "#
                         .into(),
                     },
@@ -434,8 +401,8 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
     };
     info!("{:#?}", service.inner().workspaces.read());
     info!("{contents}");
-    assert!(contents.contains("test"));
     assert!(contents.contains("Some class in A2"));
+    assert!(contents.contains("test"));
 }
 
 #[test(tokio::test)]
@@ -1449,7 +1416,7 @@ fn arrange_workspace_member(member: WorkspaceMember, path: &Path) {
 
 fn arrange_parser() -> Parser {
     let mut parser = Parser::new();
-    parser.set_language(*LANGUAGE).unwrap();
+    parser.set_language(&LANGUAGE).unwrap();
     parser
 }
 

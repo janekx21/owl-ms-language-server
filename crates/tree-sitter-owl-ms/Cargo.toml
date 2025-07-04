@@ -2,8 +2,9 @@
 name = "tree-sitter-owl-ms"
 description = "owl-ms grammar for the tree-sitter parsing library"
 readme = "README.md"
-keywords = ["incremental", "parsing", "owl-ms"]
-categories = ["parsing", "text-editors"]
+keywords = ["incremental", "parsing", "tree-sitter", "owl-ms"]
+categories = ["parser-implementations", "parsing", "text-editors"]
+autoexamples = false
 
 edition.workspace = true
 authors.workspace = true
@@ -17,13 +18,18 @@ include = [
   "grammar.js",
   "queries/*",
   "src/*",
+  "tree-sitter.json",
+  "LICENSE",
 ]
 
 [lib]
 path = "bindings/rust/lib.rs"
 
 [dependencies]
-tree-sitter = "~0.20.10"
+tree-sitter-language = "0.1"
 
 [build-dependencies]
-cc = "1.0"
+cc = "1.2"
+
+[dev-dependencies]
+tree-sitter = "0.25"

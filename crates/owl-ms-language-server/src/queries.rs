@@ -45,15 +45,15 @@ pub struct AllQueries {
 
 pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
     import_query: Query::new(
-        *LANGUAGE,
+        &LANGUAGE,
         "(import [(full_iri) (simple_iri) (abbreviated_iri)]@iri)",
     )
     .unwrap(),
-    iri_query: Query::new(*LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri").unwrap(),
+    iri_query: Query::new(&LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri").unwrap(),
     annotation_query: Query::new(
-        *LANGUAGE,
+        &LANGUAGE,
         "
-        (_ . (_ . [(full_iri) (simple_iri) (abbreviated_iri)]@frame_iri)
+        (_ iri: (_)@frame_iri
             (annotation
                 (annotation_property_iri)@iri
                 [
@@ -65,7 +65,7 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
     )
     .unwrap(),
     frame_query: Query::new(
-        *LANGUAGE,
+        &LANGUAGE,
         "
             [
                 (datatype_frame (datatype_iri)@frame_iri)
@@ -79,14 +79,14 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
     )
     .unwrap(),
     ontology_id: Query::new(
-        *LANGUAGE,
+        &LANGUAGE,
         "
             (ontology (ontology_iri)@iri)
         ",
     )
     .unwrap(),
     prefix: Query::new(
-        *LANGUAGE,
+        &LANGUAGE,
         "
             (prefix_declaration (prefix_name)@name (full_iri)@iri)
         ",
@@ -99,11 +99,9 @@ mod tests {
     use crate::workspace::lock_global_parser;
 
     use super::*;
-    use itertools::Itertools;
-    use log::info;
     use pretty_assertions::assert_eq;
     use test_log::test;
-    use tree_sitter::QueryCursor;
+    use tree_sitter::{QueryCursor, StreamingIterator};
 
     #[test]
     fn query_frame_query() {
@@ -125,11 +123,6 @@ mod tests {
         let matches = query_cursor.matches(q, tree.root_node(), text.as_bytes());
 
         // Assert
-        let m = matches.into_iter().collect_vec();
-
-        info!("{:#?}", tree.root_node().to_sexp());
-        info!("{m:#?}");
-
-        assert_eq!(m.len(), 1);
+        assert_eq!(matches.count(), 1);
     }
 }
