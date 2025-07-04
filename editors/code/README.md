@@ -4,7 +4,7 @@
 
 Provides syntax highlighting and rich intellisense for .omn files in VS Code, using the OWL-MS language server.
 
-<img src="https://raw.githubusercontent.com/janekx21/owl-ms-language-server/refs/heads/main/img/vscode_demo.gif" height="512">
+<img src="https://raw.githubusercontent.com/janekx21/owl-ms-language-server/refs/heads/main/img/vscode_demo.gif">
 
 ## Features
 
