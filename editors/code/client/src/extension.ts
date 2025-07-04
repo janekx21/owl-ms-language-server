@@ -69,7 +69,7 @@ export function activate(context: ExtensionContext) {
 		// Create the language client and start the client.
 		client = new LanguageClient(
 			'owl-ms-language-server',
-			'Owl Manchester Syntax Language Server',
+			'OWL Manchester Syntax Language Server',
 			serverOptions,
 			clientOptions
 		);

@@ -1,26 +1,23 @@
-# Owl 2 Mancherster Syntax language server support for Visual Studio Code
+<h2 align="center">
+<img src="https://raw.githubusercontent.com/janekx21/owl-ms-language-server/refs/heads/main/img/icon.png" height="128"><br>OWL Mancherster Syntax Language Server</h2>
+<p align="center"><strong>OWL Mancherster Syntax support for Visual Studio Code</strong></p>
 
-Provides syntax highlighting and rich intellisense for .omn files in VS Code, using the owl-ms language server.
+Provides syntax highlighting and rich intellisense for .omn files in VS Code, using the OWL-MS language server.
 
-![extension icon](icon.png)
+<img src="https://raw.githubusercontent.com/janekx21/owl-ms-language-server/refs/heads/main/img/demo.gif" height="512">
 
 ## Features
 
 This Language Server works for omn files. It has the following language features:
-- Completions
-- Diagnostics regenerated on each file change or configuration change
+- Syntax highlighting
+- Auto completions
+- Realtime diagnostics
 - Go to definition
-- Hover
-- Semantic tokens
-
-It also includes an End-to-End test.
-
-## Extension Settings
-
-None (yet)
-
-<!-- ## Known Issue -->
-<!-- None -->
+- Hover information
+- Inlay hints (resolved `rdfs:label`)
+- Workspace symbol search `<Ctrl-N>`
+- Multiple files with catalog-v001.xml support
+- Multiple workspaces
 
 ## Contributing
 

@@ -11,3 +11,5 @@ examples/oeo-full.omn
 **/node_modules
 **/*.bck
 .direnv
+editors/code/server/owl-ms-language-server
+editors/code/server/owl-ms-language-server.exe

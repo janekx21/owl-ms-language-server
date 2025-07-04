@@ -1,13 +1,13 @@
 {
 	"name": "vscode-owl-ms",
-	"version": "0.5.1",
-	"displayName": "Owl Manchester Syntax",
-	"description": "Owl language server support for vscode",
+	"version": "0.5.2",
+	"displayName": "OWL Manchester Syntax",
+	"description": "OWL language server support for vscode",
 	"author": "Janek Winkler",
 	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/janekx21/vscode-owl-ms"
+		"url": "https://github.com/janekx21/owl-ms-language-server"
 	},
 	"publisher": "JanekWinkler",
 	"categories": [
@@ -39,7 +39,7 @@
 					".omn"
 				],
 				"aliases": [
-					"Owl Manchester Syntax"
+					"OWL Manchester Syntax"
 				]
 			}
 		]
