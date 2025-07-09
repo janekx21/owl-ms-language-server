@@ -39,8 +39,10 @@
 					".omn"
 				],
 				"aliases": [
-					"OWL Manchester Syntax"
-				]
+					"OWL Manchester Syntax",
+					"omn"
+				],
+				"configuration": "./language-configuration.json"
 			}
 		]
 	},
