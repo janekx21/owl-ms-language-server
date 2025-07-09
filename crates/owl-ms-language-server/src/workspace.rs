@@ -1058,7 +1058,10 @@ fn get_frame_info_helper_ex(doc: &mut ExternalDocument, iri: &Iri) -> Option<Fra
                     iri: iri.to_string(),
                     annotations,
                     frame_type: FrameType::Class,
-                    definitions: vec![],
+                    definitions: vec![Location {
+                        uri: doc.uri.clone(),
+                        range: Range::ZERO,
+                    }],
                 })
             }
             _ => None,
@@ -1128,7 +1131,7 @@ pub struct FrameInfo {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Location {
     uri: Url,
-    range: Range,
+    pub range: Range,
 }
 
 impl From<Location> for tower_lsp::lsp_types::Location {

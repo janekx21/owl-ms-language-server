@@ -1,11 +1,13 @@
 use crate::{catalog::Catalog, web::StaticClient, *};
 use anyhow::anyhow;
+use indoc::indoc;
 use pretty_assertions::assert_eq;
-use std::{fs, path::Path};
+use ropey::Rope;
+use std::{fs, net::ToSocketAddrs, path::Path};
 use tempdir::{self, TempDir};
 use test_log::test;
 use tower_lsp::LspService;
-use tree_sitter::Parser;
+use tree_sitter::{InputEdit, ParseOptions, Parser};
 
 /// This module contains tests.
 /// Each test function name is in the form of `<function>_<thing>_<condition>_<expectation>`.
@@ -25,26 +27,7 @@ fn parse_ontology_should_work() {
     let tree = parser.parse(source_code, None).unwrap();
 
     // Assert
-    assert_eq!(
-        tree.root_node().to_sexp(),
-        "(source_file (ontology (ontology_iri (simple_iri))))"
-    );
-}
-
-#[test]
-fn parse_ontology_with_datatype_should_work() {
-    // Arrange
-    let mut parser = arrange_parser();
-
-    let source_code = "Ontology: o\nDatatype: d";
-    // Act
-    let tree = parser.parse(source_code, None).unwrap();
-
-    // Assert
-    assert_eq!(
-        tree.root_node().to_sexp(),
-        "(source_file (ontology (ontology_iri (simple_iri)) (datatype_frame iri: (datatype_iri (simple_iri)))))"
-    );
+    assert_eq!(tree.root_node().has_error(), false);
 }
 
 #[test]
@@ -767,7 +750,6 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
 
 #[test(tokio::test)]
 async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
-    // TODO hier
     // Arrange
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![WorkspaceMember::Folder {

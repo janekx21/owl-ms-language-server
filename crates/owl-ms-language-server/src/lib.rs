@@ -9,24 +9,29 @@ mod tests;
 mod web;
 mod workspace;
 
+use clap::parser;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
 use parking_lot::{MappedRwLockWriteGuard, RwLock, RwLockWriteGuard};
 use position::Position;
-use queries::{ALL_QUERIES, NODE_TYPES};
+use queries::{Rule, ALL_QUERIES, GRAMMAR, NODE_TYPES};
 use range::Range;
 use rope_provider::RopeProvider;
+use std::any::Any;
 use std::collections::HashMap;
+use std::ops::SubAssign;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
-use tree_sitter::{Language, Node, Point, Query, QueryCursor, StreamingIterator, Tree, TreeCursor};
+use tree_sitter::{
+    InputEdit, Language, Node, Point, Query, QueryCursor, StreamingIterator, Tree, TreeCursor,
+};
 use web::{HttpClient, UreqClient};
-use workspace::{node_text, trim_full_iri, InternalDocument, Workspace};
+use workspace::{lock_global_parser, node_text, trim_full_iri, InternalDocument, Workspace};
 
 // Constants
 
@@ -308,12 +313,20 @@ impl LanguageServer for Backend {
 
                 debug!("Try goto definition of {}", iri);
 
-                let frame_info = workspace.get_frame_info(&iri);
+                // TODO #16 is this now correct?
+                let frame_info = workspace.get_frame_info_recursive(&iri, &doc, &*self.http_client);
 
                 if let Some(frame_info) = frame_info {
                     let locations = frame_info
                         .definitions
                         .iter()
+                        .sorted_by_key(|l| {
+                            if l.range == Range::ZERO {
+                                100000 // No range? Then put this at the end
+                            } else {
+                                l.range.start.line
+                            }
+                        })
                         .map(|l| l.clone().into())
                         .collect_vec();
 
@@ -375,54 +388,125 @@ impl LanguageServer for Backend {
 
         Ok(doc.map(|doc| {
             let doc = doc.read();
-            // generate keyword list that can be applied. Note that this is missing some keywords because of limitations in the grammar.
-            let mut cursor = doc.tree.walk();
-            cursor_goto_pos(&mut cursor, pos);
-            while cursor.node().is_error() {
-                if !cursor.goto_parent() {
-                    break; // we reached the root
-                }
-            }
-            let parent_kind = cursor.node().kind();
-            let possible_children = NODE_TYPES
-                .get(parent_kind)
-                .map(|static_node| static_node.children.types.clone())
-                .unwrap_or_default();
 
-            let keywords = possible_children
-                .iter()
-                .filter_map(|child| node_type_to_keyword(child.type_.as_ref()))
-                .map(|keyword| CompletionItem {
-                    label: keyword,
-                    ..Default::default()
-                });
+            let kws = try_keywords_at_position(&doc, pos);
+
+            info!("The resultingn kws are {kws:#?}");
+
+            // generate keyword list that can be applied. Note that this is missing some keywords because of limitations in the grammar.
+            // let mut cursor = doc.tree.walk();
+            // cursor_goto_pos(&mut cursor, pos);
+            // while cursor.node().is_error() {
+            //     if !cursor.goto_parent() {
+            //         break; // we reached the root
+            //     }
+            // }
+
+            // info!("Cursor node {:#?}", cursor.node());
+
+            let pos_one_left = Position {
+                line: pos.line,
+                character: pos.character.checked_sub(1).unwrap_or_default(),
+            };
+
+            let node = doc
+                .tree
+                .root_node()
+                .named_descendant_for_point_range(pos_one_left.into(), pos_one_left.into())
+                .expect("The pos to be in at least one node");
+
+            // // Goto prev siblin or ancestor that is not an error
+            // while node.is_error() || node.kind() == "comment" {
+            //     debug!("- Node is {node:#?}");
+            //     if let Some(ps) = node.prev_named_sibling() {
+            //         debug!("  - Go to sibling");
+            //         node = ps;
+            //     } else if let Some(p) = node.parent() {
+            //         debug!("  - Go to parent");
+            //         node = p;
+            //     } else {
+            //         break; // root reached
+            //     }
+            // }
+
+            // // Goto last named decendent in that prev siblin
+            // while node.named_child_count() > 1 {
+            //     node = node.named_child(node.named_child_count() - 1).unwrap();
+            // }
+
+            // // Goto parent if the node is a keyword
+            // match node.kind() {
+            //     k if k.starts_with("keyword_") => {
+            //         node = node.parent().unwrap();
+            //     }
+            //     _ => {}
+            // }
+
+            // // The node should now be the named node before the error
+
+            // info!("Cursor node 2 (no err) {:#?} \n {}", node, node.to_sexp());
+
+            // let mut node_kinds = vec![node.kind()];
+
+            // match node.kind() {
+            //     "class_frame" => {
+            //         node_kinds.push("ontology");
+            //     }
+            //     "characteristics" => {
+            //         node_kinds.push(node.parent().unwrap().kind());
+            //         node_kinds.push(node.parent().unwrap().parent().unwrap().kind());
+            //     }
+            //     _ => {}
+            // }
+
+            // info!("Therefore nodekinds is {:#?}", node_kinds);
+
+            // let mut possible_children_kinds = vec![];
+
+            // for node_kind in node_kinds {
+            //     if let Some(sn) = NODE_TYPES.get(node_kind) {
+            //         for ele in &sn.children.types {
+            //             possible_children_kinds.push(ele.type_.clone());
+            //         }
+            //     }
+            // }
+
+            // info!(
+            //     "The resulting possible children kinds are {:#?}",
+            //     possible_children_kinds
+            // );
+
+            // let keywords = possible_children_kinds
+            // .iter()
+            // .flat_map(|child_kind| node_kind_keywords(child_kind).map(|k| k.to_string()))
+            let keywords_completion_items = kws.into_iter().map(|keyword| CompletionItem {
+                label: keyword,
+                kind: Some(CompletionItemKind::KEYWORD),
+                ..Default::default()
+            });
 
             let mut items = vec![];
 
             // Generate the list of iris that can be inserted.
-            let child_node_types: Vec<String> = possible_children
-                .iter()
-                .filter_map(|child| node_type_to_keyword(child.type_.as_ref()))
-                .collect();
-            debug!("parent kind {}", parent_kind);
-            debug!("child node type {:?}", child_node_types);
+            let partial_text = node_text(&node, &doc.rope).to_string();
 
-            let partial_text = node_text(&cursor.node(), &doc.rope).to_string();
-
-            if parent_kind == "simple_iri" {
+            if node.kind() == "simple_iri" {
                 let iris: Vec<CompletionItem> = workspace
                     .search_frame(&partial_text)
                     .iter()
                     .map(|(iri, _frame)| CompletionItem {
                         label: iri.clone(),
+                        kind: Some(CompletionItemKind::REFERENCE),
                         // TODO #29 add details from the frame
                         ..Default::default()
                     })
+                    // TODO #29 add items for simple iri, abbriviated iri and full iri
+                    // Take the shortest one maybe
                     .collect();
                 items.extend(iris);
             }
 
-            items.extend(keywords);
+            items.extend(keywords_completion_items);
 
             CompletionResponse::Array(items)
         }))
@@ -655,23 +739,207 @@ fn cursor_goto_pos(cursor: &mut TreeCursor, pos: Position) {
 }
 
 // TODO this could be even better, if the grammar would consider all possible sub properties like "sub_class_of" for every frame type. This can be done by splitting a buch of rules up or returning a list of possible keywords for node types.
-fn node_type_to_keyword(_type: &str) -> Option<String> {
+fn node_kind_keywords(_type: &str) -> Option<&str> {
     match _type {
-        "ontology" => Some("Ontology:".to_string()),
-        "import" => Some("Import:".to_string()),
-        "class_frame" => Some("Class:".to_string()),
-        "datatype_frame" => Some("Datatype:".to_string()),
-        "object_property_frame" => Some("ObjectProperty:".to_string()),
-        "annotation_property_frame" => Some("AnnotationProperty:".to_string()),
-        "data_property_frame" => Some("DataProperty:".to_string()),
-        "individual_frame" => Some("Individual:".to_string()),
-        "annotation" => Some("Annotations:".to_string()),
-        "datatype_equavalent_to" => Some("EquivalentTo:".to_string()),
-        "sub_class_of" => Some("SubClassOf:".to_string()),
-        "equavalent_to" => Some("EquivalentTo:".to_string()),
-        "disjoint_with" => Some("DisjointWith:".to_string()),
-        "disjoint_union_of" => Some("DisjointUnionOf:".to_string()),
-        "has_key" => Some("HasKey:".to_string()),
+        // Top
+        "prefix_declaration" => Some("Prefix:"),
+        "ontology" => Some("Ontology:"),
+        "import" => Some("Import:"),
+
+        // Frametypes
+        "class_frame" => Some("Class:"),
+        "datatype_frame" => Some("Datatype:"),
+        "object_property_frame" => Some("ObjectProperty:"),
+        "annotation_property_frame" => Some("AnnotationProperty:"),
+        "data_property_frame" => Some("DataProperty:"),
+        "individual_frame" => Some("Individual:"),
+
+        // Global
+        "annotation" => Some("Annotations:"),
+
+        // Class Frame
+        "sub_class_of" => Some("SubClassOf:"),
+        "class_equavalent_to" => Some("EquivalentTo:"),
+        "class_disjoint_with" => Some("DisjointWith:"),
+        "disjoint_union_of" => Some("DisjointUnionOf:"),
+        "equivalent_to" => Some("EquivalentTo:"),
+        "has_key" => Some("HasKey:"),
+
+        // Datatype Frame
+        "datatype_equavalent_to" => Some("EquivalentTo:"),
+
+        // Object Property Frame
+        "domain" => Some("Domain:"),
+        "range" => Some("Range:"),
+        "sub_property_of" => Some("SubPropertyOf:"),
+        "object_property_equivalent_to" => Some("EquivalentTo:"),
+        "object_property_disjoint_with" => Some("DisjointWith:"),
+        "inverse_of" => Some("InverseOf:"),
+        "characteristics" => Some("Characteristics:"),
+        "sub_property_chain" => Some("SubPropertyChain:"),
+
+        // _object_property_characteristic Keywords
+        "keyword_functional" => Some("Functional"),
+        "keyword_inverse_functional" => Some("InverseFunctional"),
+        "keyword_reflexive" => Some("Reflexive"),
+        "keyword_irreflexive" => Some("Irreflexive"),
+        "keyword_symmetric" => Some("Symmetric"),
+        "keyword_asymmetric" => Some("Asymmetric"),
+        "keyword_transitive" => Some("Transitive"),
+
+        // TODO extend!
         _ => None,
     }
+}
+
+fn try_keywords_at_position(document: &InternalDocument, cursor: Position) -> Vec<String> {
+    let mut parser = lock_global_parser();
+    let rope = document.rope.clone();
+    let tree = document.tree.clone();
+
+    let cursor_char_index = rope.line_to_char(cursor.line as usize) + cursor.character as usize;
+
+    // let mut cursor_one_left = cursor.clone();
+    // cursor_one_left.character -= 1;
+
+    // let curor_node = tree
+    //     .root_node()
+    //     .descendant_for_point_range(cursor_one_left.into(), cursor_one_left.into())
+    //     .unwrap();
+
+    let line = rope.line(cursor.line as usize).to_string();
+    let partial = word_before_character(cursor.character as usize, &line);
+
+    // let partial = node_text(&curor_node, &rope).to_string();
+    // let partial = curor_node.utf8_text(source_code.as_bytes()).unwrap();
+
+    debug!("Cursor node text is {:?}", partial);
+
+    let grammar = &GRAMMAR;
+    let keywords = grammar
+        .rules
+        .iter()
+        .filter_map(|item| match item {
+            (rule_name, Rule::String { value }) if rule_name.starts_with("keyword_") => Some(value),
+            _ => None,
+        })
+        .collect_vec();
+
+    // let keywords = vec!["Class:", "DataClass:", "Functional"];
+    let kws = keywords
+        .iter()
+        .filter(|k| k.starts_with(&partial))
+        .collect_vec();
+
+    debug!("Checking {} keywords", kws.len());
+
+    kws.iter()
+        .filter_map(|kw| {
+            let mut rope_version = rope.clone();
+            let change = &kw[partial.len()..];
+
+            debug!(
+                "A possible source code version for {kw} with rope version {}",
+                rope_version
+            );
+
+            let mut tree = tree.clone(); // This is fast
+
+            // TODO this tree edit is broken !!!!!!!!!!!!!!zz
+            let old_range: Range = Range {
+                start: Position {
+                    line: cursor.line,
+                    character: cursor.character - partial.len() as u32,
+                },
+                end: cursor,
+            };
+            let start_char = rope_version
+                .try_line_to_char(old_range.start.line as usize)
+                .expect("line_idx out of bounds")
+                + (old_range.start.character as usize);
+
+            let old_end_char = rope_version
+                .try_line_to_char(old_range.end.line as usize)
+                .expect("line_idx out of bounds")
+                + (old_range.end.character as usize); // exclusive
+
+            // Must come before the rope is changed!
+            let old_end_byte = rope_version.char_to_byte(old_end_char);
+
+            rope_version.insert(cursor_char_index, change);
+
+            // Must come after rope changed!
+            let start_byte = rope_version.char_to_byte(cursor_char_index);
+            let new_end_byte = start_byte + change.len();
+            // TODO byte index out of range
+            let new_end_line = rope_version.byte_to_line(new_end_byte);
+            let new_end_character =
+                rope_version.byte_to_char(new_end_byte) - rope_version.line_to_char(new_end_line);
+
+            let edit = InputEdit {
+                start_byte,
+                start_position: old_range.start.into(),
+
+                old_end_byte,
+                old_end_position: old_range.end.into(),
+
+                new_end_byte: start_byte + change.len(),
+                new_end_position: Point {
+                    row: new_end_line,
+                    column: new_end_character,
+                },
+            };
+            tree.edit(&edit);
+
+            let rope_provider = RopeProvider::new(&rope_version);
+            let new_tree = parser
+                .parse_with_options(
+                    &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+                    Some(&tree),
+                    None,
+                )
+                .expect("language to be set, no timeout to be used, no cancelation flag");
+
+            // let new_tree = parser.parse(source_code_version, Some(&tree).unwrap();
+            debug!("New tree {:?}", new_tree.root_node().to_sexp());
+
+            let mut cursor_one_left = cursor.to_owned();
+            cursor_one_left.character = cursor_one_left.character.saturating_sub(1);
+            let cursor_node_version = new_tree
+                .root_node()
+                .named_descendant_for_point_range(cursor_one_left.into(), cursor_one_left.into())
+                .unwrap();
+
+            debug!("{cursor_node_version:#?} is {}", cursor_node_version.kind());
+
+            if cursor_node_version.kind().starts_with("keyword_")
+                && !cursor_node_version.parent().unwrap().is_error()
+            {
+                debug!("Found possible keyword {kw}!");
+                Some(kw.to_string())
+            } else {
+                debug!("{kw} is not possible");
+                None
+            }
+        })
+        .collect_vec()
+}
+
+/// Returns the word before the [`character`] position in the [`line`]
+///
+/// # Examples
+///
+/// ```
+/// let word = owl_ms_language_server::word_before_character(25, "This is a line with multi words");
+/// assert_eq!(word, "multi");
+/// ```
+pub fn word_before_character(character: usize, line: &str) -> String {
+    line[..character]
+        .chars()
+        .rev()
+        .take_while(|c| c.is_alphabetic())
+        .collect_vec()
+        .iter()
+        .rev()
+        .collect::<String>()
 }
