@@ -13,32 +13,43 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay }:
-    flake-utils.lib.eachDefaultSystem
-      (system:
-        let
-          overlays = [ (import rust-overlay) ];
-          pkgs = import nixpkgs {
-            inherit system overlays;
-          };
-        in
-        with pkgs;
-        {
-          devShells.default = mkShell {
-            buildInputs = [
-              (rust-bin.stable.latest.default.override {
-                extensions = [ "rust-analyzer" "rust-src" ];
-              })
-              clang
-            ];
-            RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
-            nativeBuildInputs = with pkgs; [
-              cargo
-              clippy
-              rust-analyzer
-              rustc
-            ];
-          };
-        }
-      );
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+      rust-overlay,
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
+      let
+        overlays = [ (import rust-overlay) ];
+        pkgs = import nixpkgs {
+          inherit system overlays;
+        };
+      in
+      with pkgs;
+      {
+        devShells.default = mkShell {
+          buildInputs = [
+            (rust-bin.stable.latest.default.override {
+              extensions = [
+                "rust-analyzer"
+                "rust-src"
+              ];
+            })
+            clang
+          ];
+          RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+          nativeBuildInputs = with pkgs; [
+            cargo
+            clippy
+            rust-analyzer
+            rustc
+            nodejs_22
+            tree-sitter
+          ];
+        };
+      }
+    );
 }
