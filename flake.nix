@@ -27,6 +27,8 @@
         pkgs = import nixpkgs {
           inherit system overlays;
         };
+
+        tree-sitter-watch = pkgs.writeShellScriptBin "tree-sitter-watch" ''${pkgs.watchexec}/bin/watchexec --clear -e js -e scm -e txt "${pkgs.tree-sitter}/bin/tree-sitter generate && ${pkgs.tree-sitter}/bin/tree-sitter test"'';
       in
       with pkgs;
       {
@@ -48,6 +50,9 @@
             rustc
             nodejs_22
             tree-sitter
+
+            # Scripts of this repository
+            tree-sitter-watch
           ];
         };
       }

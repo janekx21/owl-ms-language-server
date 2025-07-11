@@ -9,7 +9,6 @@ mod tests;
 mod web;
 mod workspace;
 
-use clap::parser;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
@@ -18,9 +17,7 @@ use position::Position;
 use queries::{Rule, ALL_QUERIES, GRAMMAR, NODE_TYPES};
 use range::Range;
 use rope_provider::RopeProvider;
-use std::any::Any;
 use std::collections::HashMap;
-use std::ops::SubAssign;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::{self};
@@ -836,54 +833,30 @@ fn try_keywords_at_position(document: &InternalDocument, cursor: Position) -> Ve
     kws.iter()
         .filter_map(|kw| {
             let mut rope_version = rope.clone();
-            let change = &kw[partial.len()..];
+            let change = kw[partial.len()..].to_string() + " a";
 
-            debug!(
-                "A possible source code version for {kw} with rope version {}",
-                rope_version
-            );
 
             let mut tree = tree.clone(); // This is fast
 
-            // TODO this tree edit is broken !!!!!!!!!!!!!!zz
-            let old_range: Range = Range {
-                start: Position {
-                    line: cursor.line,
-                    character: cursor.character - partial.len() as u32,
-                },
-                end: cursor,
-            };
-            let start_char = rope_version
-                .try_line_to_char(old_range.start.line as usize)
-                .expect("line_idx out of bounds")
-                + (old_range.start.character as usize);
-
-            let old_end_char = rope_version
-                .try_line_to_char(old_range.end.line as usize)
-                .expect("line_idx out of bounds")
-                + (old_range.end.character as usize); // exclusive
-
             // Must come before the rope is changed!
-            let old_end_byte = rope_version.char_to_byte(old_end_char);
+            let cursor_byte_index = rope_version.char_to_byte(cursor_char_index);
 
-            rope_version.insert(cursor_char_index, change);
+            rope_version.insert(cursor_char_index, &change);
 
             // Must come after rope changed!
-            let start_byte = rope_version.char_to_byte(cursor_char_index);
-            let new_end_byte = start_byte + change.len();
-            // TODO byte index out of range
-            let new_end_line = rope_version.byte_to_line(new_end_byte);
+            let new_end_byte = cursor_byte_index + change.len();
+            let new_end_line = cursor.line as usize;
             let new_end_character =
                 rope_version.byte_to_char(new_end_byte) - rope_version.line_to_char(new_end_line);
 
             let edit = InputEdit {
-                start_byte,
-                start_position: old_range.start.into(),
+                // Old range is just a zero size range
+                start_byte: cursor_char_index,
+                start_position: cursor.into(),
+                old_end_byte: cursor_char_index,
+                old_end_position: cursor.into(),
 
-                old_end_byte,
-                old_end_position: old_range.end.into(),
-
-                new_end_byte: start_byte + change.len(),
+                new_end_byte,
                 new_end_position: Point {
                     row: new_end_line,
                     column: new_end_character,
@@ -900,8 +873,8 @@ fn try_keywords_at_position(document: &InternalDocument, cursor: Position) -> Ve
                 )
                 .expect("language to be set, no timeout to be used, no cancelation flag");
 
-            // let new_tree = parser.parse(source_code_version, Some(&tree).unwrap();
-            debug!("New tree {:?}", new_tree.root_node().to_sexp());
+            debug!(
+                "A possible source code version for {kw} (change is {change}) with rope version {rope_version}\nNew tree {:?}", new_tree.root_node().to_sexp());
 
             let mut cursor_one_left = cursor.to_owned();
             cursor_one_left.character = cursor_one_left.character.saturating_sub(1);
