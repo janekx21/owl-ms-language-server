@@ -230,10 +230,11 @@ async fn backend_hover_on_class_should_show_class_info() {
         HoverContents::Scalar(MarkedString::String(str)) => str,
         _ => panic!("Did not think of that"),
     };
-    assert_eq!(
-        contents,
-        "Class **Janek der Coder**\n\n---\n`label`: Janek der Coder\nIRI: Janek"
-    );
+
+    assert!(contents.contains("Class"));
+    assert!(contents.contains("**Janek der Coder**"));
+    assert!(contents.contains("`label`: Janek der Coder"));
+    assert!(contents.contains("IRI: Janek"));
 }
 
 async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {

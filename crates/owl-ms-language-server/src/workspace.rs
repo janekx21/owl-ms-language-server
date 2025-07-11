@@ -1330,13 +1330,19 @@ impl FrameInfo {
                     })
                     .unwrap_or(iri.clone());
                 // TODO #28 use values directly
-                let annoation_display = self.annoation_display(iri).unwrap_or(iri.clone());
+                let mut annoation_display = self.annoation_display(iri).unwrap_or(iri.clone());
+
+                // If this is a multiline string then give it some space to work whith
+                if annoation_display.contains("\n") {
+                    annoation_display = format!("\n{annoation_display}\n\n");
+                }
+
                 format!("`{iri_label}`: {annoation_display}")
             })
-            .join("  \n");
+            .join("\n");
 
         format!(
-            "{entity} **{label}**\n\n---\n{annotations}\nIRI: {}",
+            "{entity} **{label}**\n\n---\n{annotations}\n\nIRI: {}",
             self.iri
         )
     }
