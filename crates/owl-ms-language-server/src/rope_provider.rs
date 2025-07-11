@@ -4,7 +4,7 @@ use tree_sitter::TextProvider;
 
 pub struct RopeProvider<'a>(pub &'a Rope);
 
-impl<'a> TextProvider<'a> for RopeProvider<'a> {
+impl<'a> TextProvider<&'a [u8]> for RopeProvider<'a> {
     type I = ChunksBytes<'a>;
 
     fn text(&mut self, node: Node) -> Self::I {
@@ -22,6 +22,9 @@ impl<'a> RopeProvider<'a> {
 
     pub fn chunk_callback(&self, byte_idx: usize) -> &[u8] {
         // TODO Why is reparsing this not O(log n)?
+        // Maybe the rope traversal takes too long.
+        // Report(i, j) complexity is in O(j + log N)
+        // See https://en.wikipedia.org/wiki/Rope_(data_structure)
         if byte_idx > self.0.len_bytes() {
             return b""; // out of bounds
         }

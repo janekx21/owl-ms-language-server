@@ -6,7 +6,7 @@
       "type": "SYMBOL",
       "name": "_ontology_document"
     },
-    "_comment": {
+    "comment": {
       "type": "TOKEN",
       "content": {
         "type": "SEQ",
@@ -1430,8 +1430,12 @@
           "value": "Datatype:"
         },
         {
-          "type": "SYMBOL",
-          "name": "_datatype"
+          "type": "FIELD",
+          "name": "iri",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_datatype"
+          }
         },
         {
           "type": "REPEAT",
@@ -1494,8 +1498,12 @@
           "value": "Class:"
         },
         {
-          "type": "SYMBOL",
-          "name": "class_iri"
+          "type": "FIELD",
+          "name": "iri",
+          "content": {
+            "type": "SYMBOL",
+            "name": "class_iri"
+          }
         },
         {
           "type": "REPEAT",
@@ -1640,8 +1648,12 @@
           "value": "ObjectProperty:"
         },
         {
-          "type": "SYMBOL",
-          "name": "object_property_iri"
+          "type": "FIELD",
+          "name": "iri",
+          "content": {
+            "type": "SYMBOL",
+            "name": "object_property_iri"
+          }
         },
         {
           "type": "REPEAT",
@@ -1835,8 +1847,12 @@
           "value": "DataProperty:"
         },
         {
-          "type": "SYMBOL",
-          "name": "data_property_iri"
+          "type": "FIELD",
+          "name": "iri",
+          "content": {
+            "type": "SYMBOL",
+            "name": "data_property_iri"
+          }
         },
         {
           "type": "REPEAT",
@@ -1950,8 +1966,12 @@
           "value": "AnnotationProperty:"
         },
         {
-          "type": "SYMBOL",
-          "name": "annotation_property_iri"
+          "type": "FIELD",
+          "name": "iri",
+          "content": {
+            "type": "SYMBOL",
+            "name": "annotation_property_iri"
+          }
         },
         {
           "type": "REPEAT",
@@ -2014,8 +2034,12 @@
           "value": "Individual:"
         },
         {
-          "type": "SYMBOL",
-          "name": "_individual"
+          "type": "FIELD",
+          "name": "iri",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_individual"
+          }
         },
         {
           "type": "REPEAT",
@@ -3268,7 +3292,7 @@
     },
     {
       "type": "SYMBOL",
-      "name": "_comment"
+      "name": "comment"
     }
   ],
   "conflicts": [
@@ -3287,5 +3311,6 @@
   "precedences": [],
   "externals": [],
   "inline": [],
-  "supertypes": []
+  "supertypes": [],
+  "reserved": {}
 }

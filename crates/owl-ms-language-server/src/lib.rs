@@ -9,7 +9,6 @@ mod tests;
 mod web;
 mod workspace;
 
-use debugging::timeit;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
@@ -25,14 +24,13 @@ use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
-use tree_sitter::{Language, Node, Point, Query, QueryCursor, Tree, TreeCursor};
-use tree_sitter_owl_ms::language;
+use tree_sitter::{Language, Node, Point, Query, QueryCursor, StreamingIterator, Tree, TreeCursor};
 use web::{HttpClient, UreqClient};
 use workspace::{node_text, trim_full_iri, InternalDocument, Workspace};
 
 // Constants
 
-pub static LANGUAGE: Lazy<Language> = Lazy::new(language);
+pub static LANGUAGE: Lazy<Language> = Lazy::new(|| tree_sitter_owl_ms::LANGUAGE.into());
 
 // Model
 
@@ -441,7 +439,7 @@ impl LanguageServer for Backend {
             let doc = doc.read();
             let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
 
-            let query = Query::new(*LANGUAGE, query_source).expect("valid query expect");
+            let query = Query::new(&LANGUAGE, query_source).expect("valid query expect");
             let mut query_cursor = QueryCursor::new();
             let matches =
                 query_cursor.matches(&query, doc.tree.root_node(), RopeProvider::new(&doc.rope));
@@ -450,16 +448,18 @@ impl LanguageServer for Backend {
             let mut last_start = Point { row: 0, column: 0 };
 
             let mut nodes = matches
-                .flat_map(|m| m.captures)
+                .map_deref(|m| m.captures)
+                .flatten()
                 .map(|c| {
                     (
                         c.node,
                         treesitter_highlight_capture_into_semantic_token_type_index(
-                            query.capture_names()[c.index as usize].as_str(),
+                            query.capture_names()[c.index as usize],
                         ),
                     )
                 })
-                .collect::<Vec<(Node, u32)>>();
+                .collect_vec();
+
             // node start poins need to be stricly in order, because the delta might otherwise negativly overflow
             // TODO is this needed? are query matches in order?
             nodes.sort_unstable_by_key(|(n, _)| n.start_byte());
@@ -614,9 +614,10 @@ fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) -> u32
         "operator" => 21,              // SemanticTokenType::OPERATOR,
         "variable.buildin" => 8,       // SemanticTokenType::VARIABLE,
         "string" => 18,                // SemanticTokenType::STRING,
-        "number" => 19,                //SemanticTokenType::NUMBER,
+        "number" => 19,                // SemanticTokenType::NUMBER,
         "constant.builtin" => 8,       // SemanticTokenType::VARIABLE,
-        "variable" => 8,               //SemanticTokenType::VARIABLE,
+        "variable" => 8,               // SemanticTokenType::VARIABLE,
+        "comment" => 17,               // SemanticTokenType::COMMENT,
         _ => todo!("highlight capture {} not implemented", str),
     }
 }
