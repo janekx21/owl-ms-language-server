@@ -269,10 +269,8 @@ pub struct SymbolRule {
 
 #[cfg(test)]
 mod tests {
-    use crate::workspace::lock_global_parser;
-
     use super::*;
-    use itertools::Itertools;
+    use crate::workspace::lock_global_parser;
     use pretty_assertions::assert_eq;
     use test_log::test;
     use tree_sitter::{QueryCursor, StreamingIterator};

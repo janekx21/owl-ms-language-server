@@ -1,8 +1,10 @@
 use crate::catalog::CatalogUri;
+use crate::position::Position;
+use crate::queries::GRAMMAR;
 use crate::web::HttpClient;
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
-    rope_provider::RopeProvider, LANGUAGE, NODE_TYPES,
+    rope_provider::RopeProvider, Rule, LANGUAGE, NODE_TYPES,
 };
 use anyhow::Result;
 use anyhow::{anyhow, Context};
@@ -39,7 +41,7 @@ use tree_sitter::{InputEdit, Node, Parser, Point, Query, QueryCursor, StreamingI
 
 static GLOBAL_PARSER: Lazy<Mutex<Parser>> = Lazy::new(|| {
     let mut parser = Parser::new();
-    parser.set_language(&*LANGUAGE).unwrap();
+    parser.set_language(&LANGUAGE).unwrap();
     parser.set_logger(Some(Box::new(|type_, str| match type_ {
         tree_sitter::LogType::Parse => trace!(target: "tree-sitter-parse", "{}", str),
         tree_sitter::LogType::Lex => trace!(target: "tree-sitter-lex", "{}", str),
@@ -172,17 +174,12 @@ impl Workspace {
             .tree_reduce(FrameInfo::merge)
     }
 
-    pub fn node_info(
-        &self,
-        node: &Node,
-        doc: &InternalDocument,
-        http_client: &dyn HttpClient,
-    ) -> String {
+    pub fn node_info(&self, node: &Node, doc: &InternalDocument) -> String {
         match node.kind() {
             "class_frame" | "annotation_property_frame" | "class_iri" => {
                 // Goto first named child and repeat
                 if let Some(iri_node) = &node.named_child(0) {
-                    self.node_info(iri_node, doc, http_client)
+                    self.node_info(iri_node, doc)
                 } else {
                     "Class Frame\nNo iri was found".to_string()
                 }
@@ -701,6 +698,17 @@ impl InternalDocument {
         }
     }
 
+    pub fn full_iri_to_abbreviated_iri(&self, full_iri: String) -> Option<String> {
+        self.prefixes()
+            .into_iter()
+            .find_map(|(prefix, url)| match full_iri.split_once(&url) {
+                Some(("", post)) if prefix.is_empty() => Some(post.to_string()),
+                Some(("", post)) => Some(prefix + ":" + post),
+                Some(_) => None,
+                None => None,
+            })
+    }
+
     pub fn ontology_id(&self) -> Option<Iri> {
         let result = self.query(&ALL_QUERIES.ontology_id);
         result
@@ -713,7 +721,7 @@ impl InternalDocument {
             })
     }
 
-    /// Returns the prefixes of a document
+    /// Returns the prefixes of a document (without colon :)
     ///
     /// Some prefixes should always be defined
     ///
@@ -742,7 +750,7 @@ impl InternalDocument {
 
                 let label = workspace
                     .get_frame_info_recursive(&iri, self, http_client)
-                    .map(|frame_info| frame_info.label())
+                    .and_then(|frame_info| frame_info.label())
                     .unwrap_or_default();
 
                 if label.is_empty() {
@@ -773,6 +781,117 @@ impl InternalDocument {
             .cloned()
             .collect_vec()
     }
+
+    pub fn try_keywords_at_position(&self, cursor: Position) -> Vec<String> {
+        let mut parser = lock_global_parser();
+        let rope = self.rope.clone();
+        let tree = self.tree.clone();
+
+        let cursor_char_index = rope.line_to_char(cursor.line as usize) + cursor.character as usize;
+
+        let line = rope.line(cursor.line as usize).to_string();
+        let partial = word_before_character(cursor.character as usize, &line);
+
+        debug!("Cursor node text is {:?}", partial);
+
+        let grammar = &GRAMMAR;
+        let keywords = grammar
+            .rules
+            .iter()
+            .filter_map(|item| match item {
+                (rule_name, Rule::String { value }) if rule_name.starts_with("keyword_") => {
+                    Some(value)
+                }
+                _ => None,
+            })
+            .collect_vec();
+
+        let kws = keywords
+            .iter()
+            .filter(|k| k.starts_with(&partial))
+            .collect_vec();
+
+        debug!("Checking {} keywords", kws.len());
+
+        kws.iter()
+        .filter_map(|kw| {
+            let mut rope_version = rope.clone();
+            let change = kw[partial.len()..].to_string() + " a";
+
+
+            let mut tree = tree.clone(); // This is fast
+
+            // Must come before the rope is changed!
+            let cursor_byte_index = rope_version.char_to_byte(cursor_char_index);
+
+            rope_version.insert(cursor_char_index, &change);
+
+            // Must come after rope changed!
+            let new_end_byte = cursor_byte_index + change.len();
+            let new_end_line = cursor.line as usize;
+            let new_end_character =
+                rope_version.byte_to_char(new_end_byte) - rope_version.line_to_char(new_end_line);
+
+            let edit = InputEdit {
+                // Old range is just a zero size range
+                start_byte: cursor_char_index,
+                start_position: cursor.into(),
+                old_end_byte: cursor_char_index,
+                old_end_position: cursor.into(),
+
+                new_end_byte,
+                new_end_position: Point {
+                    row: new_end_line,
+                    column: new_end_character,
+                },
+            };
+            tree.edit(&edit);
+
+            let rope_provider = RopeProvider::new(&rope_version);
+            let new_tree = parser
+                .parse_with_options(
+                    &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+                    Some(&tree),
+                    None,
+                )
+                .expect("language to be set, no timeout to be used, no cancelation flag");
+
+            debug!(
+                "A possible source code version for {kw} (change is {change}) with rope version {rope_version}\nNew tree {:?}", new_tree.root_node().to_sexp());
+
+            let mut cursor_one_left = cursor.to_owned();
+            cursor_one_left.character = cursor_one_left.character.saturating_sub(1);
+            let cursor_node_version = new_tree
+                .root_node()
+                .named_descendant_for_point_range(cursor_one_left.into(), cursor_one_left.into())
+                .unwrap();
+
+            debug!("{cursor_node_version:#?} is {}", cursor_node_version.kind());
+
+            if cursor_node_version.kind().starts_with("keyword_")
+                && !cursor_node_version.parent().unwrap().is_error()
+            {
+                debug!("Found possible keyword {kw}!");
+                Some(kw.to_string())
+            } else {
+                debug!("{kw} is not possible");
+                None
+            }
+        })
+        .collect_vec()
+    }
+}
+
+/// Returns the word before the [`character`] position in the [`line`]
+pub fn word_before_character(character: usize, line: &str) -> String {
+    line[..character]
+        .chars()
+        .rev()
+        .take_while(|c| c.is_alphabetic())
+        .collect_vec()
+        .iter()
+        .rev()
+        .collect::<String>()
 }
 
 #[cached(
@@ -1176,9 +1295,8 @@ impl FrameInfo {
         };
     }
 
-    pub fn label(&self) -> String {
+    pub fn label(&self) -> Option<String> {
         self.annoation_display(&"http://www.w3.org/2000/01/rdf-schema#label".to_string())
-            .unwrap_or(format!("{} (no label)", self.iri))
     }
 
     pub fn annoation_display(&self, iri: &Iri) -> Option<String> {
@@ -1196,7 +1314,9 @@ impl FrameInfo {
 
     pub fn info_display(&self, workspace: &Workspace) -> String {
         let entity = self.frame_type;
-        let label = self.label();
+        let label = self
+            .label()
+            .unwrap_or(trim_url_before_last(&self.iri).to_string());
 
         let annotations = self
             .annotations
@@ -1204,7 +1324,10 @@ impl FrameInfo {
             .map(|iri| {
                 let iri_label = workspace
                     .get_frame_info(iri)
-                    .map(|fi| fi.label())
+                    .map(|fi| {
+                        fi.label()
+                            .unwrap_or_else(|| trim_url_before_last(&fi.iri).to_string())
+                    })
                     .unwrap_or(iri.clone());
                 // TODO #28 use values directly
                 let annoation_display = self.annoation_display(iri).unwrap_or(iri.clone());
@@ -1212,8 +1335,15 @@ impl FrameInfo {
             })
             .join("  \n");
 
-        format!("{entity} **{label}**\n\n---\n{annotations}")
+        format!(
+            "{entity} **{label}**\n\n---\n{annotations}\nIRI: {}",
+            self.iri
+        )
     }
+}
+
+fn trim_url_before_last(iri: &str) -> &str {
+    iri.rsplit_once(['/', '#']).map(|(_, b)| b).unwrap_or(iri)
 }
 
 fn trim_string_value(value: &str) -> String {
@@ -1666,5 +1796,45 @@ mod tests {
         // Assert
         assert!(urls.contains(&Url::parse("http://www.example.com/other-property").unwrap()));
         assert!(urls.contains(&Url::parse("file:///abosulte/file").unwrap()));
+    }
+
+    #[test]
+    fn word_before_character_should_find_word() {
+        let word = word_before_character(25, "This is a line with multi words");
+        assert_eq!(word, "multi");
+    }
+
+    #[test]
+    fn full_iri_to_abbreviated_iri_should_work_for_simple_iris() {
+        let doc = InternalDocument::new(
+            Url::parse("http://this/is/not/relevant/3").unwrap(),
+            -1,
+            "
+                Prefix: owl: <http://www.w3.org/2002/07/owl#>
+            "
+            .into(),
+        );
+
+        let abbr_iri =
+            doc.full_iri_to_abbreviated_iri("http://www.w3.org/2002/07/owl#Thing".into());
+
+        assert_eq!(abbr_iri, Some("owl:Thing".to_string()));
+    }
+
+    #[test]
+    fn full_iri_to_abbreviated_iri_should_work_for_simple_iris_with_empty_prefix() {
+        let doc = InternalDocument::new(
+            Url::parse("http://this/is/not/relevant/4").unwrap(),
+            -1,
+            "
+                Prefix: : <http://www.w3.org/2002/07/owl#>
+            "
+            .into(),
+        );
+
+        let abbr_iri =
+            doc.full_iri_to_abbreviated_iri("http://www.w3.org/2002/07/owl#Thing".into());
+
+        assert_eq!(abbr_iri, Some("Thing".to_string()));
     }
 }

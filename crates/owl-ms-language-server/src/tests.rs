@@ -232,7 +232,7 @@ async fn backend_hover_on_class_should_show_class_info() {
     };
     assert_eq!(
         contents,
-        "Class **Janek der Coder**\n\n---\n`label`: Janek der Coder"
+        "Class **Janek der Coder**\n\n---\n`label`: Janek der Coder\nIRI: Janek"
     );
 }
 
@@ -534,7 +534,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
     };
     info!("{:#?}", service.inner().workspaces.read());
     info!("contents={contents}");
-    assert!(!contents.contains("ClassA2"));
+    assert!(!contents.contains("**ClassA2**"));
     assert!(contents.contains("Some class in A2"));
 }
 
@@ -642,8 +642,9 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
         _ => panic!("Did not think of that"),
     };
     info!("contents={contents}");
-    assert!(!contents.contains("ClassA2"));
+    assert!(!contents.contains("**ClassA2**"));
     assert!(contents.contains("Some class in A2"));
+    assert!(contents.contains("IRI: http://ontology-a.org/a2.owx#ClassA2"));
 }
 #[test(tokio::test)]
 async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_external_info() {
@@ -744,7 +745,7 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
     };
     info!("{:#?}", service.inner().workspaces.read());
     info!("contents={contents}");
-    assert!(!contents.contains("ClassA2"));
+    assert!(!contents.contains("**ClassA2**"));
     assert!(contents.contains("Some class in A2"));
 }
 
@@ -1426,6 +1427,10 @@ async fn backend_completion_test_helper(partial: &str, full: &str, ontology: &st
 
     match result {
         CompletionResponse::Array(completion_items) => {
+            let completion_items = completion_items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::KEYWORD))
+                .collect_vec();
             assert_eq!(completion_items.len(), 1);
 
             assert_eq!(completion_items[0].label, full);
