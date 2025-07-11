@@ -9,6 +9,19 @@ pub struct Range {
     pub end: Position,
 }
 
+impl Range {
+    pub const ZERO: Range = Range {
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: 0,
+            character: 0,
+        },
+    };
+}
+
 impl Display for Range {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(

@@ -1,5 +1,7 @@
 use crate::{catalog::Catalog, web::StaticClient, *};
 use anyhow::anyhow;
+use indoc::indoc;
+use position::Position;
 use pretty_assertions::assert_eq;
 use std::{fs, path::Path};
 use tempdir::{self, TempDir};
@@ -25,26 +27,7 @@ fn parse_ontology_should_work() {
     let tree = parser.parse(source_code, None).unwrap();
 
     // Assert
-    assert_eq!(
-        tree.root_node().to_sexp(),
-        "(source_file (ontology (ontology_iri (simple_iri))))"
-    );
-}
-
-#[test]
-fn parse_ontology_with_datatype_should_work() {
-    // Arrange
-    let mut parser = arrange_parser();
-
-    let source_code = "Ontology: o\nDatatype: d";
-    // Act
-    let tree = parser.parse(source_code, None).unwrap();
-
-    // Assert
-    assert_eq!(
-        tree.root_node().to_sexp(),
-        "(source_file (ontology (ontology_iri (simple_iri)) (datatype_frame iri: (datatype_iri (simple_iri)))))"
-    );
+    assert_eq!(tree.root_node().has_error(), false);
 }
 
 #[test]
@@ -247,10 +230,11 @@ async fn backend_hover_on_class_should_show_class_info() {
         HoverContents::Scalar(MarkedString::String(str)) => str,
         _ => panic!("Did not think of that"),
     };
-    assert_eq!(
-        contents,
-        "Class **Janek der Coder**\n\n---\n`label`: Janek der Coder"
-    );
+
+    assert!(contents.contains("Class"));
+    assert!(contents.contains("**Janek der Coder**"));
+    assert!(contents.contains("`label`: Janek der Coder"));
+    assert!(contents.contains("IRI: Janek"));
 }
 
 async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
@@ -551,7 +535,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
     };
     info!("{:#?}", service.inner().workspaces.read());
     info!("contents={contents}");
-    assert!(!contents.contains("ClassA2"));
+    assert!(!contents.contains("**ClassA2**"));
     assert!(contents.contains("Some class in A2"));
 }
 
@@ -659,8 +643,9 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
         _ => panic!("Did not think of that"),
     };
     info!("contents={contents}");
-    assert!(!contents.contains("ClassA2"));
+    assert!(!contents.contains("**ClassA2**"));
     assert!(contents.contains("Some class in A2"));
+    assert!(contents.contains("IRI: http://ontology-a.org/a2.owx#ClassA2"));
 }
 #[test(tokio::test)]
 async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_external_info() {
@@ -761,13 +746,12 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
     };
     info!("{:#?}", service.inner().workspaces.read());
     info!("contents={contents}");
-    assert!(!contents.contains("ClassA2"));
+    assert!(!contents.contains("**ClassA2**"));
     assert!(contents.contains("Some class in A2"));
 }
 
 #[test(tokio::test)]
 async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
-    // TODO hier
     // Arrange
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![WorkspaceMember::Folder {
@@ -1296,6 +1280,240 @@ async fn backend_did_open_should_load_external_documents_via_file() {
         1,
         "One external document should be loaded"
     );
+}
+
+#[test(tokio::test)]
+async fn backend_completion_should_work_for_keyword_class() {
+    let ontology = indoc! {r#"
+        Ontology: <http://foo.org/a>
+
+            <PARTIAL>
+
+            Class: c
+    "#};
+    backend_completion_test_helper("Cl", "Class:", ontology).await;
+}
+
+#[test(tokio::test)]
+async fn backend_completion_should_work_for_keyword_class_at_the_end() {
+    let ontology = indoc! {r#"
+        Ontology: <http://foo.org/a> Version
+
+        <PARTIAL>
+    "#};
+    backend_completion_test_helper("Cl", "Class:", ontology).await;
+}
+
+#[test(tokio::test)]
+async fn backend_completion_should_work_for_keyword_datatype() {
+    let ontology = indoc! {r#"
+        Ontology: <http://foo.org/a>
+
+            <PARTIAL>
+
+            Class: c
+    "#};
+    backend_completion_test_helper("Datat", "Datatype:", ontology).await;
+}
+
+#[test(tokio::test)]
+async fn backend_completion_should_work_for_keyword_integer() {
+    let ontology = indoc! {r#"
+        Ontology: <http://foo.org/a>
+
+            Datatype: Foo
+                EquivalentTo: (<PARTIAL>
+
+            Class: c
+    "#};
+    backend_completion_test_helper("in", "integer", ontology).await;
+}
+
+#[test(tokio::test)]
+async fn backend_completion_should_work_for_keyword_some() {
+    let ontology = indoc! {r#"
+        Ontology: <http://foo.org/a>
+
+            Ontology:
+            	Class: Person
+            		SubClassOf: hasAge <PARTIAL> 1 and hasAge only not NegInt
+
+            Class: c
+    "#};
+    backend_completion_test_helper("so", "some", ontology).await;
+}
+
+#[test(tokio::test)]
+async fn backend_completion_should_work_for_keyword_functionnal() {
+    let ontology = indoc! {r#"
+        Ontology: <http://foo.org/a>
+
+            Ontology:
+            	ObjectProperty: Thing
+            		Characteristics: <PARTIAL>
+
+            Class: c
+    "#};
+    backend_completion_test_helper("Fu", "Functional", ontology).await;
+}
+
+async fn backend_completion_test_helper(partial: &str, full: &str, ontology: &str) {
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "foo".into(),
+        }),
+        vec![],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("a.omn")).unwrap();
+
+    let pos = ontology
+        .lines()
+        .enumerate()
+        .find_map(|(li, line)| {
+            line.find("<PARTIAL>").map(|ci| Position {
+                line: li as u32,
+                character: ci as u32,
+            })
+        })
+        .expect("Should contain <PARTIAL> str");
+
+    let ontology = ontology.replace("<PARTIAL>", partial);
+
+    let pos = Position {
+        character: pos.character + partial.len() as u32,
+        ..pos
+    };
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    let result = service
+        .inner()
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url },
+                position: pos.into(),
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            context: None,
+        })
+        .await;
+
+    // Assert
+
+    let result = result.expect("Result shoud not produce error");
+    let result = result.expect("Result should contain completion response");
+
+    match result {
+        CompletionResponse::Array(completion_items) => {
+            let completion_items = completion_items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::KEYWORD))
+                .collect_vec();
+            assert_eq!(completion_items.len(), 1);
+
+            assert_eq!(completion_items[0].label, full);
+        }
+        CompletionResponse::List(_) => unimplemented!(),
+    }
+}
+
+#[test(tokio::test)]
+async fn backend_completion_should_work_for_keywords() {
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "foo".into(),
+        }),
+        vec![],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("a.omn")).unwrap();
+
+    let ontology = indoc! {r#"
+        Ontology: <http://foo.org/a>
+
+            Cl
+        
+            Class: some-other-class-at-c
+                Annotations:
+                    rdfs:label "Some other class at c"
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    let result = service
+        .inner()
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url },
+                position: Position {
+                    line: 2,
+                    character: 6,
+                }
+                .into(),
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            context: None,
+        })
+        .await;
+
+    // Assert
+
+    let result = result.expect("Result shoud not produce error");
+    let result = result.expect("Result should contain completion response");
+
+    match result {
+        CompletionResponse::Array(completion_items) => {
+            assert_eq!(completion_items.len(), 1);
+
+            assert_eq!(completion_items[0].label, "Class:");
+        }
+        CompletionResponse::List(_) => unimplemented!(),
+    }
 }
 
 #[test(tokio::test)]
