@@ -1155,6 +1155,10 @@
           "named": true
         },
         {
+          "type": "keyword_different_from",
+          "named": true
+        },
+        {
           "type": "node_id",
           "named": true
         }
@@ -1982,10 +1986,6 @@
     "named": false
   },
   {
-    "type": "DifferentFrom:",
-    "named": false
-  },
-  {
     "type": "E",
     "named": false
   },
@@ -2060,6 +2060,10 @@
   },
   {
     "type": "keyword_decimal",
+    "named": true
+  },
+  {
+    "type": "keyword_different_from",
     "named": true
   },
   {

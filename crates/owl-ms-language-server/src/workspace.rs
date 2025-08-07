@@ -17,6 +17,7 @@ use horned_owl::model::Component::*;
 use horned_owl::model::{ArcStr, Build};
 use horned_owl::ontology::iri_mapped::ArcIRIMappedOntology;
 use horned_owl::ontology::set::SetOntology;
+use indoc::indoc;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use once_cell::sync::Lazy;
@@ -200,7 +201,239 @@ impl Workspace {
                     .unwrap_or(iri)
             }
 
-            _ => format!("generic node named {}", node.kind()),
+            // Keyword hover information
+            "keyword_prefix" => indoc! {"
+                `Prefix:`
+
+                ---
+
+                Declare a namespace prefix for use in abbriviated IRIs.
+
+                A prefix always comes before the ontology. Using \":\" as a prefix will define it as default.
+                Any simple IRI (the ones without a prefix) will get the defaut namespace.                
+
+                Example:
+                ```owl-ms
+                Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                Prefix: : <http://example.com/ontology/>
+
+                Ontology: ...
+                ```
+
+                [Specification](https://www.w3.org/TR/owl2-syntax/#IRIs)
+            "}.to_string(),
+            "keyword_ontology" => indoc! {"
+                `Ontology:`
+
+                ---
+
+                Defines an ontology with its IRI and optional version IRI.
+
+                
+                OWL 2 provides several built-in annotation properties for ontology annotations. The usage of these annotation properties on entities other than ontologies is discouraged.
+
+                - The `owl:priorVersion` annotation property specifies the IRI of a prior version of the containing ontology.
+                - The `owl:backwardCompatibleWith` annotation property specifies the IRI of a prior version of the containing ontology that is compatible with the current version of the containing ontology.
+                - The `owl:incompatibleWith` annotation property specifies the IRI of a prior version of the containing ontology that is incompatible with the current version of the containing ontology.
+
+                Example:
+                ```owl-ms
+                Ontology: <http://example.com/ontology/physical/> <http://example.com/ontology/dev/physical.omn>
+                ```
+
+                [Specification](https://www.w3.org/TR/owl2-syntax/#Ontologies)
+            "}.to_string(),
+            "keyword_integer" => "Built-in datatype for integer values".to_string(),
+            "keyword_decimal" => {
+                "Built-in datatype for decimal numbers with arbitrary precision".to_string()
+            }
+            "keyword_float" => {
+                "Built-in datatype for single-precision floating-point numbers".to_string()
+            }
+            "keyword_string" => "Built-in datatype for character strings".to_string(),
+            "keyword_import" => indoc!{"
+                `Import:`
+
+                ---
+                
+                Imports another ontology into the current ontology.
+
+                Import other ontologies in order to gain access to their entities, expressions, and axioms. This provides the basic facility for ontology modularization. The IRIs of the imported ontology do not automaticly join the default namespace.
+
+                Example:
+                ```owl-ms
+                Ontology: <http://example.com/ontology/physical/> <http://example.com/ontology/dev/physical.omn>
+
+                    Import: <http://example.com/ontology/dev/shared.omn>
+                ```
+
+                [Specification](https://www.w3.org/TR/owl2-syntax/#Imports)
+            "}.to_string(),
+            "keyword_annotations" => indoc!{"
+                `Annotations:`
+
+                ---
+
+                Defines annotation assertions for an entity.
+
+                Ontologies, axioms, and annotations themselves can be annotated using annotations. They consist of an annotation property and an annotation value, where the latter can be anonymous individuals, IRIs, and literals.
+
+                Example:
+                ```owl-ms
+                Class: OEO0042
+
+                    Annotations: 
+                        <http://example.com/o/CH_0000118> \"CO2\"@de,
+                        rdfs:label \"greenhouse gas\",
+                        rdfs:label \"Treibhausgas\"@de
+                ```
+
+                [Specification](https://www.w3.org/TR/owl2-syntax/#Annotations)
+            "}.to_string(),
+            "keyword_inverse" => {
+                "Specifies the inverse property in a property restriction".to_string()
+            }
+            "keyword_length" => "Constrains the exact length of a datatype value".to_string(),
+            "keyword_min_length" => "Constrains the minimum length of a datatype value".to_string(),
+            "keyword_max_length" => "Constrains the maximum length of a datatype value".to_string(),
+            "keyword_pattern" => {
+                "Constrains datatype values to match a regular expression pattern".to_string()
+            }
+            "keyword_lang_range" => {
+                "Constrains literal values to specific language ranges".to_string()
+            }
+            "keyword_some" => {
+                "Existential quantification - at least one relationship exists".to_string()
+            }
+            "keyword_only" => {
+                "Universal quantification - all relationships must satisfy the constraint"
+                    .to_string()
+            }
+            "keyword_self" => "Self-restriction - relates an individual to itself".to_string(),
+            "keyword_value" => {
+                "Value restriction - relates to a specific individual or literal".to_string()
+            }
+
+            "keyword_datatype" => indoc!{"
+                `Datatype:`
+
+                ---
+                
+                Declares a custom datatype.
+                    
+                Example:
+                ```owl-ms
+            	Datatype: NegInt
+            		EquivalentTo:
+            			integer[< 0]
+                ```
+
+                [Specification](https://www.w3.org/TR/owl2-syntax/#Datatypes)
+            "}.to_string(),
+            "keyword_equivalent_to" => "Declares logical equivalence between entities".to_string(),
+            "keyword_class" => indoc!{"
+                `Class:`
+
+                ---
+
+                Declares a class (concept) in the ontology.
+
+                Classes can be understood as sets of individuals.
+
+                For example, classes `Child` and `Person` can be used to represent the set of all children and persons, respectively, in the application domain.
+                ```owl-ms
+            	Class: Child
+            	    SubClassOf: Person
+
+            	Class: Person
+                ```
+
+                [Specification](https://www.w3.org/TR/owl2-syntax/#Classes)
+            "}.to_string(),
+            "keyword_sub_class_of" => {
+                "Declares subsumption relationship between classes. x subcass of y => each x is a y".to_string()
+            }
+            "keyword_disjoint_with" => {
+                "Declares that classes have no individuals in common. [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Classes)".to_string()
+            }
+            "keyword_disjoint_union_of" => {
+                "Declares a class as the disjoint union of other classes. [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Union_of_Class_Expressions)".to_string()
+            }
+            "keyword_has_key" => {
+                "Declares key properties that uniquely identify individuals".to_string()
+            }
+            "keyword_object_property" => {
+                "Declares a property that relates individuals to individuals".to_string()
+            }
+            "keyword_domain" => "Specifies the domain (subject) class of a property".to_string(),
+            "keyword_range" => {
+                "Specifies the range (object) class or datatype of a property".to_string()
+            }
+            "keyword_sub_property_of" => {
+                "Declares subsumption relationship between properties".to_string()
+            }
+            "keyword_inverse_of" => "Declares that two object properties are inverses".to_string(),
+            "keyword_sub_property_chain" => {
+                "Declares a property chain that implies the current property".to_string()
+            }
+            "keyword_functional" => {
+                "Declares that a property has at most one value for each individual".to_string()
+            }
+            "keyword_inverse_functional" => {
+                "Declares that the inverse of a property is functional".to_string()
+            }
+            "keyword_reflexive" => {
+                "Declares that a property relates every individual to itself".to_string()
+            }
+            "keyword_irreflexive" => {
+                "Declares that a property never relates an individual to itself".to_string()
+            }
+            "keyword_symmetric" => {
+                "Declares that if a relates to b, then b relates to a".to_string()
+            }
+            "keyword_asymmetric" => {
+                "Declares that if a relates to b, then b does not relate to a".to_string()
+            }
+            "keyword_transitive" => {
+                "Declares that if a relates to b and b relates to c, then a relates to c"
+                    .to_string()
+            }
+            "keyword_data_property" => {
+                "Declares a property that relates individuals to literal values".to_string()
+            }
+            "keyword_characteristics" => {
+                "Specifies characteristics (functional, symmetric, etc.) of a property".to_string()
+            }
+            "keyword_annotation_property" => {
+                "Declares a property used for annotations (metadata)".to_string()
+            }
+            "keyword_individual" => "Declares a named individual in the ontology".to_string(),
+            "keyword_types" => "Specifies class membership for an individual".to_string(),
+            "keyword_facts" => "Specifies property assertions for an individual".to_string(),
+            "keyword_same_as" => {
+                "Declares that two individuals refer to the same entity".to_string()
+            }
+            "keyword_equivalent_classes" => {
+                "Declares logical equivalence between multiple classes".to_string()
+            }
+            "keyword_disjoint_classes" => {
+                "Declares that multiple classes are pairwise disjoint".to_string()
+            }
+            "keyword_equivalent_properties" => {
+                "Declares logical equivalence between multiple properties".to_string()
+            }
+            "keyword_disjoint_properties" => {
+                "Declares that multiple properties are pairwise disjoint".to_string()
+            }
+            "keyword_same_individual" => {
+                "Declares that multiple IRIs refer to the same individual".to_string()
+            }
+            "keyword_different_individuals" => {
+                "Declares that multiple individuals are distinct entities".to_string()
+            }
+            "keyword_different_from"=> "Declares that an individual is distinct from another specific individual".to_string(),
+
+            _ => "".into(),
         }
     }
 
@@ -1384,7 +1617,7 @@ impl FrameInfo {
                     annoation_display = format!("\n{annoation_display}\n\n");
                 }
 
-                format!("`{iri_label}`: {annoation_display}")
+                format!("- `{iri_label}`: {annoation_display}")
             })
             .join("\n");
 
