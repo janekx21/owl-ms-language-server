@@ -362,9 +362,35 @@ impl Workspace {
             "keyword_has_key" => {
                 "Declares key properties that uniquely identify individuals".to_string()
             }
-            "keyword_object_property" => {
-                "Declares a property that relates individuals to individuals".to_string()
-            }
+            "keyword_object_property" => indoc!{"
+                `ObjectProperty:`
+
+                ---
+
+                Declares a property that relates individuals to individuals.
+
+                
+                The object properties with the IRIs owl:topObjectProperty and owl:bottomObjectProperty are available in OWL 2 as built-in object properties with a predefined semantics:
+
+                - The object property with IRI owl:topObjectProperty connects all possible pairs of individuals.
+                - The object property with IRI owl:bottomObjectProperty does not connect any pair of individuals.
+
+                Example:
+                ```owl-ms
+                ObjectProperty: HasEnergy
+
+                    Domain: 
+                        ArtificialObject
+    
+                    Range: 
+                        Energy
+    
+                    InverseOf: 
+                        IsEnergyParticipantOf
+                ```
+
+                [Specification](https://www.w3.org/TR/owl2-syntax/#Object_Properties)
+            "}.to_string(),
             "keyword_domain" => "Specifies the domain (subject) class of a property".to_string(),
             "keyword_range" => {
                 "Specifies the range (object) class or datatype of a property".to_string()
@@ -398,9 +424,22 @@ impl Workspace {
                 "Declares that if a relates to b and b relates to c, then a relates to c"
                     .to_string()
             }
-            "keyword_data_property" => {
-                "Declares a property that relates individuals to literal values".to_string()
-            }
+            "keyword_data_property" =>
+
+indoc!{"
+                `DataProperty:`
+
+                ---
+
+                Declares a property that relates individuals to literal values.
+
+                Example:
+                ```owl-ms
+                TODO weiter schreiben
+                ```
+
+                [Specification](https://www.w3.org/TR/owl2-syntax/#Data_Properties)
+            "}.to_string(),
             "keyword_characteristics" => {
                 "Specifies characteristics (functional, symmetric, etc.) of a property".to_string()
             }
