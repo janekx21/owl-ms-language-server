@@ -1,16 +1,3 @@
-; ===================
-; Comment
-; ===================
-
-; # Comment
-; Ontology: #Comment
-; # Comment
-
-; ---
-
-; (source_file (ontology_document
-; 	(ontology)))
-
 ===================
 Full IRI
 ===================
@@ -21,6 +8,7 @@ Ontology: <http://www.semanticweb.org/janek/ontologies/2023/9/untitled-ontology-
 
 (source_file
 	(ontology
+	    (keyword_ontology)
 		(ontology_iri (full_iri))))
 
 ===================
@@ -35,9 +23,10 @@ Ontology:
 ---
 
 (source_file
-	(prefix_declaration (prefix_name) (full_iri))
-	(prefix_declaration (prefix_name) (full_iri))
-	(ontology))
+	(prefix_declaration (keyword_prefix) (prefix_name) (full_iri))
+	(prefix_declaration (keyword_prefix) (prefix_name) (full_iri))
+	(ontology
+	    (keyword_ontology)))
 
 
 ===================
@@ -52,15 +41,17 @@ Ontology:
 
 (source_file
 	(ontology
+	    (keyword_ontology)
 	    (class_frame 
-			(class_iri (simple_iri))
-            (annotation
-				(annotation_property_iri (simple_iri))
-				(string_literal_no_language)))))
+  			(keyword_class)
+  			(class_iri (simple_iri))
+          (keyword_annotations)
+          (annotation
+    				(annotation_property_iri (simple_iri))
+    				(string_literal_no_language)))))
 
 ===================
 Datatype Frame integer
-:skip
 ===================
 
 Ontology:
@@ -70,13 +61,14 @@ Ontology:
 
 (source_file 
 	(ontology
+	    (keyword_ontology)
 		(datatype_frame 
-			(datatype))))
+		  (keyword_datatype)
+			(keyword_integer))))
 
 
 ===================
 Datatype Frame IRI
-:skip
 ===================
 
 Ontology:
@@ -86,13 +78,13 @@ Ontology:
 
 (source_file 
 	(ontology
+	    (keyword_ontology)
 		(datatype_frame 
-			(datatype
-				(datatype_iri (simple_iri))))))
+		  (keyword_datatype)
+			(datatype_iri (simple_iri)))))
 
 ===================
 Datatype Frame Annotations
-:skip
 ===================
 
 Ontology:
@@ -104,20 +96,17 @@ Ontology:
 
 (source_file
 	(ontology
-		(frame 
-			(datatype_frame 
-				(datatype)
-				(annotation_annotated_list
-          (annotation
-            (iri
-              (simple_iri))
-            (annotation_target
-              (iri
-                (simple_iri)))))))))
+	    (keyword_ontology)
+		(datatype_frame 
+			(keyword_datatype)
+			(keyword_integer)
+			(keyword_annotations)
+      (annotation
+        (annotation_property_iri (simple_iri))
+        (simple_iri)))))
 
 ===================
 Datatype Frame EquivalentTo
-:skip
 ===================
 
 Ontology:
@@ -130,70 +119,54 @@ Ontology:
 
 (source_file
 	(ontology
-		(frame 
+	    (keyword_ontology)
 			(datatype_frame 
-				(datatype (iri (simple_iri)))
-        (annotations
-          (annotation_annotated_list (annotation
-						(iri (simple_iri))
-            (annotation_target (iri (simple_iri))))))
+			  (keyword_datatype)
+				(datatype_iri (simple_iri))
+				(datatype_equavalent_to
+				  (keyword_equivalent_to)
+				  (keyword_annotations)
+          (annotation
+						(annotation_property_iri (simple_iri))
+            (simple_iri))
           (data_range
-            (data_conjunction (data_primary (data_atomic
-                  (datatype_restriction
-                    (datatype)
-                    (facet)
-                    (literal))))))))))
+              (datatype_restriction
+                (keyword_integer)
+                ; Seems like mutch information is not named here
+                (integer_literal)))))))
 
 ===================
 Datatype Frame EquivalentTo Complex
-:skip
 ===================
 
 Ontology:
 	Datatype: NegInt
 		EquivalentTo:
-			Annotations: creator God
 			integer[< 0] or float and string[length 8]
 
 ---
 
 (source_file
-        (ontology
-          (frame
-            (datatype_frame
-              (datatype
-                (iri
-                  (simple_iri)))
-              (annotations
-                (annotation_annotated_list
-                  (annotation
-                    (iri
-                      (simple_iri))
-                    (annotation_target
-                      (iri
-                        (simple_iri))))))
-              (data_range
-                (data_conjunction
-                  (data_primary
-                    (data_atomic
-                      (datatype_restriction
-                        (datatype)
-                        (facet)
-                        (literal)))))
-                (data_conjunction
-                  (data_primary
-                    (data_atomic
-                      (datatype)))
-                  (data_primary
-                    (data_atomic
-                      (datatype_restriction
-                        (datatype)
-                        (facet)
-		                    (literal))))))))))
+      (ontology
+	    (keyword_ontology)
+        (datatype_frame
+          (keyword_datatype)
+          (datatype_iri
+            (simple_iri))
+          (datatype_equavalent_to
+            (keyword_equivalent_to)
+            (data_range
+              (datatype_restriction
+                (keyword_integer)
+                (integer_literal))
+              (keyword_float)
+              (datatype_restriction
+                (keyword_string)
+                (keyword_length)
+                (integer_literal)))))))
 
 ===================
 Class Frame IRI
-:skip
 ===================
 
 Ontology:
@@ -203,10 +176,11 @@ Ontology:
 
 (source_file
 	(ontology
-		(frame 
+	    (keyword_ontology)
 			(class_frame 
-				(iri
-					(simple_iri))))))
+			  (keyword_class)
+				(class_iri
+					(simple_iri)))))
 
 ======================
 Class Frame SubClassOf
@@ -220,9 +194,12 @@ Ontology:
 
 (source_file
 	(ontology
+	    (keyword_ontology)
 		(class_frame
+			(keyword_class)
 			(class_iri (simple_iri))
 			(sub_class_of
+			  (keyword_sub_class_of)
 				(description
 					(class_iri (abbreviated_iri)))))))
 
@@ -240,6 +217,7 @@ Ontology:
 
 (source_file 
 	(ontology
+	    (keyword_ontology)
 		(frame 
 			(class_frame 
 				(iri
@@ -269,6 +247,7 @@ Ontology:
 
 (source_file
 	(ontology
+	    (keyword_ontology)
 		(frame 
 			(class_frame 
 				(iri
@@ -300,6 +279,7 @@ Ontology:
 
 (source_file
 	(ontology
+	    (keyword_ontology)
 		(frame 
 			(class_frame 
 				(iri
@@ -349,6 +329,7 @@ Ontology:
 
 (source_file
         (ontology
+	    (keyword_ontology)
           (frame
             (object_property_frame
               (iri
@@ -366,6 +347,7 @@ Ontology:
 
 (source_file
         (ontology
+	    (keyword_ontology)
           (frame
             (object_property_frame
               (iri
@@ -389,6 +371,7 @@ Ontology:
 ---
 (source_file
     (ontology
+	    (keyword_ontology)
       (frame
         (object_property_frame
           (iri
@@ -419,6 +402,7 @@ Ontology:
 
 (source_file
     (ontology
+	    (keyword_ontology)
       (frame
         (object_property_frame
           (iri
@@ -455,6 +439,7 @@ Ontology:
 
 (source_file
         (ontology
+	    (keyword_ontology)
           (frame
             (object_property_frame
               (iri
@@ -585,6 +570,7 @@ Ontology:
 
 (source_file
         (ontology
+	    (keyword_ontology)
           (frame
             (data_property_frame
               (iri
@@ -667,6 +653,7 @@ Ontology:
 
 (source_file
         (ontology
+	    (keyword_ontology)
           (frame
             (annotation_property_frame
               (iri
@@ -722,9 +709,11 @@ Ontology: # Comment
 (source_file
   (comment)
   (ontology
+	    (keyword_ontology)
 	(comment)
 	(comment)
     (individual_frame
+      (keyword_individual)
       (individual_iri
         (simple_iri))))
   (comment)
@@ -741,9 +730,11 @@ Import: <http://external.org/shared.omn>
 
 (source_file
   (ontology
+	    (keyword_ontology)
     (ontology_iri
       (full_iri))
     (version_iri
       (full_iri))
     (import
+	    (keyword_import)
       (full_iri))))

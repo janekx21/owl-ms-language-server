@@ -9,12 +9,13 @@ mod tests;
 mod web;
 mod workspace;
 
+use debugging::timeit;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
 use parking_lot::{MappedRwLockWriteGuard, RwLock, RwLockWriteGuard};
 use position::Position;
-use queries::{ALL_QUERIES, NODE_TYPES};
+use queries::{Rule, ALL_QUERIES, NODE_TYPES};
 use range::Range;
 use rope_provider::RopeProvider;
 use std::collections::HashMap;
@@ -24,7 +25,7 @@ use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
-use tree_sitter::{Language, Node, Point, Query, QueryCursor, StreamingIterator, Tree, TreeCursor};
+use tree_sitter::{Language, Point, Query, QueryCursor, StreamingIterator};
 use web::{HttpClient, UreqClient};
 use workspace::{node_text, trim_full_iri, InternalDocument, Workspace};
 
@@ -253,9 +254,14 @@ impl LanguageServer for Backend {
 
         Ok(workspace.internal_documents.get(&url).map(|document| {
             let document = document.read();
-            let pos = params.text_document_position_params.position.into();
-            let node = deepest_named_node_at_pos(&document.tree, pos);
-            let info = workspace.node_info(&node, &document, &*self.http_client);
+            let pos: Position = params.text_document_position_params.position.into();
+            let node = document
+                .tree
+                .root_node()
+                .named_descendant_for_point_range(pos.into(), pos.into())
+                .unwrap();
+            let info = workspace.node_info(&node, &document);
+            // Transitive into
             let range: Range = node.range().into();
             Hover {
                 contents: HoverContents::Scalar(MarkedString::String(info)),
@@ -301,19 +307,32 @@ impl LanguageServer for Backend {
             let doc = doc.read();
             let pos: Position = params.text_document_position_params.position.into();
 
-            let leaf_node = deepest_named_node_at_pos(&doc.tree, pos);
+            let leaf_node = doc
+                .tree
+                .root_node()
+                .named_descendant_for_point_range(pos.into(), pos.into())
+                .unwrap();
+
             if ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind()) {
                 let iri = trim_full_iri(node_text(&leaf_node, &doc.rope));
                 let iri = doc.abbreviated_iri_to_full_iri(iri);
 
                 debug!("Try goto definition of {}", iri);
 
-                let frame_info = workspace.get_frame_info(&iri);
+                // TODO #16 is this now correct?
+                let frame_info = workspace.get_frame_info_recursive(&iri, &doc, &*self.http_client);
 
                 if let Some(frame_info) = frame_info {
                     let locations = frame_info
                         .definitions
                         .iter()
+                        .sorted_by_key(|l| {
+                            if l.range == Range::ZERO {
+                                u32::MAX // No range? Then put this at the end
+                            } else {
+                                l.range.start.line
+                            }
+                        })
                         .map(|l| l.clone().into())
                         .collect_vec();
 
@@ -375,54 +394,58 @@ impl LanguageServer for Backend {
 
         Ok(doc.map(|doc| {
             let doc = doc.read();
-            // generate keyword list that can be applied. Note that this is missing some keywords because of limitations in the grammar.
-            let mut cursor = doc.tree.walk();
-            cursor_goto_pos(&mut cursor, pos);
-            while cursor.node().is_error() {
-                if !cursor.goto_parent() {
-                    break; // we reached the root
-                }
-            }
-            let parent_kind = cursor.node().kind();
-            let possible_children = NODE_TYPES
-                .get(parent_kind)
-                .map(|static_node| static_node.children.types.clone())
-                .unwrap_or_default();
 
-            let keywords = possible_children
-                .iter()
-                .filter_map(|child| node_type_to_keyword(child.type_.as_ref()))
-                .map(|keyword| CompletionItem {
-                    label: keyword,
-                    ..Default::default()
-                });
+            let kws = timeit("try_keywords_at_position", || {
+                doc.try_keywords_at_position(pos)
+            });
+
+            debug!("The resultingn kws are {kws:#?}");
+
+            let pos_one_left = Position {
+                line: pos.line,
+                character: pos.character.checked_sub(1).unwrap_or_default(),
+            };
+
+            let keywords_completion_items = kws.into_iter().map(|keyword| CompletionItem {
+                label: keyword,
+                kind: Some(CompletionItemKind::KEYWORD),
+                ..Default::default()
+            });
 
             let mut items = vec![];
 
+            let node = doc
+                .tree
+                .root_node()
+                .named_descendant_for_point_range(pos_one_left.into(), pos_one_left.into())
+                .expect("The pos to be in at least one node");
             // Generate the list of iris that can be inserted.
-            let child_node_types: Vec<String> = possible_children
-                .iter()
-                .filter_map(|child| node_type_to_keyword(child.type_.as_ref()))
-                .collect();
-            debug!("parent kind {}", parent_kind);
-            debug!("child node type {:?}", child_node_types);
+            let partial_text = node_text(&node, &doc.rope).to_string();
 
-            let partial_text = node_text(&cursor.node(), &doc.rope).to_string();
-
-            if parent_kind == "simple_iri" {
+            if node.kind() == "simple_iri" {
                 let iris: Vec<CompletionItem> = workspace
                     .search_frame(&partial_text)
                     .iter()
-                    .map(|(iri, _frame)| CompletionItem {
-                        label: iri.clone(),
-                        // TODO #29 add details from the frame
-                        ..Default::default()
+                    .map(|(full_iri, frame)| {
+                        let iri = doc
+                            .full_iri_to_abbreviated_iri(full_iri.clone())
+                            .unwrap_or(format!("<{full_iri}>"));
+
+                        CompletionItem {
+                            label: iri,
+                            kind: Some(CompletionItemKind::REFERENCE),
+                            detail: Some(frame.info_display(&workspace)),
+                            // TODO #29 add details from the frame
+                            ..Default::default()
+                        }
                     })
+                    // TODO #29 add items for simple iri, abbriviated iri and full iri
+                    // Take the shortest one maybe
                     .collect();
                 items.extend(iris);
             }
 
-            items.extend(keywords);
+            items.extend(keywords_completion_items);
 
             CompletionResponse::Array(items)
         }))
@@ -516,6 +539,7 @@ impl LanguageServer for Backend {
                         .any(|v| v.iter().any(|l| l.contains(query.as_str())))
             })
             .flat_map(|fi| {
+                #[allow(deprecated)] // All fields need to be specified
                 fi.definitions.iter().map(|definition| SymbolInformation {
                     name: fi.iri.clone(),
                     kind: fi.frame_type.into(),
@@ -619,59 +643,5 @@ fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) -> u32
         "variable" => 8,               // SemanticTokenType::VARIABLE,
         "comment" => 17,               // SemanticTokenType::COMMENT,
         _ => todo!("highlight capture {} not implemented", str),
-    }
-}
-
-// Implementations for Structs
-
-fn deepest_named_node_at_pos(tree: &Tree, pos: Position) -> Node {
-    let mut cursor = tree.walk();
-    loop {
-        let is_leaf = cursor.goto_first_child_for_point(pos.into()).is_none();
-        if is_leaf {
-            break;
-        }
-    }
-    while !cursor.node().is_named() {
-        if !cursor.goto_parent() {
-            break;
-        }
-    }
-    cursor.node()
-}
-
-fn cursor_goto_pos(cursor: &mut TreeCursor, pos: Position) {
-    loop {
-        let is_leaf = cursor.goto_first_child_for_point(pos.into()).is_none();
-        if is_leaf {
-            break;
-        }
-    }
-    while !cursor.node().is_named() {
-        if !cursor.goto_parent() {
-            break;
-        }
-    }
-}
-
-// TODO this could be even better, if the grammar would consider all possible sub properties like "sub_class_of" for every frame type. This can be done by splitting a buch of rules up or returning a list of possible keywords for node types.
-fn node_type_to_keyword(_type: &str) -> Option<String> {
-    match _type {
-        "ontology" => Some("Ontology:".to_string()),
-        "import" => Some("Import:".to_string()),
-        "class_frame" => Some("Class:".to_string()),
-        "datatype_frame" => Some("Datatype:".to_string()),
-        "object_property_frame" => Some("ObjectProperty:".to_string()),
-        "annotation_property_frame" => Some("AnnotationProperty:".to_string()),
-        "data_property_frame" => Some("DataProperty:".to_string()),
-        "individual_frame" => Some("Individual:".to_string()),
-        "annotation" => Some("Annotations:".to_string()),
-        "datatype_equavalent_to" => Some("EquivalentTo:".to_string()),
-        "sub_class_of" => Some("SubClassOf:".to_string()),
-        "equavalent_to" => Some("EquivalentTo:".to_string()),
-        "disjoint_with" => Some("DisjointWith:".to_string()),
-        "disjoint_union_of" => Some("DisjointUnionOf:".to_string()),
-        "has_key" => Some("HasKey:".to_string()),
-        _ => None,
     }
 }

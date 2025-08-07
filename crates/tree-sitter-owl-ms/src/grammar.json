@@ -73,23 +73,23 @@
       "members": [
         {
           "type": "SYMBOL",
+          "name": "keyword_integer"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "keyword_decimal"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "keyword_float"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "keyword_string"
+        },
+        {
+          "type": "SYMBOL",
           "name": "datatype_iri"
-        },
-        {
-          "type": "STRING",
-          "value": "integer"
-        },
-        {
-          "type": "STRING",
-          "value": "decimal"
-        },
-        {
-          "type": "STRING",
-          "value": "float"
-        },
-        {
-          "type": "STRING",
-          "value": "string"
         }
       ]
     },
@@ -529,8 +529,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "Prefix:"
+          "type": "SYMBOL",
+          "name": "keyword_prefix"
         },
         {
           "type": "SYMBOL",
@@ -546,8 +546,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "Ontology:"
+          "type": "SYMBOL",
+          "name": "keyword_ontology"
         },
         {
           "type": "CHOICE",
@@ -605,8 +605,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "Import:"
+          "type": "SYMBOL",
+          "name": "keyword_import"
         },
         {
           "type": "SYMBOL",
@@ -651,8 +651,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "Annotations:"
+          "type": "SYMBOL",
+          "name": "keyword_annotations"
         },
         {
           "type": "SYMBOL",
@@ -707,8 +707,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "inverse"
+          "type": "SYMBOL",
+          "name": "keyword_inverse"
         },
         {
           "type": "SYMBOL",
@@ -902,24 +902,24 @@
       "type": "CHOICE",
       "members": [
         {
-          "type": "STRING",
-          "value": "length"
+          "type": "SYMBOL",
+          "name": "keyword_length"
         },
         {
-          "type": "STRING",
-          "value": "minLength"
+          "type": "SYMBOL",
+          "name": "keyword_min_length"
         },
         {
-          "type": "STRING",
-          "value": "maxLength"
+          "type": "SYMBOL",
+          "name": "keyword_max_length"
         },
         {
-          "type": "STRING",
-          "value": "pattern"
+          "type": "SYMBOL",
+          "name": "keyword_pattern"
         },
         {
-          "type": "STRING",
-          "value": "langRange"
+          "type": "SYMBOL",
+          "name": "keyword_lang_range"
         },
         {
           "type": "STRING",
@@ -1096,8 +1096,8 @@
               "name": "_data_property_expression"
             },
             {
-              "type": "STRING",
-              "value": "some"
+              "type": "SYMBOL",
+              "name": "keyword_some"
             },
             {
               "type": "SYMBOL",
@@ -1113,8 +1113,8 @@
               "name": "_data_property_expression"
             },
             {
-              "type": "STRING",
-              "value": "some"
+              "type": "SYMBOL",
+              "name": "keyword_some"
             },
             {
               "type": "SYMBOL",
@@ -1130,8 +1130,8 @@
               "name": "_data_property_expression"
             },
             {
-              "type": "STRING",
-              "value": "only"
+              "type": "SYMBOL",
+              "name": "keyword_only"
             },
             {
               "type": "SYMBOL",
@@ -1147,8 +1147,8 @@
               "name": "_data_property_expression"
             },
             {
-              "type": "STRING",
-              "value": "only"
+              "type": "SYMBOL",
+              "name": "keyword_only"
             },
             {
               "type": "SYMBOL",
@@ -1164,8 +1164,8 @@
               "name": "_data_property_expression"
             },
             {
-              "type": "STRING",
-              "value": "Self"
+              "type": "SYMBOL",
+              "name": "keyword_self"
             }
           ]
         },
@@ -1351,8 +1351,8 @@
               "name": "_object_property_expression"
             },
             {
-              "type": "STRING",
-              "value": "value"
+              "type": "SYMBOL",
+              "name": "keyword_value"
             },
             {
               "type": "SYMBOL",
@@ -1368,8 +1368,8 @@
               "name": "_data_property_expression"
             },
             {
-              "type": "STRING",
-              "value": "value"
+              "type": "SYMBOL",
+              "name": "keyword_value"
             },
             {
               "type": "SYMBOL",
@@ -1426,8 +1426,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "Datatype:"
+          "type": "SYMBOL",
+          "name": "keyword_datatype"
         },
         {
           "type": "FIELD",
@@ -1469,8 +1469,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "EquivalentTo:"
+          "type": "SYMBOL",
+          "name": "keyword_equivalent_to"
         },
         {
           "type": "CHOICE",
@@ -1494,8 +1494,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "Class:"
+          "type": "SYMBOL",
+          "name": "keyword_class"
         },
         {
           "type": "FIELD",
@@ -1520,11 +1520,11 @@
               },
               {
                 "type": "SYMBOL",
-                "name": "equivalent_to"
+                "name": "class_equivalent_to"
               },
               {
                 "type": "SYMBOL",
-                "name": "disjoint_with"
+                "name": "class_disjoint_with"
               },
               {
                 "type": "SYMBOL",
@@ -1543,8 +1543,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "SubClassOf:"
+          "type": "SYMBOL",
+          "name": "keyword_sub_class_of"
         },
         {
           "type": "SYMBOL",
@@ -1552,12 +1552,12 @@
         }
       ]
     },
-    "equivalent_to": {
+    "class_equivalent_to": {
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "EquivalentTo:"
+          "type": "SYMBOL",
+          "name": "keyword_equivalent_to"
         },
         {
           "type": "SYMBOL",
@@ -1565,12 +1565,12 @@
         }
       ]
     },
-    "disjoint_with": {
+    "class_disjoint_with": {
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "DisjointWith:"
+          "type": "SYMBOL",
+          "name": "keyword_disjoint_with"
         },
         {
           "type": "SYMBOL",
@@ -1582,8 +1582,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "DisjointUnionOf:"
+          "type": "SYMBOL",
+          "name": "keyword_disjoint_union_of"
         },
         {
           "type": "CHOICE",
@@ -1607,8 +1607,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "HasKey:"
+          "type": "SYMBOL",
+          "name": "keyword_has_key"
         },
         {
           "type": "CHOICE",
@@ -1644,8 +1644,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "ObjectProperty:"
+          "type": "SYMBOL",
+          "name": "keyword_object_property"
         },
         {
           "type": "FIELD",
@@ -1665,144 +1665,176 @@
                 "name": "_annotations"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "Domain:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_description_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "domain"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "Range:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_description_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "range"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "SubPropertyOf:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_object_property_expression_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "sub_property_of"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "EquivalentTo:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_object_property_expression_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "object_property_equivalent_to"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "DisjointWith:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_object_property_expression_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "object_property_disjoint_with"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "InverseOf:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_object_property_expression_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "inverse_of"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "Characteristics:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_object_property_characteristic_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "characteristics"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "SubPropertyChain:"
-                  },
-                  {
-                    "type": "CHOICE",
-                    "members": [
-                      {
-                        "type": "SYMBOL",
-                        "name": "_annotations"
-                      },
-                      {
-                        "type": "BLANK"
-                      }
-                    ]
-                  },
-                  {
-                    "type": "SEQ",
-                    "members": [
-                      {
-                        "type": "SYMBOL",
-                        "name": "_object_property_expression"
-                      },
-                      {
-                        "type": "REPEAT",
-                        "content": {
-                          "type": "SEQ",
-                          "members": [
-                            {
-                              "type": "STRING",
-                              "value": "o"
-                            },
-                            {
-                              "type": "SYMBOL",
-                              "name": "_object_property_expression"
-                            }
-                          ]
-                        }
-                      }
-                    ]
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "sub_property_chain"
               }
             ]
           }
+        }
+      ]
+    },
+    "domain": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_domain"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_description_annotated_list"
+        }
+      ]
+    },
+    "range": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_range"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_description_annotated_list"
+        }
+      ]
+    },
+    "sub_property_of": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_sub_property_of"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_object_property_expression_annotated_list"
+        }
+      ]
+    },
+    "object_property_equivalent_to": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_equivalent_to"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_object_property_expression_annotated_list"
+        }
+      ]
+    },
+    "object_property_disjoint_with": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_disjoint_with"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_object_property_expression_annotated_list"
+        }
+      ]
+    },
+    "inverse_of": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_inverse_of"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_object_property_expression_annotated_list"
+        }
+      ]
+    },
+    "characteristics": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_characteristics"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_object_property_characteristic_annotated_list"
+        }
+      ]
+    },
+    "sub_property_chain": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_sub_property_chain"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "_annotations"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "_object_property_expression"
+            },
+            {
+              "type": "REPEAT",
+              "content": {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": "o"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "_object_property_expression"
+                  }
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -1810,32 +1842,32 @@
       "type": "CHOICE",
       "members": [
         {
-          "type": "STRING",
-          "value": "Functional"
+          "type": "SYMBOL",
+          "name": "keyword_functional"
         },
         {
-          "type": "STRING",
-          "value": "InverseFunctional"
+          "type": "SYMBOL",
+          "name": "keyword_inverse_functional"
         },
         {
-          "type": "STRING",
-          "value": "Reflexive"
+          "type": "SYMBOL",
+          "name": "keyword_reflexive"
         },
         {
-          "type": "STRING",
-          "value": "Irreflexive"
+          "type": "SYMBOL",
+          "name": "keyword_irreflexive"
         },
         {
-          "type": "STRING",
-          "value": "Symmetric"
+          "type": "SYMBOL",
+          "name": "keyword_symmetric"
         },
         {
-          "type": "STRING",
-          "value": "Asymmetric"
+          "type": "SYMBOL",
+          "name": "keyword_asymmetric"
         },
         {
-          "type": "STRING",
-          "value": "Transitive"
+          "type": "SYMBOL",
+          "name": "keyword_transitive"
         }
       ]
     },
@@ -1843,8 +1875,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "DataProperty:"
+          "type": "SYMBOL",
+          "name": "keyword_data_property"
         },
         {
           "type": "FIELD",
@@ -1864,97 +1896,121 @@
                 "name": "_annotations"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "Domain:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_description_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "data_property_domain"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "Range:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_data_range_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "data_property_range"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "Characteristics:"
-                  },
-                  {
-                    "type": "CHOICE",
-                    "members": [
-                      {
-                        "type": "SYMBOL",
-                        "name": "_annotations"
-                      },
-                      {
-                        "type": "BLANK"
-                      }
-                    ]
-                  },
-                  {
-                    "type": "STRING",
-                    "value": "Functional"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "data_property_characteristics"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "SubPropertyOf:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_data_property_expression_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "data_property_sub_property_of"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "EquivalentTo:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_data_property_expression_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "data_property_equivalent_to"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "DisjointWith:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_data_property_expression_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "data_property_disjoint_with"
               }
             ]
           }
+        }
+      ]
+    },
+    "data_property_domain": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_domain"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_description_annotated_list"
+        }
+      ]
+    },
+    "data_property_range": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_range"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_data_range_annotated_list"
+        }
+      ]
+    },
+    "data_property_characteristics": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_characteristics"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "_annotations"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "SYMBOL",
+          "name": "keyword_functional"
+        }
+      ]
+    },
+    "data_property_sub_property_of": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_sub_property_of"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_data_property_expression_annotated_list"
+        }
+      ]
+    },
+    "data_property_equivalent_to": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_equivalent_to"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_data_property_expression_annotated_list"
+        }
+      ]
+    },
+    "data_property_disjoint_with": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_disjoint_with"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_data_property_expression_annotated_list"
         }
       ]
     },
@@ -1962,8 +2018,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "AnnotationProperty:"
+          "type": "SYMBOL",
+          "name": "keyword_annotation_property"
         },
         {
           "type": "FIELD",
@@ -1983,46 +2039,58 @@
                 "name": "_annotations"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "Domain:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_iri_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "annotation_property_domin"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "Range:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_iri_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "annotation_property_range"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "SubPropertyOf:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_annotation_property_iri_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "annotation_property_sub_property_of"
               }
             ]
           }
+        }
+      ]
+    },
+    "annotation_property_domin": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_domain"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_iri_annotated_list"
+        }
+      ]
+    },
+    "annotation_property_range": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_range"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_iri_annotated_list"
+        }
+      ]
+    },
+    "annotation_property_sub_property_of": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_sub_property_of"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_annotation_property_iri_annotated_list"
         }
       ]
     },
@@ -2030,8 +2098,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "Individual:"
+          "type": "SYMBOL",
+          "name": "keyword_individual"
         },
         {
           "type": "FIELD",
@@ -2051,59 +2119,75 @@
                 "name": "_annotations"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "Types:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_description_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "individual_types"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "Facts:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_fact_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "individual_facts"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "SameAs:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_individual_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "individual_same_as"
               },
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "DifferentFrom:"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_individual_annotated_list"
-                  }
-                ]
+                "type": "SYMBOL",
+                "name": "individual_different_from"
               }
             ]
           }
+        }
+      ]
+    },
+    "individual_types": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_types"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_description_annotated_list"
+        }
+      ]
+    },
+    "individual_facts": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_facts"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_fact_annotated_list"
+        }
+      ]
+    },
+    "individual_same_as": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "keyword_same_as"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_individual_annotated_list"
+        }
+      ]
+    },
+    "individual_different_from": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DifferentFrom:"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_individual_annotated_list"
         }
       ]
     },
@@ -2170,8 +2254,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "EquivalentClasses:"
+              "type": "SYMBOL",
+              "name": "keyword_equivalent_classes"
             },
             {
               "type": "CHOICE",
@@ -2195,8 +2279,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "DisjointClasses:"
+              "type": "SYMBOL",
+              "name": "keyword_disjoint_classes"
             },
             {
               "type": "CHOICE",
@@ -2220,8 +2304,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "EquivalentProperties:"
+              "type": "SYMBOL",
+              "name": "keyword_equivalent_properties"
             },
             {
               "type": "CHOICE",
@@ -2245,8 +2329,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "DisjointProperties:"
+              "type": "SYMBOL",
+              "name": "keyword_disjoint_properties"
             },
             {
               "type": "CHOICE",
@@ -2270,8 +2354,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "EquivalentProperties:"
+              "type": "SYMBOL",
+              "name": "keyword_equivalent_properties"
             },
             {
               "type": "CHOICE",
@@ -2295,8 +2379,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "DisjointProperties:"
+              "type": "SYMBOL",
+              "name": "keyword_disjoint_properties"
             },
             {
               "type": "CHOICE",
@@ -2320,8 +2404,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "SameIndividual:"
+              "type": "SYMBOL",
+              "name": "keyword_same_individual"
             },
             {
               "type": "CHOICE",
@@ -2345,8 +2429,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "DifferentIndividuals:"
+              "type": "SYMBOL",
+              "name": "keyword_different_individuals"
             },
             {
               "type": "CHOICE",
@@ -3283,6 +3367,210 @@
     "_pname_ln": {
       "type": "PATTERN",
       "value": "[A-Za-z0-9_\\-\\.]*:[A-Za-z0-9_\\-\\.]+"
+    },
+    "keyword_prefix": {
+      "type": "STRING",
+      "value": "Prefix:"
+    },
+    "keyword_ontology": {
+      "type": "STRING",
+      "value": "Ontology:"
+    },
+    "keyword_integer": {
+      "type": "STRING",
+      "value": "integer"
+    },
+    "keyword_decimal": {
+      "type": "STRING",
+      "value": "decimal"
+    },
+    "keyword_float": {
+      "type": "STRING",
+      "value": "float"
+    },
+    "keyword_string": {
+      "type": "STRING",
+      "value": "string"
+    },
+    "keyword_import": {
+      "type": "STRING",
+      "value": "Import:"
+    },
+    "keyword_annotations": {
+      "type": "STRING",
+      "value": "Annotations:"
+    },
+    "keyword_inverse": {
+      "type": "STRING",
+      "value": "inverse"
+    },
+    "keyword_length": {
+      "type": "STRING",
+      "value": "length"
+    },
+    "keyword_min_length": {
+      "type": "STRING",
+      "value": "minLength"
+    },
+    "keyword_max_length": {
+      "type": "STRING",
+      "value": "maxLength"
+    },
+    "keyword_pattern": {
+      "type": "STRING",
+      "value": "pattern"
+    },
+    "keyword_lang_range": {
+      "type": "STRING",
+      "value": "langRange"
+    },
+    "keyword_some": {
+      "type": "STRING",
+      "value": "some"
+    },
+    "keyword_only": {
+      "type": "STRING",
+      "value": "only"
+    },
+    "keyword_self": {
+      "type": "STRING",
+      "value": "Self"
+    },
+    "keyword_value": {
+      "type": "STRING",
+      "value": "value"
+    },
+    "keyword_datatype": {
+      "type": "STRING",
+      "value": "Datatype:"
+    },
+    "keyword_equivalent_to": {
+      "type": "STRING",
+      "value": "EquivalentTo:"
+    },
+    "keyword_class": {
+      "type": "STRING",
+      "value": "Class:"
+    },
+    "keyword_sub_class_of": {
+      "type": "STRING",
+      "value": "SubClassOf:"
+    },
+    "keyword_disjoint_with": {
+      "type": "STRING",
+      "value": "DisjointWith:"
+    },
+    "keyword_disjoint_union_of": {
+      "type": "STRING",
+      "value": "DisjointUnionOf:"
+    },
+    "keyword_has_key": {
+      "type": "STRING",
+      "value": "HasKey:"
+    },
+    "keyword_object_property": {
+      "type": "STRING",
+      "value": "ObjectProperty:"
+    },
+    "keyword_domain": {
+      "type": "STRING",
+      "value": "Domain:"
+    },
+    "keyword_range": {
+      "type": "STRING",
+      "value": "Range:"
+    },
+    "keyword_sub_property_of": {
+      "type": "STRING",
+      "value": "SubPropertyOf:"
+    },
+    "keyword_inverse_of": {
+      "type": "STRING",
+      "value": "InverseOf:"
+    },
+    "keyword_sub_property_chain": {
+      "type": "STRING",
+      "value": "SubPropertyChain:"
+    },
+    "keyword_functional": {
+      "type": "STRING",
+      "value": "Functional"
+    },
+    "keyword_inverse_functional": {
+      "type": "STRING",
+      "value": "InverseFunctional"
+    },
+    "keyword_reflexive": {
+      "type": "STRING",
+      "value": "Reflexive"
+    },
+    "keyword_irreflexive": {
+      "type": "STRING",
+      "value": "Irreflexive"
+    },
+    "keyword_symmetric": {
+      "type": "STRING",
+      "value": "Symmetric"
+    },
+    "keyword_asymmetric": {
+      "type": "STRING",
+      "value": "Asymmetric"
+    },
+    "keyword_transitive": {
+      "type": "STRING",
+      "value": "Transitive"
+    },
+    "keyword_data_property": {
+      "type": "STRING",
+      "value": "DataProperty:"
+    },
+    "keyword_characteristics": {
+      "type": "STRING",
+      "value": "Characteristics:"
+    },
+    "keyword_annotation_property": {
+      "type": "STRING",
+      "value": "AnnotationProperty:"
+    },
+    "keyword_individual": {
+      "type": "STRING",
+      "value": "Individual:"
+    },
+    "keyword_types": {
+      "type": "STRING",
+      "value": "Types:"
+    },
+    "keyword_facts": {
+      "type": "STRING",
+      "value": "Facts:"
+    },
+    "keyword_same_as": {
+      "type": "STRING",
+      "value": "SameAs:"
+    },
+    "keyword_equivalent_classes": {
+      "type": "STRING",
+      "value": "EquivalentClasses:"
+    },
+    "keyword_disjoint_classes": {
+      "type": "STRING",
+      "value": "DisjointClasses:"
+    },
+    "keyword_equivalent_properties": {
+      "type": "STRING",
+      "value": "EquivalentProperties:"
+    },
+    "keyword_disjoint_properties": {
+      "type": "STRING",
+      "value": "DisjointProperties:"
+    },
+    "keyword_same_individual": {
+      "type": "STRING",
+      "value": "SameIndividual:"
+    },
+    "keyword_different_individuals": {
+      "type": "STRING",
+      "value": "DifferentIndividuals:"
     }
   },
   "extras": [

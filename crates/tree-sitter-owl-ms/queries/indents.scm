@@ -8,10 +8,6 @@
 	(individual_frame)
 	(misc)
 
-	(sub_class_of)
-	(equivalent_to)
-	(disjoint_with)
-	(disjoint_union_of)
-	(has_key)
+	; TODO indets for the other indentation stuff
 ] @indent @extend
 

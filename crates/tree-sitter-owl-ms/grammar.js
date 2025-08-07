@@ -1,50 +1,56 @@
 module.exports = grammar({
-  name: "owl_ms",
-  conflicts: ($) => [
+  name: 'owl_ms',
+  conflicts: $ => [
     [$.datatype_frame],
     [$.data_property_iri, $.object_property_iri],
     [$.datatype_iri, $.class_iri],
   ],
-  extras: ($) => [/[ \t\n\r]/, $.comment],
+  extras: $ => [/[ \t\n\r]/, $.comment],
   rules: {
     // My rules
-    source_file: ($) => $._ontology_document,
+    source_file: $ => $._ontology_document,
     comment: _ => token(seq('#', /.*/)), // https://github.com/tree-sitter/tree-sitter-rust/blob/master/grammar.js
 
     // https://www.w3.org/TR/owl2-manchester-syntax/
 
     // 2.1 IRIs, Integers, Literals, and Entities
-    _iri: ($) => choice($.full_iri, $.abbreviated_iri, $.simple_iri),
-    full_iri: ($) => seq("<", $._iri_rfc3987, ">"),
-    abbreviated_iri: ($) => $._pname_ln,
-    simple_iri: ($) => $._pn_local,
-    prefix_name: ($) => /([A-Za-z][A-Za-z0-9_\-\.]*)?:/,
+    _iri: $ => choice($.full_iri, $.abbreviated_iri, $.simple_iri),
+    full_iri: $ => seq('<', $._iri_rfc3987, '>'),
+    abbreviated_iri: $ => $._pname_ln,
+    simple_iri: $ => $._pn_local,
+    prefix_name: $ => /([A-Za-z][A-Za-z0-9_\-\.]*)?:/,
 
-    _datatype: ($) =>
-      choice($.datatype_iri, "integer", "decimal", "float", "string"),
+    _datatype: $ =>
+      choice(
+        $.keyword_integer,
+        $.keyword_decimal,
+        $.keyword_float,
+        $.keyword_string,
+        $.datatype_iri,
+      ),
 
     // Iri Types
-    datatype_iri: ($) => $._iri,
-    class_iri: ($) => $._iri,
-    annotation_property_iri: ($) => $._iri,
-    ontology_iri: ($) => $._iri,
-    data_property_iri: ($) => $._iri,
-    version_iri: ($) => $._iri,
-    object_property_iri: ($) => $._iri,
-    annotation_property_iri_annotated_list: ($) => $._iri,
-    individual_iri: ($) => $._iri,
+    datatype_iri: $ => $._iri,
+    class_iri: $ => $._iri,
+    annotation_property_iri: $ => $._iri,
+    ontology_iri: $ => $._iri,
+    data_property_iri: $ => $._iri,
+    version_iri: $ => $._iri,
+    object_property_iri: $ => $._iri,
+    annotation_property_iri_annotated_list: $ => $._iri,
+    individual_iri: $ => $._iri,
 
-    _individual: ($) => choice($.individual_iri, $.node_id),
-    node_id: ($) => seq("_:", $._pn_local),
+    _individual: $ => choice($.individual_iri, $.node_id),
+    node_id: $ => seq('_:', $._pn_local),
 
-    non_negative_integer: ($) => choice($._zero, $._positive_integer),
-    _positive_integer: ($) => seq($._non_zero, repeat($._digit)),
-    _digits: ($) => repeat1($._digit),
-    _digit: ($) => choice($._zero, $._non_zero),
-    _non_zero: ($) => /[1-9]/,
-    _zero: ($) => "0",
+    non_negative_integer: $ => choice($._zero, $._positive_integer),
+    _positive_integer: $ => seq($._non_zero, repeat($._digit)),
+    _digits: $ => repeat1($._digit),
+    _digit: $ => choice($._zero, $._non_zero),
+    _non_zero: $ => /[1-9]/,
+    _zero: $ => '0',
 
-    _literal: ($) =>
+    _literal: $ =>
       choice(
         $.typed_literal,
         $.string_literal_no_language,
@@ -53,45 +59,45 @@ module.exports = grammar({
         $.decimal_literal,
         $.floating_point_literal,
       ),
-    typed_literal: ($) => seq($._lexial_value, "^^", $._datatype),
-    string_literal_no_language: ($) => $._quoted_string,
-    string_literal_with_language: ($) => seq($._quoted_string, $._language_tag),
-    integer_literal: ($) => seq(optional(choice("+", "-")), $._digits),
-    decimal_literal: ($) =>
-      seq(optional(choice("+", "-")), $._digits, ".", $._digits),
-    floating_point_literal: ($) =>
+    typed_literal: $ => seq($._lexial_value, '^^', $._datatype),
+    string_literal_no_language: $ => $._quoted_string,
+    string_literal_with_language: $ => seq($._quoted_string, $._language_tag),
+    integer_literal: $ => seq(optional(choice('+', '-')), $._digits),
+    decimal_literal: $ =>
+      seq(optional(choice('+', '-')), $._digits, '.', $._digits),
+    floating_point_literal: $ =>
       seq(
-        optional(choice("+", "-")),
+        optional(choice('+', '-')),
         choice(
-          seq($._digits, optional(seq(".", $._digits)), optional($._exponent)),
-          seq(".", $._digits, optional($._exponent)),
+          seq($._digits, optional(seq('.', $._digits)), optional($._exponent)),
+          seq('.', $._digits, optional($._exponent)),
         ),
-        choice("f", "F"),
+        choice('f', 'F'),
       ),
 
-    _exponent: ($) =>
-      seq(choice("e", "E"), optional(choice("+", "-")), $._digits),
+    _exponent: $ =>
+      seq(choice('e', 'E'), optional(choice('+', '-')), $._digits),
 
-    _quoted_string: ($) => /"([^"\\]|\\\\|\\")*"/,
-    _language_tag: ($) => /@[a-zA-Z\-]+/, // TODO make more strict https://www.rfc-editor.org/rfc/bcp/bcp47.txt
-    _lexial_value: ($) => $._quoted_string,
+    _quoted_string: $ => /"([^"\\]|\\\\|\\")*"/,
+    _language_tag: $ => /@[a-zA-Z\-]+/, // TODO make more strict https://www.rfc-editor.org/rfc/bcp/bcp47.txt
+    _lexial_value: $ => $._quoted_string,
 
     // 2.2 Ontologies and Annotations
-    _ontology_document: ($) => seq(repeat($.prefix_declaration), $.ontology),
-    prefix_declaration: ($) => seq("Prefix:", $.prefix_name, $.full_iri),
+    _ontology_document: $ => seq(repeat($.prefix_declaration), $.ontology),
+    prefix_declaration: $ => seq($.keyword_prefix, $.prefix_name, $.full_iri),
 
-    ontology: ($) =>
+    ontology: $ =>
       seq(
-        "Ontology:",
+        $.keyword_ontology,
         optional(seq($.ontology_iri, optional($.version_iri))),
         repeat($.import),
         repeat($._annotations),
         repeat($._frame),
       ),
 
-    import: ($) => seq("Import:", $._iri),
+    import: $ => seq($.keyword_import, $._iri),
 
-    _frame: ($) =>
+    _frame: $ =>
       choice(
         $.datatype_frame,
         $.class_frame,
@@ -102,366 +108,517 @@ module.exports = grammar({
         $.misc,
       ),
 
-    _annotations: ($) => seq("Annotations:", $._annotation_annotated_list),
-    annotation: ($) => seq($.annotation_property_iri, $._annotation_target),
-    _annotation_target: ($) => choice($._iri, $._literal, $.node_id),
+    _annotations: $ => seq($.keyword_annotations, $._annotation_annotated_list),
+
+    annotation: $ => seq($.annotation_property_iri, $._annotation_target),
+    _annotation_target: $ => choice($._iri, $._literal, $.node_id),
 
     // 2.3  Property and Datatype Expressions
-    _object_property_expression: ($) =>
+    _object_property_expression: $ =>
       choice($.object_property_iri, $._inverse_object_property),
-    _inverse_object_property: ($) => seq("inverse", $.object_property_iri),
+    _inverse_object_property: $ =>
+      seq($.keyword_inverse, $.object_property_iri),
 
-    _data_property_expression: ($) => $.data_property_iri,
+    _data_property_expression: $ => $.data_property_iri,
 
-    data_range: ($) => sep1($._data_conjunction, "or"),
-    _data_conjunction: ($) => sep1($._data_primary, "and"),
-    _data_primary: ($) => seq(optional("not"), $._data_atomic),
-    _data_atomic: ($) =>
+    data_range: $ => sep1($._data_conjunction, 'or'),
+    _data_conjunction: $ => sep1($._data_primary, 'and'),
+    _data_primary: $ => seq(optional('not'), $._data_atomic),
+    _data_atomic: $ =>
       choice(
         $._datatype,
-        seq("{", $._literal_list, "}"),
+        seq('{', $._literal_list, '}'),
         $.datatype_restriction,
-        seq("(", $.data_range, ")"),
+        seq('(', $.data_range, ')'),
       ),
-    datatype_restriction: ($) =>
+    datatype_restriction: $ =>
       seq(
         $._datatype,
-        "[",
-        sep1(seq($._facet, $._restriction_value), ","),
-        "]",
+        '[',
+        sep1(seq($._facet, $._restriction_value), ','),
+        ']',
       ),
 
-    _facet: ($) =>
+    _facet: $ =>
       choice(
-        "length",
-        "minLength",
-        "maxLength",
-        "pattern",
-        "langRange",
-        "<=",
-        "<",
-        ">=",
-        ">",
+        $.keyword_length,
+        $.keyword_min_length,
+        $.keyword_max_length,
+        $.keyword_pattern,
+        $.keyword_lang_range,
+        '<=',
+        '<',
+        '>=',
+        '>',
       ),
 
-    _restriction_value: ($) => $._literal,
+    _restriction_value: $ => $._literal,
 
     // 2.4 Descriptions
-    description: ($) => sep1($._conjunction, "or"),
+    description: $ => sep1($._conjunction, 'or'),
 
-    _conjunction: ($) =>
+    _conjunction: $ =>
       choice(
         seq(
           $.class_iri,
-          "that",
-          optional("not"),
+          'that',
+          optional('not'),
           $._restriction,
-          repeat(seq("and", optional("not"), $._restriction)),
+          repeat(seq('and', optional('not'), $._restriction)),
         ),
-        sep1($._primary, "and"),
+        sep1($._primary, 'and'),
       ),
 
-    _primary: ($) => seq(optional("not"), choice($._restriction, $._atomic)),
+    _primary: $ => seq(optional('not'), choice($._restriction, $._atomic)),
 
-    _restriction: ($) =>
+    _restriction: $ =>
       choice(
-        seq($._data_property_expression, "some", $._primary),
-        seq($._data_property_expression, "some", $._data_primary),
-        seq($._data_property_expression, "only", $._primary),
-        seq($._data_property_expression, "only", $._data_primary),
-        seq($._data_property_expression, "Self"),
+        seq($._data_property_expression, $.keyword_some, $._primary),
+        seq($._data_property_expression, $.keyword_some, $._data_primary),
+        seq($._data_property_expression, $.keyword_only, $._primary),
+        seq($._data_property_expression, $.keyword_only, $._data_primary),
+        seq($._data_property_expression, $.keyword_self),
         seq(
           $._data_property_expression,
-          "min",
+          'min',
           $.non_negative_integer,
           optional($._primary),
         ),
         seq(
           $._data_property_expression,
-          "min",
+          'min',
           $.non_negative_integer,
           optional($._data_primary),
         ),
         seq(
           $._data_property_expression,
-          "max",
+          'max',
           $.non_negative_integer,
           optional($._primary),
         ),
         seq(
           $._data_property_expression,
-          "max",
+          'max',
           $.non_negative_integer,
           optional($._data_primary),
         ),
         seq(
           $._data_property_expression,
-          "exactly",
+          'exactly',
           $.non_negative_integer,
           optional($._primary),
         ),
         seq(
           $._data_property_expression,
-          "exactly",
+          'exactly',
           $.non_negative_integer,
           optional($._data_primary),
         ),
-        seq($._object_property_expression, "value", $._individual),
-        seq($._data_property_expression, "value", $._literal),
+        seq($._object_property_expression, $.keyword_value, $._individual),
+        seq($._data_property_expression, $.keyword_value, $._literal),
       ),
 
-    _atomic: ($) =>
+    _atomic: $ =>
       choice(
         $.class_iri,
-        seq("{", $._individual_list, "}"),
-        seq("(", $.description, ")"),
+        seq('{', $._individual_list, '}'),
+        seq('(', $.description, ')'),
       ),
 
     // 2.5 Frames and Miscellaneous
 
-    datatype_frame: ($) =>
+    datatype_frame: $ =>
       seq(
-        "Datatype:",
-        field("iri",$._datatype),
+        $.keyword_datatype,
+        field('iri', $._datatype),
         repeat($._annotations),
         optional($.datatype_equavalent_to),
         repeat($._annotations),
       ),
 
-    datatype_equavalent_to: ($) =>
-      seq("EquivalentTo:", optional($._annotations), $.data_range),
+    datatype_equavalent_to: $ =>
+      seq($.keyword_equivalent_to, optional($._annotations), $.data_range),
 
-    class_frame: ($) =>
+    class_frame: $ =>
       seq(
-        "Class:",
-        field("iri", $.class_iri),
+        $.keyword_class,
+        field('iri', $.class_iri),
         repeat(
           choice(
             $._annotations,
             $.sub_class_of,
-            $.equivalent_to,
-            $.disjoint_with,
+            $.class_equivalent_to,
+            $.class_disjoint_with,
             $.disjoint_union_of,
             $.has_key,
           ),
         ),
       ),
 
-    sub_class_of: ($) => seq("SubClassOf:", $._description_annotated_list),
-    equivalent_to: ($) => seq("EquivalentTo:", $._description_annotated_list),
-    disjoint_with: ($) => seq("DisjointWith:", $._description_annotated_list),
-    disjoint_union_of: ($) =>
-      seq("DisjointUnionOf:", optional($._annotations), $._description_2list),
-    has_key: ($) =>
+    sub_class_of: $ =>
+      seq($.keyword_sub_class_of, $._description_annotated_list),
+
+    class_equivalent_to: $ =>
+      seq($.keyword_equivalent_to, $._description_annotated_list),
+
+    class_disjoint_with: $ =>
+      seq($.keyword_disjoint_with, $._description_annotated_list),
+
+    disjoint_union_of: $ =>
       seq(
-        "HasKey:",
+        $.keyword_disjoint_union_of,
+        optional($._annotations),
+        $._description_2list,
+      ),
+
+    has_key: $ =>
+      seq(
+        $.keyword_has_key,
         optional($._annotations),
         repeat1(
           choice($._object_property_expression, $._data_property_expression),
         ),
       ),
 
-    object_property_frame: ($) =>
+    object_property_frame: $ =>
       seq(
-        "ObjectProperty:",
-        field("iri", $.object_property_iri),
+        $.keyword_object_property,
+        field('iri', $.object_property_iri),
         repeat(
           choice(
             $._annotations,
-            seq("Domain:", $._description_annotated_list),
-            seq("Range:", $._description_annotated_list),
-            seq("SubPropertyOf:", $._object_property_expression_annotated_list),
-            seq("EquivalentTo:", $._object_property_expression_annotated_list),
-            seq("DisjointWith:", $._object_property_expression_annotated_list),
-            seq("InverseOf:", $._object_property_expression_annotated_list),
-            seq(
-              "Characteristics:",
-              $._object_property_characteristic_annotated_list,
-            ),
-            seq(
-              "SubPropertyChain:",
-              optional($._annotations),
-              sep1($._object_property_expression, "o"),
-            ),
+            $.domain,
+            $.range,
+            $.sub_property_of,
+            $.object_property_equivalent_to,
+            $.object_property_disjoint_with,
+            $.inverse_of,
+            $.characteristics,
+            $.sub_property_chain,
           ),
         ),
       ),
 
-    _object_property_characteristic: ($) =>
+    domain: $ => seq($.keyword_domain, $._description_annotated_list),
+
+    range: $ => seq($.keyword_range, $._description_annotated_list),
+
+    sub_property_of: $ =>
+      seq(
+        $.keyword_sub_property_of,
+        $._object_property_expression_annotated_list,
+      ),
+
+    object_property_equivalent_to: $ =>
+      seq(
+        $.keyword_equivalent_to,
+        $._object_property_expression_annotated_list,
+      ),
+
+    object_property_disjoint_with: $ =>
+      seq(
+        $.keyword_disjoint_with,
+        $._object_property_expression_annotated_list,
+      ),
+
+    inverse_of: $ =>
+      seq($.keyword_inverse_of, $._object_property_expression_annotated_list),
+
+    characteristics: $ =>
+      seq(
+        $.keyword_characteristics,
+        $._object_property_characteristic_annotated_list,
+      ),
+    sub_property_chain: $ =>
+      seq(
+        $.keyword_sub_property_chain,
+        optional($._annotations),
+        sep1($._object_property_expression, 'o'),
+      ),
+
+    _object_property_characteristic: $ =>
       choice(
-        "Functional",
-        "InverseFunctional",
-        "Reflexive",
-        "Irreflexive",
-        "Symmetric",
-        "Asymmetric",
-        "Transitive",
+        $.keyword_functional,
+        $.keyword_inverse_functional,
+        $.keyword_reflexive,
+        $.keyword_irreflexive,
+        $.keyword_symmetric,
+        $.keyword_asymmetric,
+        $.keyword_transitive,
       ),
 
-    data_property_frame: ($) =>
+    data_property_frame: $ =>
       seq(
-        "DataProperty:",
-        field("iri", $.data_property_iri),
+        $.keyword_data_property,
+        field('iri', $.data_property_iri),
         repeat(
           choice(
             $._annotations,
-            seq("Domain:", $._description_annotated_list),
-            seq("Range:", $._data_range_annotated_list),
-            seq("Characteristics:", optional($._annotations), "Functional"),
-            seq("SubPropertyOf:", $._data_property_expression_annotated_list),
-            seq("EquivalentTo:", $._data_property_expression_annotated_list),
-            seq("DisjointWith:", $._data_property_expression_annotated_list),
+            $.data_property_domain,
+            $.data_property_range,
+            $.data_property_characteristics,
+            $.data_property_sub_property_of,
+            $.data_property_equivalent_to,
+            $.data_property_disjoint_with,
           ),
         ),
       ),
 
-    annotation_property_frame: ($) =>
+    // TODO hier weiter machen mit den keywords!
+
+    data_property_domain: $ =>
+      seq($.keyword_domain, $._description_annotated_list),
+    data_property_range: $ =>
+      seq($.keyword_range, $._data_range_annotated_list),
+
+    data_property_characteristics: $ =>
       seq(
-        "AnnotationProperty:",
-        field("iri",$.annotation_property_iri),
+        $.keyword_characteristics,
+        optional($._annotations),
+        $.keyword_functional,
+      ),
+    data_property_sub_property_of: $ =>
+      seq(
+        $.keyword_sub_property_of,
+        $._data_property_expression_annotated_list,
+      ),
+    data_property_equivalent_to: $ =>
+      seq($.keyword_equivalent_to, $._data_property_expression_annotated_list),
+    data_property_disjoint_with: $ =>
+      seq($.keyword_disjoint_with, $._data_property_expression_annotated_list),
+
+    annotation_property_frame: $ =>
+      seq(
+        $.keyword_annotation_property,
+        field('iri', $.annotation_property_iri),
         repeat(
           choice(
             $._annotations,
-            seq("Domain:", $._iri_annotated_list),
-            seq("Range:", $._iri_annotated_list),
-            seq("SubPropertyOf:", $._annotation_property_iri_annotated_list),
+            $.annotation_property_domin,
+            $.annotation_property_range,
+            $.annotation_property_sub_property_of,
           ),
         ),
       ),
 
-    individual_frame: ($) =>
+    annotation_property_domin: $ =>
+      seq($.keyword_domain, $._iri_annotated_list),
+    annotation_property_range: $ => seq($.keyword_range, $._iri_annotated_list),
+    annotation_property_sub_property_of: $ =>
+      seq($.keyword_sub_property_of, $._annotation_property_iri_annotated_list),
+
+    individual_frame: $ =>
       seq(
-        "Individual:",
-        field("iri", $._individual),
+        $.keyword_individual,
+        field('iri', $._individual),
         repeat(
           choice(
             $._annotations,
-            seq("Types:", $._description_annotated_list),
-            seq("Facts:", $._fact_annotated_list),
-            seq("SameAs:", $._individual_annotated_list),
-            seq("DifferentFrom:", $._individual_annotated_list),
+            $.individual_types,
+            $.individual_facts,
+            $.individual_same_as,
+            $.individual_different_from,
           ),
         ),
       ),
 
-    _fact: ($) =>
+    individual_types: $ => seq($.keyword_types, $._description_annotated_list),
+
+    individual_facts: $ => seq($.keyword_facts, $._fact_annotated_list),
+
+    individual_same_as: $ =>
+      seq($.keyword_same_as, $._individual_annotated_list),
+
+    individual_different_from: $ =>
+      seq('DifferentFrom:', $._individual_annotated_list),
+
+    _fact: $ =>
       seq(
-        optional("not"),
+        optional('not'),
         choice($._object_property_fact, $._data_property_fact),
       ),
-    _object_property_fact: ($) => seq($.object_property_iri, $._individual),
-    _data_property_fact: ($) => seq($.data_property_iri, $._literal),
+    _object_property_fact: $ => seq($.object_property_iri, $._individual),
+    _data_property_fact: $ => seq($.data_property_iri, $._literal),
 
-    misc: ($) =>
+    // TODO extract keywords
+    misc: $ =>
       choice(
         seq(
-          "EquivalentClasses:",
+          $.keyword_equivalent_classes,
           optional($._annotations),
           $._description_2list,
         ), // optional annotations is not to spec. spec wrong?
-        seq("DisjointClasses:", optional($._annotations), $._description_2list),
         seq(
-          "EquivalentProperties:",
+          $.keyword_disjoint_classes,
+          optional($._annotations),
+          $._description_2list,
+        ),
+        seq(
+          $.keyword_equivalent_properties,
           optional($._annotations),
           $._object_property_2list,
         ),
         seq(
-          "DisjointProperties:",
+          $.keyword_disjoint_properties,
           optional($._annotations),
           $._object_property_2list,
         ),
         seq(
-          "EquivalentProperties:",
+          $.keyword_equivalent_properties,
           optional($._annotations),
           $._data_property_2list,
         ),
         seq(
-          "DisjointProperties:",
+          $.keyword_disjoint_properties,
           optional($._annotations),
           $._data_property_2list,
         ),
-        seq("SameIndividual:", optional($._annotations), $._individual_2list),
         seq(
-          "DifferentIndividuals:",
+          $.keyword_same_individual,
+          optional($._annotations),
+          $._individual_2list,
+        ),
+        seq(
+          $.keyword_different_individuals,
           optional($._annotations),
           $._individual_2list,
         ),
       ),
 
     // Annotated Lists
-    _description_annotated_list: ($) =>
+    _description_annotated_list: $ =>
       annotated_list($._annotations, $.description),
-    _annotation_annotated_list: ($) =>
+    _annotation_annotated_list: $ =>
       annotated_list($._annotations, $.annotation),
-    _object_property_expression_annotated_list: ($) =>
+    _object_property_expression_annotated_list: $ =>
       annotated_list($._annotations, $._object_property_expression),
-    _object_property_characteristic_annotated_list: ($) =>
+    _object_property_characteristic_annotated_list: $ =>
       annotated_list($._annotations, $._object_property_characteristic),
-    _data_range_annotated_list: ($) =>
+    _data_range_annotated_list: $ =>
       annotated_list($._annotations, $.data_range),
-    _data_property_expression_annotated_list: ($) =>
+    _data_property_expression_annotated_list: $ =>
       annotated_list($._annotations, $._data_property_expression),
-    _iri_annotated_list: ($) => annotated_list($._annotations, $._iri),
-    _annotation_property_iri_annotated_list: ($) =>
+    _iri_annotated_list: $ => annotated_list($._annotations, $._iri),
+    _annotation_property_iri_annotated_list: $ =>
       annotated_list($._annotations, $.annotation_property_iri),
-    _individual_annotated_list: ($) =>
+    _individual_annotated_list: $ =>
       annotated_list($._annotations, $._individual),
-    _fact_annotated_list: ($) => annotated_list($._annotations, $._fact),
+    _fact_annotated_list: $ => annotated_list($._annotations, $._fact),
 
     // List2
-    _description_2list: ($) =>
-      seq($.description, ",", sep1($.description, ",")),
-    _object_property_2list: ($) =>
+    _description_2list: $ => seq($.description, ',', sep1($.description, ',')),
+    _object_property_2list: $ =>
       seq(
         $._object_property_expression,
-        ",",
-        sep1($._object_property_expression, ","),
+        ',',
+        sep1($._object_property_expression, ','),
       ), // This is not correct to the grammar. Grammar is missing "objectProperty" Is the grammar wrong?
     // resolved using https://github.com/spechub/Hets/blob/master/OWL2/ParseMS.hs
-    _data_property_2list: ($) =>
+    _data_property_2list: $ =>
       seq(
         $._data_property_expression,
-        ",",
-        sep1($._data_property_expression, ","),
+        ',',
+        sep1($._data_property_expression, ','),
       ), // same as with object_property
-    _individual_2list: ($) => seq($._individual, ",", sep1($._individual, ",")),
+    _individual_2list: $ => seq($._individual, ',', sep1($._individual, ',')),
 
     // List
-    _individual_list: ($) => sep1($._individual, ","),
-    _literal_list: ($) => sep1($._literal, ","),
+    _individual_list: $ => sep1($._individual, ','),
+    _literal_list: $ => sep1($._literal, ','),
 
     // IRI [RFC 3987]
     // TODO finish this rfc3987 URL rule
-    _iri_rfc3987: ($) =>
-      token(seq(
-        /[A-Za-z][A-Za-z0-9+\-\.]*/,
-        ":",
-        seq("//",
+    _iri_rfc3987: $ =>
+      token(
+        seq(
+          /[A-Za-z][A-Za-z0-9+\-\.]*/,
+          ':',
           seq(
-            optional(seq(/[A-Za-z0-9_\-\.\~:%]*/, "@")),
-            /[A-Za-z0-9_\-\.\~:%]*/,
-            optional(seq(":", /[0-9]*/)),
+            '//',
+            seq(
+              optional(seq(/[A-Za-z0-9_\-\.\~:%]*/, '@')),
+              /[A-Za-z0-9_\-\.\~:%]*/,
+              optional(seq(':', /[0-9]*/)),
+            ),
+            repeat1(seq('/', /[A-Za-z0-9_\-\.\~:%]*/)),
           ),
-          repeat1(seq("/", /[A-Za-z0-9_\-\.\~:%]*/))),
-        optional(/\?[A-Za-z0-9_\-\.\~\/\?]*/),
-        optional(/\#[A-Za-z0-9_\-\.\~\/\?]*/),
-      )),
+          optional(/\?[A-Za-z0-9_\-\.\~\/\?]*/),
+          optional(/\#[A-Za-z0-9_\-\.\~\/\?]*/),
+        ),
+      ),
 
     // https://www.w3.org/TR/2008/REC-rdf-sparql-query-20080115/
     // TODO make more strict
-    _pn_local: ($) => /[A-Za-z0-9_\-\.]+/,
-    _pname_ln: ($) => /[A-Za-z0-9_\-\.]*:[A-Za-z0-9_\-\.]+/,
+    _pn_local: $ => /[A-Za-z0-9_\-\.]+/,
+    _pname_ln: $ => /[A-Za-z0-9_\-\.]*:[A-Za-z0-9_\-\.]+/,
     // _pn_prefix: $ => /[A-Za-z0-9_\-\.]+/,
     // _pname_ln: $ => seq(optional($._pn_prefix), ':', $._pn_local),
+
+    // Keywords
+
+    keyword_prefix: $ => 'Prefix:',
+    keyword_ontology: $ => 'Ontology:',
+    keyword_integer: $ => 'integer',
+    keyword_decimal: $ => 'decimal',
+    keyword_float: $ => 'float',
+    keyword_string: $ => 'string',
+    keyword_import: $ => 'Import:',
+    keyword_annotations: $ => 'Annotations:',
+    keyword_inverse: $ => 'inverse',
+    keyword_length: $ => 'length',
+    keyword_min_length: $ => 'minLength',
+    keyword_max_length: $ => 'maxLength',
+    keyword_pattern: $ => 'pattern',
+    keyword_lang_range: $ => 'langRange',
+    keyword_some: $ => 'some',
+    keyword_only: $ => 'only',
+    keyword_self: $ => 'Self',
+    keyword_value: $ => 'value',
+    keyword_datatype: $ => 'Datatype:',
+    keyword_equivalent_to: $ => 'EquivalentTo:',
+    keyword_class: $ => 'Class:',
+    keyword_sub_class_of: $ => 'SubClassOf:',
+    keyword_equivalent_to: $ => 'EquivalentTo:',
+    keyword_disjoint_with: $ => 'DisjointWith:',
+    keyword_disjoint_union_of: $ => 'DisjointUnionOf:',
+    keyword_has_key: $ => 'HasKey:',
+    keyword_object_property: $ => 'ObjectProperty:',
+    keyword_domain: $ => 'Domain:',
+    keyword_range: $ => 'Range:',
+    keyword_sub_property_of: $ => 'SubPropertyOf:',
+    keyword_equivalent_to: $ => 'EquivalentTo:',
+    keyword_disjoint_with: $ => 'DisjointWith:',
+    keyword_inverse_of: $ => 'InverseOf:',
+    keyword_sub_property_chain: $ => 'SubPropertyChain:',
+    keyword_functional: $ => 'Functional',
+    keyword_inverse_functional: $ => 'InverseFunctional',
+    keyword_reflexive: $ => 'Reflexive',
+    keyword_irreflexive: $ => 'Irreflexive',
+    keyword_symmetric: $ => 'Symmetric',
+    keyword_asymmetric: $ => 'Asymmetric',
+    keyword_transitive: $ => 'Transitive',
+    keyword_data_property: $ => 'DataProperty:',
+    keyword_characteristics: $ => 'Characteristics:',
+    keyword_annotation_property: $ => 'AnnotationProperty:',
+    keyword_individual: $ => 'Individual:',
+    keyword_types: $ => 'Types:',
+    keyword_facts: $ => 'Facts:',
+    keyword_same_as: $ => 'SameAs:',
+    keyword_equivalent_classes: $ => 'EquivalentClasses:',
+    keyword_disjoint_classes: $ => 'DisjointClasses:',
+    keyword_equivalent_properties: $ => 'EquivalentProperties:',
+    keyword_disjoint_properties: $ => 'DisjointProperties:',
+    keyword_same_individual: $ => 'SameIndividual:',
+    keyword_different_individuals: $ => 'DifferentIndividuals:',
   },
-});
+})
 
 // Util Functions
 
 function sep1(rule, separator) {
-  return seq(rule, repeat(seq(separator, rule)));
+  return seq(rule, repeat(seq(separator, rule)))
 }
 
 function annotated_list(annotations, nt) {
-  return sep1(seq(optional(annotations), nt), ",");
+  return sep1(seq(optional(annotations), nt), ',')
 }
