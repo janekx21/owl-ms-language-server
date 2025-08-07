@@ -1,10 +1,10 @@
 use crate::catalog::CatalogUri;
 use crate::position::Position;
-use crate::queries::{self, GRAMMAR};
+use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type_index};
 use crate::web::HttpClient;
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
-    rope_provider::RopeProvider, Rule, LANGUAGE, NODE_TYPES,
+    rope_provider::RopeProvider, LANGUAGE, NODE_TYPES,
 };
 use anyhow::Result;
 use anyhow::{anyhow, Context};
@@ -35,7 +35,7 @@ use std::{
 };
 use tower_lsp::lsp_types::{
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
-    SymbolKind, Url, WorkspaceFolder,
+    SemanticToken, SymbolKind, Url, WorkspaceFolder,
 };
 use tree_sitter::{InputEdit, Node, Parser, Point, Query, QueryCursor, StreamingIterator, Tree};
 
@@ -871,6 +871,61 @@ impl InternalDocument {
                 }
             })
             .collect_vec()
+    }
+
+    pub fn sematic_tokens(&self, range: Option<Range>) -> Vec<SemanticToken> {
+        let doc = self;
+        let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
+
+        let query = Query::new(&LANGUAGE, query_source).expect("valid query expect");
+        let mut query_cursor = QueryCursor::new();
+        if let Some(range) = range {
+            query_cursor.set_point_range(range.into());
+        }
+        let matches =
+            query_cursor.matches(&query, doc.tree.root_node(), RopeProvider::new(&doc.rope));
+
+        let mut tokens = vec![];
+        let mut last_start = Point { row: 0, column: 0 };
+
+        let mut nodes = matches
+            .map_deref(|m| m.captures)
+            .flatten()
+            .map(|c| {
+                (
+                    c.node,
+                    treesitter_highlight_capture_into_semantic_token_type_index(
+                        query.capture_names()[c.index as usize],
+                    ),
+                )
+            })
+            .collect_vec();
+
+        // node start poins need to be stricly in order, because the delta might otherwise negativly overflow
+        // TODO is this needed? are query matches in order?
+        nodes.sort_unstable_by_key(|(n, _)| n.start_byte());
+        for (node, type_index) in nodes {
+            let start = node.range().start_point;
+            let delta_line = (start.row - last_start.row) as u32;
+            let delta_start = if delta_line == 0 {
+                (start.column - last_start.column) as u32 // same line
+            } else {
+                start.column as u32 // some other line
+            };
+            let length = node_text(&node, &doc.rope).len_chars() as u32;
+
+            let token = SemanticToken {
+                delta_line,
+                delta_start,
+                length,
+                token_type: type_index,
+                token_modifiers_bitset: 0,
+            };
+
+            last_start = node.start_position();
+            tokens.push(token);
+        }
+        tokens
     }
 }
 

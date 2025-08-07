@@ -15,9 +15,8 @@ use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
 use parking_lot::{MappedRwLockWriteGuard, RwLock, RwLockWriteGuard};
 use position::Position;
-use queries::{Rule, ALL_QUERIES, NODE_TYPES};
+use queries::{ALL_QUERIES, NODE_TYPES};
 use range::Range;
-use rope_provider::RopeProvider;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -25,7 +24,7 @@ use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
-use tree_sitter::{Language, Point, Query, QueryCursor, StreamingIterator};
+use tree_sitter::Language;
 use web::{HttpClient, UreqClient};
 use workspace::{node_text, trim_full_iri, InternalDocument, Workspace};
 
@@ -136,6 +135,7 @@ impl LanguageServer for Backend {
                                 token_modifiers: vec![],
                             },
                             full: Some(SemanticTokensFullOptions::Bool(true)),
+                            range: Some(true),
                             ..Default::default()
                         },
                     ),
@@ -460,55 +460,30 @@ impl LanguageServer for Backend {
         let workspace = self.find_workspace(&uri);
         if let Some(doc) = workspace.internal_documents.get(&uri) {
             let doc = doc.read();
-            let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
 
-            let query = Query::new(&LANGUAGE, query_source).expect("valid query expect");
-            let mut query_cursor = QueryCursor::new();
-            let matches =
-                query_cursor.matches(&query, doc.tree.root_node(), RopeProvider::new(&doc.rope));
-
-            let mut tokens = vec![];
-            let mut last_start = Point { row: 0, column: 0 };
-
-            let mut nodes = matches
-                .map_deref(|m| m.captures)
-                .flatten()
-                .map(|c| {
-                    (
-                        c.node,
-                        treesitter_highlight_capture_into_semantic_token_type_index(
-                            query.capture_names()[c.index as usize],
-                        ),
-                    )
-                })
-                .collect_vec();
-
-            // node start poins need to be stricly in order, because the delta might otherwise negativly overflow
-            // TODO is this needed? are query matches in order?
-            nodes.sort_unstable_by_key(|(n, _)| n.start_byte());
-            for (node, type_index) in nodes {
-                let start = node.range().start_point;
-                let delta_line = (start.row - last_start.row) as u32;
-                let delta_start = if delta_line == 0 {
-                    (start.column - last_start.column) as u32 // same line
-                } else {
-                    start.column as u32 // some other line
-                };
-                let length = node_text(&node, &doc.rope).len_chars() as u32;
-
-                let token = SemanticToken {
-                    delta_line,
-                    delta_start,
-                    length,
-                    token_type: type_index,
-                    token_modifiers_bitset: 0,
-                };
-
-                last_start = node.start_position();
-                tokens.push(token);
-            }
+            let tokens = doc.sematic_tokens(None);
 
             return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: None,
+                data: tokens,
+            })));
+        }
+        Ok(None)
+    }
+
+    async fn semantic_tokens_range(
+        &self,
+        params: SemanticTokensRangeParams,
+    ) -> Result<Option<SemanticTokensRangeResult>> {
+        debug!("semantic_tokens_range at {}", params.text_document.uri);
+        let uri = params.text_document.uri;
+        let workspace = self.find_workspace(&uri);
+        if let Some(doc) = workspace.internal_documents.get(&uri) {
+            let doc = doc.read();
+            let range: Range = params.range.into();
+            let tokens = doc.sematic_tokens(Some(range));
+
+            return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
                 result_id: None,
                 data: tokens,
             })));
@@ -625,23 +600,5 @@ impl Backend {
                 .inspect_err(|e| error!("Resolve imports error: {e:?}"))
                 .ok();
         }
-    }
-}
-
-// Functions
-
-fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) -> u32 {
-    match str {
-        "punctuation.bracket" => 21,   // SemanticTokenType::OPERATOR,
-        "punctuation.delimiter" => 21, // SemanticTokenType::OPERATOR,
-        "keyword" => 15,               // SemanticTokenType::KEYWORD,
-        "operator" => 21,              // SemanticTokenType::OPERATOR,
-        "variable.buildin" => 8,       // SemanticTokenType::VARIABLE,
-        "string" => 18,                // SemanticTokenType::STRING,
-        "number" => 19,                // SemanticTokenType::NUMBER,
-        "constant.builtin" => 8,       // SemanticTokenType::VARIABLE,
-        "variable" => 8,               // SemanticTokenType::VARIABLE,
-        "comment" => 17,               // SemanticTokenType::COMMENT,
-        _ => todo!("highlight capture {} not implemented", str),
     }
 }

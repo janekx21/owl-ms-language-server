@@ -267,6 +267,22 @@ pub struct SymbolRule {
     pub name: String,
 }
 
+pub fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) -> u32 {
+    match str {
+        "punctuation.bracket" => 21,   // SemanticTokenType::OPERATOR,
+        "punctuation.delimiter" => 21, // SemanticTokenType::OPERATOR,
+        "keyword" => 15,               // SemanticTokenType::KEYWORD,
+        "operator" => 21,              // SemanticTokenType::OPERATOR,
+        "variable.buildin" => 8,       // SemanticTokenType::VARIABLE,
+        "string" => 18,                // SemanticTokenType::STRING,
+        "number" => 19,                // SemanticTokenType::NUMBER,
+        "constant.builtin" => 8,       // SemanticTokenType::VARIABLE,
+        "variable" => 8,               // SemanticTokenType::VARIABLE,
+        "comment" => 17,               // SemanticTokenType::COMMENT,
+        _ => todo!("highlight capture {} not implemented", str),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
