@@ -8,6 +8,7 @@ Ontology: <http://www.semanticweb.org/janek/ontologies/2023/9/untitled-ontology-
 
 (source_file
 	(ontology
+	    (keyword_ontology)
 		(ontology_iri (full_iri))))
 
 ===================
@@ -22,9 +23,10 @@ Ontology:
 ---
 
 (source_file
-	(prefix_declaration (prefix_name) (full_iri))
-	(prefix_declaration (prefix_name) (full_iri))
-	(ontology))
+	(prefix_declaration (keyword_prefix) (prefix_name) (full_iri))
+	(prefix_declaration (keyword_prefix) (prefix_name) (full_iri))
+	(ontology
+	    (keyword_ontology)))
 
 
 ===================
@@ -39,6 +41,7 @@ Ontology:
 
 (source_file
 	(ontology
+	    (keyword_ontology)
 	    (class_frame 
   			(keyword_class)
   			(class_iri (simple_iri))
@@ -58,6 +61,7 @@ Ontology:
 
 (source_file 
 	(ontology
+	    (keyword_ontology)
 		(datatype_frame 
 		  (keyword_datatype)
 			(keyword_integer))))
@@ -74,6 +78,7 @@ Ontology:
 
 (source_file 
 	(ontology
+	    (keyword_ontology)
 		(datatype_frame 
 		  (keyword_datatype)
 			(datatype_iri (simple_iri)))))
@@ -91,6 +96,7 @@ Ontology:
 
 (source_file
 	(ontology
+	    (keyword_ontology)
 		(datatype_frame 
 			(keyword_datatype)
 			(keyword_integer)
@@ -113,6 +119,7 @@ Ontology:
 
 (source_file
 	(ontology
+	    (keyword_ontology)
 			(datatype_frame 
 			  (keyword_datatype)
 				(datatype_iri (simple_iri))
@@ -141,6 +148,7 @@ Ontology:
 
 (source_file
       (ontology
+	    (keyword_ontology)
         (datatype_frame
           (keyword_datatype)
           (datatype_iri
@@ -168,6 +176,7 @@ Ontology:
 
 (source_file
 	(ontology
+	    (keyword_ontology)
 			(class_frame 
 			  (keyword_class)
 				(class_iri
@@ -185,6 +194,7 @@ Ontology:
 
 (source_file
 	(ontology
+	    (keyword_ontology)
 		(class_frame
 			(keyword_class)
 			(class_iri (simple_iri))
@@ -207,6 +217,7 @@ Ontology:
 
 (source_file 
 	(ontology
+	    (keyword_ontology)
 		(frame 
 			(class_frame 
 				(iri
@@ -236,6 +247,7 @@ Ontology:
 
 (source_file
 	(ontology
+	    (keyword_ontology)
 		(frame 
 			(class_frame 
 				(iri
@@ -267,6 +279,7 @@ Ontology:
 
 (source_file
 	(ontology
+	    (keyword_ontology)
 		(frame 
 			(class_frame 
 				(iri
@@ -316,6 +329,7 @@ Ontology:
 
 (source_file
         (ontology
+	    (keyword_ontology)
           (frame
             (object_property_frame
               (iri
@@ -333,6 +347,7 @@ Ontology:
 
 (source_file
         (ontology
+	    (keyword_ontology)
           (frame
             (object_property_frame
               (iri
@@ -356,6 +371,7 @@ Ontology:
 ---
 (source_file
     (ontology
+	    (keyword_ontology)
       (frame
         (object_property_frame
           (iri
@@ -386,6 +402,7 @@ Ontology:
 
 (source_file
     (ontology
+	    (keyword_ontology)
       (frame
         (object_property_frame
           (iri
@@ -422,6 +439,7 @@ Ontology:
 
 (source_file
         (ontology
+	    (keyword_ontology)
           (frame
             (object_property_frame
               (iri
@@ -552,6 +570,7 @@ Ontology:
 
 (source_file
         (ontology
+	    (keyword_ontology)
           (frame
             (data_property_frame
               (iri
@@ -634,6 +653,7 @@ Ontology:
 
 (source_file
         (ontology
+	    (keyword_ontology)
           (frame
             (annotation_property_frame
               (iri
@@ -689,6 +709,7 @@ Ontology: # Comment
 (source_file
   (comment)
   (ontology
+	    (keyword_ontology)
 	(comment)
 	(comment)
     (individual_frame
@@ -709,6 +730,7 @@ Import: <http://external.org/shared.omn>
 
 (source_file
   (ontology
+	    (keyword_ontology)
     (ontology_iri
       (full_iri))
     (version_iri

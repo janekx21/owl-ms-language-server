@@ -84,11 +84,11 @@ module.exports = grammar({
 
     // 2.2 Ontologies and Annotations
     _ontology_document: $ => seq(repeat($.prefix_declaration), $.ontology),
-    prefix_declaration: $ => seq('Prefix:', $.prefix_name, $.full_iri),
+    prefix_declaration: $ => seq($.keyword_prefix, $.prefix_name, $.full_iri),
 
     ontology: $ =>
       seq(
-        'Ontology:',
+        $.keyword_ontology,
         optional(seq($.ontology_iri, optional($.version_iri))),
         repeat($.import),
         repeat($._annotations),
@@ -444,34 +444,42 @@ module.exports = grammar({
     misc: $ =>
       choice(
         seq(
-          'EquivalentClasses:',
+          $.keyword_equivalent_classes,
           optional($._annotations),
           $._description_2list,
         ), // optional annotations is not to spec. spec wrong?
-        seq('DisjointClasses:', optional($._annotations), $._description_2list),
         seq(
-          'EquivalentProperties:',
+          $.keyword_disjoint_classes,
+          optional($._annotations),
+          $._description_2list,
+        ),
+        seq(
+          $.keyword_equivalent_properties,
           optional($._annotations),
           $._object_property_2list,
         ),
         seq(
-          'DisjointProperties:',
+          $.keyword_disjoint_properties,
           optional($._annotations),
           $._object_property_2list,
         ),
         seq(
-          'EquivalentProperties:',
+          $.keyword_equivalent_properties,
           optional($._annotations),
           $._data_property_2list,
         ),
         seq(
-          'DisjointProperties:',
+          $.keyword_disjoint_properties,
           optional($._annotations),
           $._data_property_2list,
         ),
-        seq('SameIndividual:', optional($._annotations), $._individual_2list),
         seq(
-          'DifferentIndividuals:',
+          $.keyword_same_individual,
+          optional($._annotations),
+          $._individual_2list,
+        ),
+        seq(
+          $.keyword_different_individuals,
           optional($._annotations),
           $._individual_2list,
         ),
@@ -548,6 +556,8 @@ module.exports = grammar({
 
     // Keywords
 
+    keyword_prefix: $ => 'Prefix:',
+    keyword_ontology: $ => 'Ontology:',
     keyword_integer: $ => 'integer',
     keyword_decimal: $ => 'decimal',
     keyword_float: $ => 'float',
@@ -594,6 +604,12 @@ module.exports = grammar({
     keyword_types: $ => 'Types:',
     keyword_facts: $ => 'Facts:',
     keyword_same_as: $ => 'SameAs:',
+    keyword_equivalent_classes: $ => 'EquivalentClasses:',
+    keyword_disjoint_classes: $ => 'DisjointClasses:',
+    keyword_equivalent_properties: $ => 'EquivalentProperties:',
+    keyword_disjoint_properties: $ => 'DisjointProperties:',
+    keyword_same_individual: $ => 'SameIndividual:',
+    keyword_different_individuals: $ => 'DifferentIndividuals:',
   },
 })
 

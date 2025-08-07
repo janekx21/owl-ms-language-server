@@ -1424,7 +1424,31 @@
           "named": true
         },
         {
+          "type": "keyword_different_individuals",
+          "named": true
+        },
+        {
+          "type": "keyword_disjoint_classes",
+          "named": true
+        },
+        {
+          "type": "keyword_disjoint_properties",
+          "named": true
+        },
+        {
+          "type": "keyword_equivalent_classes",
+          "named": true
+        },
+        {
+          "type": "keyword_equivalent_properties",
+          "named": true
+        },
+        {
           "type": "keyword_inverse",
+          "named": true
+        },
+        {
+          "type": "keyword_same_individual",
           "named": true
         },
         {
@@ -1605,7 +1629,7 @@
     "fields": {},
     "children": {
       "multiple": true,
-      "required": false,
+      "required": true,
       "types": [
         {
           "type": "annotation",
@@ -1637,6 +1661,10 @@
         },
         {
           "type": "keyword_annotations",
+          "named": true
+        },
+        {
+          "type": "keyword_ontology",
           "named": true
         },
         {
@@ -1691,6 +1719,10 @@
       "types": [
         {
           "type": "full_iri",
+          "named": true
+        },
+        {
+          "type": "keyword_prefix",
           "named": true
         },
         {
@@ -1954,43 +1986,11 @@
     "named": false
   },
   {
-    "type": "DifferentIndividuals:",
-    "named": false
-  },
-  {
-    "type": "DisjointClasses:",
-    "named": false
-  },
-  {
-    "type": "DisjointProperties:",
-    "named": false
-  },
-  {
     "type": "E",
     "named": false
   },
   {
-    "type": "EquivalentClasses:",
-    "named": false
-  },
-  {
-    "type": "EquivalentProperties:",
-    "named": false
-  },
-  {
     "type": "F",
-    "named": false
-  },
-  {
-    "type": "Ontology:",
-    "named": false
-  },
-  {
-    "type": "Prefix:",
-    "named": false
-  },
-  {
-    "type": "SameIndividual:",
     "named": false
   },
   {
@@ -2063,6 +2063,18 @@
     "named": true
   },
   {
+    "type": "keyword_different_individuals",
+    "named": true
+  },
+  {
+    "type": "keyword_disjoint_classes",
+    "named": true
+  },
+  {
+    "type": "keyword_disjoint_properties",
+    "named": true
+  },
+  {
     "type": "keyword_disjoint_union_of",
     "named": true
   },
@@ -2072,6 +2084,14 @@
   },
   {
     "type": "keyword_domain",
+    "named": true
+  },
+  {
+    "type": "keyword_equivalent_classes",
+    "named": true
+  },
+  {
+    "type": "keyword_equivalent_properties",
     "named": true
   },
   {
@@ -2147,7 +2167,15 @@
     "named": true
   },
   {
+    "type": "keyword_ontology",
+    "named": true
+  },
+  {
     "type": "keyword_pattern",
+    "named": true
+  },
+  {
+    "type": "keyword_prefix",
     "named": true
   },
   {
@@ -2160,6 +2188,10 @@
   },
   {
     "type": "keyword_same_as",
+    "named": true
+  },
+  {
+    "type": "keyword_same_individual",
     "named": true
   },
   {

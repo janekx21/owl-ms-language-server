@@ -13,3 +13,5 @@ examples/oeo-full.omn
 .direnv
 editors/code/server/owl-ms-language-server
 editors/code/server/owl-ms-language-server.exe
+**/*.profraw
+**/*.profdata

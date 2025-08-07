@@ -9,6 +9,7 @@ mod tests;
 mod web;
 mod workspace;
 
+use debugging::timeit;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
@@ -327,7 +328,7 @@ impl LanguageServer for Backend {
                         .iter()
                         .sorted_by_key(|l| {
                             if l.range == Range::ZERO {
-                                100000 // No range? Then put this at the end
+                                u32::MAX // No range? Then put this at the end
                             } else {
                                 l.range.start.line
                             }
@@ -394,7 +395,9 @@ impl LanguageServer for Backend {
         Ok(doc.map(|doc| {
             let doc = doc.read();
 
-            let kws = doc.try_keywords_at_position(pos);
+            let kws = timeit("try_keywords_at_position", || {
+                doc.try_keywords_at_position(pos)
+            });
 
             debug!("The resultingn kws are {kws:#?}");
 

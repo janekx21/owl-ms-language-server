@@ -9,6 +9,8 @@
 ; "o" @punctuation.delimiter
 
 [
+  (keyword_ontology)
+  (keyword_prefix)
   (keyword_integer)
   (keyword_decimal)
   (keyword_float)
@@ -45,6 +47,12 @@
   (keyword_types)
   (keyword_facts)
   (keyword_same_as)
+  (keyword_equivalent_classes)
+  (keyword_disjoint_classes)
+  (keyword_equivalent_properties)
+  (keyword_disjoint_properties)
+  (keyword_same_individual)
+  (keyword_different_individuals)
 ] @keyword
 
 

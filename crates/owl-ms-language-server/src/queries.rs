@@ -39,7 +39,7 @@ pub struct StaticNodeChildren {
 pub static GRAMMAR: Lazy<Grammar> =
     Lazy::new(|| serde_json::from_str(tree_sitter_owl_ms::GRAMMAR).expect("valid grammar json"));
 
-static KEYWORDS: Lazy<Vec<String>> = Lazy::new(|| {
+pub static KEYWORDS: Lazy<Vec<String>> = Lazy::new(|| {
     GRAMMAR
         .rules
         .iter()

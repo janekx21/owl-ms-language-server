@@ -529,8 +529,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "Prefix:"
+          "type": "SYMBOL",
+          "name": "keyword_prefix"
         },
         {
           "type": "SYMBOL",
@@ -546,8 +546,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "Ontology:"
+          "type": "SYMBOL",
+          "name": "keyword_ontology"
         },
         {
           "type": "CHOICE",
@@ -2254,8 +2254,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "EquivalentClasses:"
+              "type": "SYMBOL",
+              "name": "keyword_equivalent_classes"
             },
             {
               "type": "CHOICE",
@@ -2279,8 +2279,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "DisjointClasses:"
+              "type": "SYMBOL",
+              "name": "keyword_disjoint_classes"
             },
             {
               "type": "CHOICE",
@@ -2304,8 +2304,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "EquivalentProperties:"
+              "type": "SYMBOL",
+              "name": "keyword_equivalent_properties"
             },
             {
               "type": "CHOICE",
@@ -2329,8 +2329,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "DisjointProperties:"
+              "type": "SYMBOL",
+              "name": "keyword_disjoint_properties"
             },
             {
               "type": "CHOICE",
@@ -2354,8 +2354,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "EquivalentProperties:"
+              "type": "SYMBOL",
+              "name": "keyword_equivalent_properties"
             },
             {
               "type": "CHOICE",
@@ -2379,8 +2379,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "DisjointProperties:"
+              "type": "SYMBOL",
+              "name": "keyword_disjoint_properties"
             },
             {
               "type": "CHOICE",
@@ -2404,8 +2404,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "SameIndividual:"
+              "type": "SYMBOL",
+              "name": "keyword_same_individual"
             },
             {
               "type": "CHOICE",
@@ -2429,8 +2429,8 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "DifferentIndividuals:"
+              "type": "SYMBOL",
+              "name": "keyword_different_individuals"
             },
             {
               "type": "CHOICE",
@@ -3368,6 +3368,14 @@
       "type": "PATTERN",
       "value": "[A-Za-z0-9_\\-\\.]*:[A-Za-z0-9_\\-\\.]+"
     },
+    "keyword_prefix": {
+      "type": "STRING",
+      "value": "Prefix:"
+    },
+    "keyword_ontology": {
+      "type": "STRING",
+      "value": "Ontology:"
+    },
     "keyword_integer": {
       "type": "STRING",
       "value": "integer"
@@ -3539,6 +3547,30 @@
     "keyword_same_as": {
       "type": "STRING",
       "value": "SameAs:"
+    },
+    "keyword_equivalent_classes": {
+      "type": "STRING",
+      "value": "EquivalentClasses:"
+    },
+    "keyword_disjoint_classes": {
+      "type": "STRING",
+      "value": "DisjointClasses:"
+    },
+    "keyword_equivalent_properties": {
+      "type": "STRING",
+      "value": "EquivalentProperties:"
+    },
+    "keyword_disjoint_properties": {
+      "type": "STRING",
+      "value": "DisjointProperties:"
+    },
+    "keyword_same_individual": {
+      "type": "STRING",
+      "value": "SameIndividual:"
+    },
+    "keyword_different_individuals": {
+      "type": "STRING",
+      "value": "DifferentIndividuals:"
     }
   },
   "extras": [

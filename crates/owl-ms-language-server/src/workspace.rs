@@ -1,6 +1,6 @@
 use crate::catalog::CatalogUri;
 use crate::position::Position;
-use crate::queries::GRAMMAR;
+use crate::queries::{self, GRAMMAR};
 use crate::web::HttpClient;
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
@@ -605,7 +605,7 @@ impl InternalDocument {
             })
             .collect::<Vec<(Range, InputEdit, Range)>>();
 
-        debug!("Change ranges {:#?}", change_ranges);
+        // debug!("Change ranges {:#?}", change_ranges);
 
         let rope_provider = RopeProvider::new(&self.rope);
 
@@ -621,7 +621,7 @@ impl InternalDocument {
                     .expect("language to be set, no timeout to be used, no cancelation flag")
             })
         };
-        debug!("New tree {}", tree.root_node().to_sexp());
+        // debug!("New tree {}", tree.root_node().to_sexp());
         self.tree = tree;
 
         // TODO #30 prune
@@ -794,17 +794,7 @@ impl InternalDocument {
 
         debug!("Cursor node text is {:?}", partial);
 
-        let grammar = &GRAMMAR;
-        let keywords = grammar
-            .rules
-            .iter()
-            .filter_map(|item| match item {
-                (rule_name, Rule::String { value }) if rule_name.starts_with("keyword_") => {
-                    Some(value)
-                }
-                _ => None,
-            })
-            .collect_vec();
+        let keywords = &*queries::KEYWORDS;
 
         let kws = keywords
             .iter()
@@ -814,71 +804,73 @@ impl InternalDocument {
         debug!("Checking {} keywords", kws.len());
 
         kws.iter()
-        .filter_map(|kw| {
-            let mut rope_version = rope.clone();
-            let change = kw[partial.len()..].to_string() + " a";
+            .filter_map(|kw| {
+                let mut rope_version = rope.clone();
+                let change = kw[partial.len()..].to_string() + " a";
 
+                let mut tree = tree.clone(); // This is fast
 
-            let mut tree = tree.clone(); // This is fast
+                // Must come before the rope is changed!
+                let cursor_byte_index = rope_version.char_to_byte(cursor_char_index);
 
-            // Must come before the rope is changed!
-            let cursor_byte_index = rope_version.char_to_byte(cursor_char_index);
+                rope_version.insert(cursor_char_index, &change);
 
-            rope_version.insert(cursor_char_index, &change);
+                // Must come after rope changed!
+                let new_end_byte = cursor_byte_index + change.len();
+                let new_end_line = cursor.line as usize;
+                let new_end_character = rope_version.byte_to_char(new_end_byte)
+                    - rope_version.line_to_char(new_end_line);
 
-            // Must come after rope changed!
-            let new_end_byte = cursor_byte_index + change.len();
-            let new_end_line = cursor.line as usize;
-            let new_end_character =
-                rope_version.byte_to_char(new_end_byte) - rope_version.line_to_char(new_end_line);
+                let edit = InputEdit {
+                    // Old range is just a zero size range
+                    start_byte: cursor_char_index,
+                    start_position: cursor.into(),
+                    old_end_byte: cursor_char_index,
+                    old_end_position: cursor.into(),
 
-            let edit = InputEdit {
-                // Old range is just a zero size range
-                start_byte: cursor_char_index,
-                start_position: cursor.into(),
-                old_end_byte: cursor_char_index,
-                old_end_position: cursor.into(),
+                    new_end_byte,
+                    new_end_position: Point {
+                        row: new_end_line,
+                        column: new_end_character,
+                    },
+                };
+                tree.edit(&edit);
 
-                new_end_byte,
-                new_end_position: Point {
-                    row: new_end_line,
-                    column: new_end_character,
-                },
-            };
-            tree.edit(&edit);
+                let rope_provider = RopeProvider::new(&rope_version);
+                let new_tree = parser
+                    .parse_with_options(
+                        &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+                        Some(&tree),
+                        None,
+                    )
+                    .expect("language to be set, no timeout to be used, no cancelation flag");
 
-            let rope_provider = RopeProvider::new(&rope_version);
-            let new_tree = parser
-                .parse_with_options(
-                    &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
-                    Some(&tree),
-                    None,
-                )
-                .expect("language to be set, no timeout to be used, no cancelation flag");
+                // debug!(
+                // "A possible source code version for {kw} (change is {change}) with rope version {rope_version}\nNew tree {:?}", new_tree.root_node().to_sexp());
 
-            debug!(
-                "A possible source code version for {kw} (change is {change}) with rope version {rope_version}\nNew tree {:?}", new_tree.root_node().to_sexp());
+                let mut cursor_one_left = cursor.to_owned();
+                cursor_one_left.character = cursor_one_left.character.saturating_sub(1);
+                let cursor_node_version = new_tree
+                    .root_node()
+                    .named_descendant_for_point_range(
+                        cursor_one_left.into(),
+                        cursor_one_left.into(),
+                    )
+                    .unwrap();
 
-            let mut cursor_one_left = cursor.to_owned();
-            cursor_one_left.character = cursor_one_left.character.saturating_sub(1);
-            let cursor_node_version = new_tree
-                .root_node()
-                .named_descendant_for_point_range(cursor_one_left.into(), cursor_one_left.into())
-                .unwrap();
+                debug!("{cursor_node_version:#?} is {}", cursor_node_version.kind());
 
-            debug!("{cursor_node_version:#?} is {}", cursor_node_version.kind());
-
-            if cursor_node_version.kind().starts_with("keyword_")
-                && !cursor_node_version.parent().unwrap().is_error()
-            {
-                debug!("Found possible keyword {kw}!");
-                Some(kw.to_string())
-            } else {
-                debug!("{kw} is not possible");
-                None
-            }
-        })
-        .collect_vec()
+                if cursor_node_version.kind().starts_with("keyword_")
+                    && !cursor_node_version.parent().unwrap().is_error()
+                {
+                    debug!("Found possible keyword {kw}!");
+                    Some(kw.to_string())
+                } else {
+                    debug!("{kw} is not possible");
+                    None
+                }
+            })
+            .collect_vec()
     }
 }
 
