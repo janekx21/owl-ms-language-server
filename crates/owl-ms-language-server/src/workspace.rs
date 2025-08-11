@@ -351,7 +351,7 @@ impl Workspace {
                 [Specification](https://www.w3.org/TR/owl2-syntax/#Classes)
             "}.to_string(),
             "keyword_sub_class_of" => {
-                "Declares subsumption relationship between classes. x subcass of y => each x is a y".to_string()
+                "Declares subsumption relationship between classes.\n\nx subclass of y => each x is a y".to_string()
             }
             "keyword_disjoint_with" => {
                 "Declares that classes have no individuals in common. [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Classes)".to_string()
@@ -435,7 +435,9 @@ indoc!{"
 
                 Example:
                 ```owl-ms
-                TODO weiter schreiben
+                DataProperty: hasAge
+                    Domain: Person
+                    Range: xsd:integer
                 ```
 
                 [Specification](https://www.w3.org/TR/owl2-syntax/#Data_Properties)
@@ -443,10 +445,50 @@ indoc!{"
             "keyword_characteristics" => {
                 "Specifies characteristics (functional, symmetric, etc.) of a property".to_string()
             }
-            "keyword_annotation_property" => {
-                "Declares a property used for annotations (metadata)".to_string()
-            }
-            "keyword_individual" => "Declares a named individual in the ontology".to_string(),
+            "keyword_annotation_property" => indoc!{"
+                `AnnotationProperty:`
+
+                ---
+                
+                Declares a property used for annotations (metadata).
+
+                
+                The annotation properties with the IRIs listed below are available in OWL 2 as built-in annotation properties with a predefined semantics:
+                - The `rdfs:label` annotation property can be used to provide an IRI with a human-readable label.
+                - The `rdfs:comment` annotation property can be used to provide an IRI with a human-readable comment.
+                - The `rdfs:seeAlso` annotation property can be used to provide an IRI with another IRI such that the latter provides additional information about the former.
+                - The `rdfs:isDefinedBy` annotation property can be used to provide an IRI with another IRI such that the latter provides information about the definition of the former; the way in which this information is provided is not described by this specification.
+                - An annotation with the `owl:deprecated` annotation property and the value equal to `\"true\"^^xsd:boolean` can be used to specify that an IRI is deprecated.
+                - The `owl:versionInfo` annotation property can be used to provide an IRI with a string that describes the IRI's version.
+                - The `owl:priorVersion` annotation property is described in more detail in Section 3.5.
+                - The `owl:backwardCompatibleWith` annotation property is described in more detail in Section 3.5.
+                - The `owl:incompatibleWith` annotation property is described in more detail in Section 3.5.
+
+                Example:
+                ```owl-ms
+                AnnotationProperty: rdfs:label
+                    Domain: owl:Thing
+                    Range: xsd:string
+                ```
+
+                [Specification](https://www.w3.org/TR/owl2-syntax/#Annotation_Properties)
+            "}.to_string(),
+            "keyword_individual" => indoc! {"
+                `Individual:`
+
+                ---
+
+                Declares a named individual in the ontology.
+                   
+                Example:
+                ```owl-ms
+                Individual: john
+                    Types: Person
+                    Facts: hasAge 25
+                ```
+
+                [Specification](https://www.w3.org/TR/owl2-syntax/#Individuals)
+            "}.to_string(),
             "keyword_types" => "Specifies class membership for an individual".to_string(),
             "keyword_facts" => "Specifies property assertions for an individual".to_string(),
             "keyword_same_as" => {
