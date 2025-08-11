@@ -39,15 +39,16 @@
                 "rust-analyzer"
                 "rust-src"
               ];
+              targets = [ "x86_64-unknown-linux-musl" ];
             })
-            clang
+            # clang
           ];
           RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
           nativeBuildInputs = with pkgs; [
-            cargo
-            clippy
-            rust-analyzer
-            rustc
+            # cargo
+            # clippy
+            # rust-analyzer
+            # rustc
             nodejs_22
             tree-sitter
 
