@@ -4,8 +4,41 @@ on:
 
 jobs:
   test_rust:
-    runs-on: ubuntu-latest
-    name: Build and test rust workspace
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - os: windows-latest
+          target: x86_64-pc-windows-msvc
+          code-target: win32-x64
+          bin-ext: .exe
+        # NOT WORKING
+        # - os: windows-latest
+        #   target: i686-pc-windows-msvc
+        # NOT WORKING
+        # - os: windows-latest
+        #   target: aarch64-pc-windows-msvc
+        #   code-target: win32-arm64
+        - os: ubuntu-latest
+          target: x86_64-unknown-linux-musl
+          code-target: linux-x64
+        # NOT WORKING
+        # - os: ubuntu-20.04
+        #   target: aarch64-unknown-linux-gnu
+        #   code-target: linux-arm64
+        # NOT WORKING
+        #- os: ubuntu-20.04
+        #  target: arm-unknown-linux-gnueabihf
+        #  code-target: linux-armhf
+        - os: macos-14
+          target: x86_64-apple-darwin
+          code-target: darwin-x64
+        - os: macos-14
+          target: aarch64-apple-darwin
+          code-target: darwin-arm64
+
+    name: Build and test rust workspace (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
 
     steps:
     - name: Checkout repository
@@ -15,9 +48,16 @@ jobs:
       run: |
         rustup update --no-self-update stable
         rustup default stable
+        rustup target add ${{ matrix.target }}
+
+    - if: ${{ matrix.target == 'x86_64-unknown-linux-musl' }}
+      uses: awalsh128/cache-apt-pkgs-action@v1
+      with:
+        packages: musl-tools # provides musl-gcc
+        version: 1.0
 
     - name: Cargo Test
-      run: cargo test
+      run: cargo test --target ${{ matrix.target }}
 
   test_tree_sitter:
     runs-on: ubuntu-latest
@@ -45,4 +85,5 @@ jobs:
     # - name: Install Node Dependencies
     #   working-directory: editors/code
     #   run: npm ci
+    #
 

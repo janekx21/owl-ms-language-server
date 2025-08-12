@@ -1,0 +1,117 @@
+Prefix: : <http://example.org/university#>
+Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+
+Ontology: <http://example.org/university>
+
+AnnotationProperty: rdfs:label
+    Domain: owl:Thing
+    Range: xsd:string
+
+AnnotationProperty: rdfs:comment
+    Domain: owl:Thing
+    Range: xsd:string
+
+Class: Person
+    Annotations: rdfs:label "Person",
+                 rdfs:comment "A human being"
+
+Class: Student
+    Annotations: rdfs:label "Student"
+    SubClassOf: Person
+
+Class: Faculty
+    Annotations: rdfs:label "Faculty"
+    SubClassOf: Person
+
+Class: Course
+    Annotations: rdfs:label "Course",
+                 rdfs:comment "An academic course offered by the university"
+
+Class: Department
+    Annotations: rdfs:label "Department"
+
+Class: UndergraduateStudent
+    Annotations: rdfs:label "Undergraduate Student"
+    SubClassOf: Student
+
+Class: GraduateStudent
+    Annotations: rdfs:label "Graduate Student"
+    SubClassOf: Student
+
+ObjectProperty: enrolledIn
+    Annotations: rdfs:label "enrolled in"
+    Domain: Student
+    Range: Course
+
+ObjectProperty: teaches
+    Annotations: rdfs:label "teaches"
+    Domain: Faculty
+    Range: Course
+
+ObjectProperty: belongsTo
+    Annotations: rdfs:label "belongs to"
+    Domain: Person
+    Range: Department
+
+ObjectProperty: offers
+    Annotations: rdfs:label "offers"
+    Domain: Department
+    Range: Course
+
+DataProperty: hasAge
+    Annotations: rdfs:label "has age"
+    Domain: Person
+    Range: xsd:integer
+
+DataProperty: hasStudentID
+    Annotations: rdfs:label "has student ID"
+    Domain: Student
+    Range: xsd:string
+    Characteristics: Functional
+
+DataProperty: hasCourseCode
+    Annotations: rdfs:label "has course code"
+    Domain: Course
+    Range: xsd:string
+    Characteristics: Functional
+
+DataProperty: hasCredits
+    Annotations: rdfs:label "has credits"
+    Domain: Course
+    Range: xsd:integer
+
+Individual: john_doe
+    Annotations: rdfs:label "John Doe"
+    Types: UndergraduateStudent
+    Facts: hasAge 20,
+           hasStudentID "STU12345",
+           enrolledIn cs101,
+           belongsTo computer_science_dept
+
+Individual: dr_smith
+    Annotations: rdfs:label "Dr. Smith"
+    Types: Faculty
+    Facts: hasAge 45,
+           teaches cs101,
+           belongsTo computer_science_dept
+
+Individual: cs101
+    Annotations: rdfs:label "Introduction to Computer Science"
+    Types: Course
+    Facts: hasCourseCode "CS101",
+           hasCredits 3
+
+Individual: computer_science_dept
+    Annotations: rdfs:label "Computer Science Department"
+    Types: Department
+    Facts: offers cs101
+
+Individual: mary_johnson
+    Annotations: rdfs:label "Mary Johnson"
+    Types: GraduateStudent
+    Facts: hasAge 24,
+           hasStudentID "GRAD789",
+           belongsTo computer_science_dept

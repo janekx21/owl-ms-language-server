@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use tree_sitter::Query;
+use tree_sitter_c2rust::Query;
 
 use crate::LANGUAGE;
 
@@ -289,7 +289,7 @@ mod tests {
     use crate::workspace::lock_global_parser;
     use pretty_assertions::assert_eq;
     use test_log::test;
-    use tree_sitter::{QueryCursor, StreamingIterator};
+    use tree_sitter_c2rust::{QueryCursor, StreamingIterator};
 
     #[test]
     fn query_frame_query() {

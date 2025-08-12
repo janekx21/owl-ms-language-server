@@ -3,20 +3,21 @@
 	"description": "OWL 2 manchester syntax plugin for vscode",
 	"author": "Janek Winkler",
 	"license": "MIT",
-	"version": "0.0.1",
+	"version": "0.5.5",
 	"publisher": "JanekWinkler",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/janek/owl-ms-language-server"
 	},
 	"engines": {
-		"vscode": "^1.75.0"
+		"vscode": "^1.100.0"
 	},
 	"dependencies": {
-		"vscode-languageclient": "^8.1.0"
+		"glob": "^11.0.0",
+		"vscode-languageclient": "^9.0.1"
 	},
 	"devDependencies": {
-		"@types/vscode": "^1.75.1",
-		"@vscode/test-electron": "^2.2.3"
+		"@types/vscode": "^1.100.0",
+		"@vscode/test-electron": "^2.3.9"
 	}
 }

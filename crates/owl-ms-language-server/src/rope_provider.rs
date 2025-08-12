@@ -1,6 +1,6 @@
 use ropey::Rope;
-use tree_sitter::Node;
-use tree_sitter::TextProvider;
+use tree_sitter_c2rust::Node;
+use tree_sitter_c2rust::TextProvider;
 
 pub struct RopeProvider<'a>(pub &'a Rope);
 

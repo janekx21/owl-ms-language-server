@@ -25,20 +25,20 @@ import {
 
 let client: LanguageClient;
 
-class F implements StaticFeature {
-	fillInitializeParams?: (params: InitializeParams) => void;
-	fillClientCapabilities(capabilities: ClientCapabilities): void {
-		capabilities.general = { positionEncodings: ['utf-8', 'utf-16'] };
-	}
-	preInitialize?: (capabilities: ServerCapabilities<any>, documentSelector: DocumentSelector) => void;
-	initialize(capabilities: ServerCapabilities<any>, documentSelector: DocumentSelector): void {
-	}
-	getState(): FeatureState {
-		return { kind: 'static' };
-	}
-	dispose(): void {
-	}
-}
+// class F implements StaticFeature {
+// 	fillInitializeParams?: (params: InitializeParams) => void;
+// 	fillClientCapabilities(capabilities: ClientCapabilities): void {
+// 		capabilities.general = { positionEncodings: ['utf-8', 'utf-16'] };
+// 	}
+// 	preInitialize?: (capabilities: ServerCapabilities<any>, documentSelector: DocumentSelector) => void;
+// 	initialize(capabilities: ServerCapabilities<any>, documentSelector: DocumentSelector): void {
+// 	}
+// 	getState(): FeatureState {
+// 		return { kind: 'static' };
+// 	}
+// 	dispose(): void {
+// 	}
+// }
 
 export function activate(context: ExtensionContext) {
 	// The server is implemented in rust
