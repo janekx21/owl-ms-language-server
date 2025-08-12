@@ -50,8 +50,8 @@ impl From<Range> for tower_lsp::lsp_types::Range {
     }
 }
 
-impl From<tree_sitter::Range> for Range {
-    fn from(value: tree_sitter::Range) -> Self {
+impl From<tree_sitter_c2rust::Range> for Range {
+    fn from(value: tree_sitter_c2rust::Range) -> Self {
         Range {
             start: value.start_point.into(),
             end: value.end_point.into(),
@@ -59,8 +59,8 @@ impl From<tree_sitter::Range> for Range {
     }
 }
 
-impl From<Range> for std::ops::Range<tree_sitter::Point> {
-    fn from(value: Range) -> std::ops::Range<tree_sitter::Point> {
+impl From<Range> for std::ops::Range<tree_sitter_c2rust::Point> {
+    fn from(value: Range) -> std::ops::Range<tree_sitter_c2rust::Point> {
         value.start.into()..value.end.into()
     }
 }

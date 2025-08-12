@@ -4,7 +4,7 @@ use std::{hint::black_box, time::Duration};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use owl_ms_language_server::{rope_provider::RopeProvider, LANGUAGE};
 use ropey::Rope;
-use tree_sitter::{InputEdit, Parser, Point, Query, QueryCursor, StreamingIterator, Tree};
+use tree_sitter_c2rust::{InputEdit, Parser, Point, Query, QueryCursor, StreamingIterator, Tree};
 
 fn parse_helper(source_code: &String, parser: &mut Parser) {
     parser.reset();

@@ -22,8 +22,8 @@ impl From<Position> for tower_lsp::lsp_types::Position {
     }
 }
 
-impl From<tree_sitter::Point> for Position {
-    fn from(value: tree_sitter::Point) -> Self {
+impl From<tree_sitter_c2rust::Point> for Position {
+    fn from(value: tree_sitter_c2rust::Point) -> Self {
         Position {
             line: value.row as u32,
             character: value.column as u32,
@@ -31,9 +31,9 @@ impl From<tree_sitter::Point> for Position {
     }
 }
 
-impl From<Position> for tree_sitter::Point {
-    fn from(value: Position) -> tree_sitter::Point {
-        tree_sitter::Point {
+impl From<Position> for tree_sitter_c2rust::Point {
+    fn from(value: Position) -> tree_sitter_c2rust::Point {
+        tree_sitter_c2rust::Point {
             row: value.line as usize,
             column: value.character as usize,
         }

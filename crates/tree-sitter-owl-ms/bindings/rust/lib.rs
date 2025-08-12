@@ -8,7 +8,7 @@
 //! Ontology: Example
 //!   Class: Person
 //! "#;
-//! let mut parser = tree_sitter::Parser::new();
+//! let mut parser = tree_sitter_c2rust::Parser::new();
 //! let language = tree_sitter_owl_ms::LANGUAGE;
 //! parser
 //!     .set_language(&language.into())
@@ -56,7 +56,7 @@ pub const INDENTS_QUERY: &str = include_str!("../../queries/indents.scm");
 mod tests {
     #[test]
     fn test_can_load_grammar() {
-        let mut parser = tree_sitter::Parser::new();
+        let mut parser = tree_sitter_c2rust::Parser::new();
         parser
             .set_language(&super::LANGUAGE.into())
             .expect("Error loading owl_ms language");

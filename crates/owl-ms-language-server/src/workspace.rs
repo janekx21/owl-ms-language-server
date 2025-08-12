@@ -37,14 +37,16 @@ use tower_lsp::lsp_types::{
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
     SemanticToken, SymbolKind, Url, WorkspaceFolder,
 };
-use tree_sitter::{InputEdit, Node, Parser, Point, Query, QueryCursor, StreamingIterator, Tree};
+use tree_sitter_c2rust::{
+    InputEdit, Node, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
+};
 
 static GLOBAL_PARSER: Lazy<Mutex<Parser>> = Lazy::new(|| {
     let mut parser = Parser::new();
     parser.set_language(&LANGUAGE).unwrap();
     parser.set_logger(Some(Box::new(|type_, str| match type_ {
-        tree_sitter::LogType::Parse => trace!(target: "tree-sitter-parse", "{}", str),
-        tree_sitter::LogType::Lex => trace!(target: "tree-sitter-lex", "{}", str),
+        tree_sitter_c2rust::LogType::Parse => trace!(target: "tree-sitter-parse", "{}", str),
+        tree_sitter_c2rust::LogType::Lex => trace!(target: "tree-sitter-lex", "{}", str),
     })));
 
     Mutex::new(parser)
