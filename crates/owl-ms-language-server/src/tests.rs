@@ -45,7 +45,8 @@ async fn backend_did_open_should_create_document() {
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
-    let url = Url::parse("file:///tmp/foo.omn").expect("valid url");
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let url = Url::from_file_path(dir.path().join("foo.omn")).unwrap();
 
     // Act
 
@@ -87,14 +88,14 @@ async fn backend_did_change_should_update_internal_rope() {
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
-    let url = Url::parse("file:///tmp/foo.omn").expect("valid url");
-    //                              ^^^ 2 for the scheme, 1 for the root
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
 
     service
         .inner()
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
-                uri: url.clone(),
+                uri: ontology_url.clone(),
                 language_id: "owl2md".to_string(),
                 version: 0,
                 text: "DEF".to_string(),
@@ -107,7 +108,7 @@ async fn backend_did_change_should_update_internal_rope() {
         .inner()
         .did_change(DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {
-                uri: url.clone(),
+                uri: ontology_url.clone(),
                 version: 2,
             },
             content_changes: vec![
@@ -150,11 +151,11 @@ async fn backend_did_change_should_update_internal_rope() {
         .await;
 
     // Assert
-    let workspace = service.inner().find_workspace(&url);
+    let workspace = service.inner().find_workspace(&ontology_url);
 
     let doc = workspace
         .internal_documents
-        .get(&url.clone())
+        .get(&ontology_url.clone())
         .expect("found the document");
     let doc = doc.read();
     let doc_content = doc.rope.to_string();
@@ -167,7 +168,8 @@ async fn backend_hover_on_class_should_show_class_info() {
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
-    let url = Url::parse("file:///some/folder/foo.omn").expect("valid url");
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
 
     let ontology = r#"
         Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -932,7 +934,8 @@ async fn backend_did_change_should_remove_old_infos() {
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
-    let ontology_url = Url::from_file_path("/tmp/file.omn").unwrap();
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
 
     let ontology = r#"Ontology: <http://a.b/multi-file>
 Class: class-in-first-file
