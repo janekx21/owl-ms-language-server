@@ -3,8 +3,9 @@ on:
     branches:
     - main
     tags: ['v*.*.*']
+
 jobs:
-  my_job:
+  publish:
 
     strategy:
       fail-fast: false
@@ -22,7 +23,7 @@ jobs:
         #   target: aarch64-pc-windows-msvc
         #   code-target: win32-arm64
         - os: ubuntu-latest
-          target: x86_64-unknown-linux-gnu
+          target: x86_64-unknown-linux-musl
           code-target: linux-x64
         # NOT WORKING
         # - os: ubuntu-20.04
@@ -39,20 +40,24 @@ jobs:
           target: aarch64-apple-darwin
           code-target: darwin-arm64
 
-    name: dist (${{ matrix.target }})
+    name: Build and Publish (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      # with:
-      #   submodules: recursive
 
     - name: Setup Rust toolchain
       run: |
         rustup update --no-self-update stable
         rustup default stable
         rustup target add ${{ matrix.target }}
+
+    - if: ${{ matrix.target == 'x86_64-unknown-linux-musl' }}
+      uses: awalsh128/cache-apt-pkgs-action@v1
+      with:
+        packages: musl-tools # provides musl-gcc
+        version: 1.0
 
     - name: Setup Node
       uses: actions/setup-node@v4
@@ -71,7 +76,6 @@ jobs:
       run: npm ci
 
     - name: Cargo Build
-      # working-directory: crates/owl-ms-language-server
       run: cargo build --release --target ${{ matrix.target }}
 
     - name: Move language server binary
@@ -80,8 +84,8 @@ jobs:
 
     - name: Publish on OVSX
       working-directory: editors/code
-      run: npx ovsx publish --pat ${{ secrets.PAT_OVSX }} --target ${{ matrix.code-target }}
+      run: npx ovsx publish --skip-duplicate --pat ${{ secrets.PAT_OVSX }} --target ${{ matrix.code-target }}
 
     - name: Publish on VSCE
       working-directory: editors/code
-      run: npx vsce publish --pat ${{ secrets.PAT_VSCE }} --target ${{ matrix.code-target }}
+      run: npx vsce publish --skip-duplicate --pat ${{ secrets.PAT_VSCE }} --target ${{ matrix.code-target }}
