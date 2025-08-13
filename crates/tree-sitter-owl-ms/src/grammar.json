@@ -2182,8 +2182,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "DifferentFrom:"
+          "type": "SYMBOL",
+          "name": "keyword_different_from"
         },
         {
           "type": "SYMBOL",
@@ -3571,6 +3571,10 @@
     "keyword_different_individuals": {
       "type": "STRING",
       "value": "DifferentIndividuals:"
+    },
+    "keyword_different_from": {
+      "type": "STRING",
+      "value": "DifferentFrom:"
     }
   },
   "extras": [

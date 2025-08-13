@@ -430,7 +430,7 @@ module.exports = grammar({
       seq($.keyword_same_as, $._individual_annotated_list),
 
     individual_different_from: $ =>
-      seq('DifferentFrom:', $._individual_annotated_list),
+      seq($.keyword_different_from, $._individual_annotated_list),
 
     _fact: $ =>
       seq(
@@ -440,7 +440,7 @@ module.exports = grammar({
     _object_property_fact: $ => seq($.object_property_iri, $._individual),
     _data_property_fact: $ => seq($.data_property_iri, $._literal),
 
-    // TODO extract keywords
+    // TODO make misc hidden and add rules for choices
     misc: $ =>
       choice(
         seq(
@@ -578,7 +578,6 @@ module.exports = grammar({
     keyword_equivalent_to: $ => 'EquivalentTo:',
     keyword_class: $ => 'Class:',
     keyword_sub_class_of: $ => 'SubClassOf:',
-    keyword_equivalent_to: $ => 'EquivalentTo:',
     keyword_disjoint_with: $ => 'DisjointWith:',
     keyword_disjoint_union_of: $ => 'DisjointUnionOf:',
     keyword_has_key: $ => 'HasKey:',
@@ -586,8 +585,6 @@ module.exports = grammar({
     keyword_domain: $ => 'Domain:',
     keyword_range: $ => 'Range:',
     keyword_sub_property_of: $ => 'SubPropertyOf:',
-    keyword_equivalent_to: $ => 'EquivalentTo:',
-    keyword_disjoint_with: $ => 'DisjointWith:',
     keyword_inverse_of: $ => 'InverseOf:',
     keyword_sub_property_chain: $ => 'SubPropertyChain:',
     keyword_functional: $ => 'Functional',
@@ -610,6 +607,7 @@ module.exports = grammar({
     keyword_disjoint_properties: $ => 'DisjointProperties:',
     keyword_same_individual: $ => 'SameIndividual:',
     keyword_different_individuals: $ => 'DifferentIndividuals:',
+    keyword_different_from: $ => 'DifferentFrom:',
   },
 })
 

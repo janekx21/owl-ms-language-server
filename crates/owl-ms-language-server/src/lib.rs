@@ -252,7 +252,7 @@ impl LanguageServer for Backend {
 
         let workspace = self.find_workspace(&url);
 
-        Ok(workspace.internal_documents.get(&url).map(|document| {
+        Ok(workspace.internal_documents.get(&url).and_then(|document| {
             let document = document.read();
             let pos: Position = params.text_document_position_params.position.into();
             let node = document
@@ -261,11 +261,16 @@ impl LanguageServer for Backend {
                 .named_descendant_for_point_range(pos.into(), pos.into())
                 .unwrap();
             let info = workspace.node_info(&node, &document);
-            // Transitive into
-            let range: Range = node.range().into();
-            Hover {
-                contents: HoverContents::Scalar(MarkedString::String(info)),
-                range: Some(range.into()),
+
+            if info.is_empty() {
+                None
+            } else {
+                // Transitive into
+                let range: Range = node.range().into();
+                Some(Hover {
+                    contents: HoverContents::Scalar(MarkedString::String(info)),
+                    range: Some(range.into()),
+                })
             }
         }))
     }

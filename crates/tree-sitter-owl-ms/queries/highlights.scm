@@ -53,6 +53,7 @@
   (keyword_disjoint_properties)
   (keyword_same_individual)
   (keyword_different_individuals)
+  (keyword_different_from)
 ] @keyword
 
 
