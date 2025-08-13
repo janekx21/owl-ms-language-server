@@ -11,7 +11,6 @@ use anyhow::{anyhow, Context};
 use cached::proc_macro::cached;
 use cached::SizedCache;
 use core::fmt;
-use std::arch::x86_64;
 use dashmap::DashMap;
 use horned_owl::io::ParserConfiguration;
 use horned_owl::model::Component::*;
