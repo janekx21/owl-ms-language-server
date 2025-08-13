@@ -11,6 +11,7 @@ use anyhow::{anyhow, Context};
 use cached::proc_macro::cached;
 use cached::SizedCache;
 use core::fmt;
+use std::arch::x86_64;
 use dashmap::DashMap;
 use horned_owl::io::ParserConfiguration;
 use horned_owl::model::Component::*;
@@ -347,7 +348,7 @@ impl Workspace {
 
                 ---
 
-                An inverse property expression is a property that relates the same individuals in the opposite direction.
+                An inverse property expression connects an individual i with j if and only if j is connected to i by the current object property.
 
                 [Specification](https://www.w3.org/TR/2012/REC-owl2-syntax-20121211/#Inverse_Object_Properties)"
             }.to_string(),
@@ -368,6 +369,8 @@ impl Workspace {
 
                 ---
 
+                Built-in alias for `xsd:minLength`. Constrains the minimum length of a datatype value. Must be a non-negative integer.
+
                 [Specification](https://www.w3.org/TR/2012/REC-xmlschema11-2-20120405/#rf-minLength)"}.to_string(),
             "keyword_max_length" => indoc!{"
                 `maxLength`
@@ -375,6 +378,8 @@ impl Workspace {
                 *Facet* 
 
                 ---
+
+                Built-in alias for `xsd:maxLength`. Constrains the maximum length of a datatype value. Must be a non-negative integer.
 
                 [Specification](https://www.w3.org/TR/2012/REC-xmlschema11-2-20120405/#rf-maxLength)"}.to_string(),
             "keyword_pattern" => indoc!{"
@@ -446,7 +451,7 @@ impl Workspace {
                 - [Universal Quantification over Data Properties](https://www.w3.org/TR/owl2-syntax/#Universal_Quantification_2)
             "}.to_string(),
             "keyword_self" => indoc! {"
-                `Self`
+                `self`
 
                 *Class expression* 
 
@@ -598,6 +603,8 @@ impl Workspace {
                 Class: Party
                     DisjointUnionOf: Person, PrivateCompany, PublicOrganization
                 ```
+
+                [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Union_of_Class_Expressions)
             "}.to_string(),
             "keyword_has_key" => indoc!{"
                 `HasKey:`
@@ -689,7 +696,7 @@ impl Workspace {
 
                 ---
 
-                States that the current property is a subproperty of the listed object properties.
+                States that the current property is a subproperty of the listed object properties. If p is a subproperty of q, then if an individual x is connected to an individual y by p, then x is also connected to y by q.
 
                 Example:
                 ```owl-ms
@@ -863,7 +870,7 @@ impl Workspace {
 
                 ---
 
-                States a property that connects individuals to literal values.
+                Declares a property that connects individuals to literal values.
 
                 Example:
                 ```owl-ms
@@ -916,7 +923,7 @@ impl Workspace {
 
                 ---
 
-                Declares a named or anonymous individual in the ontology. Individuals which use the blank node are considered anonymous. The identifier is then only available within the current ontology.
+                Declares a named or anonymous individual in the ontology. Individuals which use the blank node (start with `_:`) are considered anonymous. Their identifier is then only available within the current ontology.
 
                 Example:
                 ```owl-ms
@@ -1097,7 +1104,6 @@ impl Workspace {
 
                 [Specification](https://www.w3.org/TR/owl2-syntax/#Individual_Inequality)
             "}.to_string(),
-
             _ => "".into(),
         }
     }
