@@ -140,6 +140,7 @@ impl LanguageServer for Backend {
                         },
                     ),
                 ),
+                document_symbol_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Right(WorkspaceSymbolOptions {
                     work_done_progress_options: WorkDoneProgressOptions {
                         work_done_progress: Some(false),
@@ -492,6 +493,36 @@ impl LanguageServer for Backend {
                 result_id: None,
                 data: tokens,
             })));
+        }
+        Ok(None)
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let url = params.text_document.uri;
+        let workspace = self.find_workspace(&url);
+        if let Some(doc) = workspace.internal_documents.get(&url) {
+            let infos = doc.read().get_all_frame_infos();
+            drop(doc);
+            return Ok(Some(DocumentSymbolResponse::Flat(
+                #[allow(deprecated)] // All fields need to be specified
+                infos
+                    .iter()
+                    .map(|info| SymbolInformation {
+                        name: info.iri.clone(),
+                        kind: info.frame_type.into(),
+                        tags: None,
+                        deprecated: None,
+                        location: Location {
+                            uri: url.clone(),
+                            range: info.definitions.first().unwrap().range.into(),
+                        },
+                        container_name: None,
+                    })
+                    .collect_vec(),
+            )));
         }
         Ok(None)
     }

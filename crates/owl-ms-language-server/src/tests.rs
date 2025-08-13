@@ -6,7 +6,7 @@ use pretty_assertions::assert_eq;
 use std::{fs, path::Path};
 use tempdir::{self, TempDir};
 use test_log::test;
-use tower_lsp::LspService;
+use tower_lsp::{lsp_types::request::DocumentSymbolRequest, LspService};
 use tree_sitter_c2rust::Parser;
 
 /// This module contains tests.
@@ -1559,6 +1559,40 @@ async fn backend_goto_definition_in_multi_file_ontology_should_work() {
             assert_eq!(location.uri, url2);
         }
         _ => todo!(),
+    }
+}
+
+#[test(tokio::test)]
+async fn backend_document_symbols_in_multi_file_ontology_should_just_show_symbols_from_active_file()
+{
+    // Arrange
+    let (service, tmp_dir) = arrange_multi_file_ontology().await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a2.omn")).unwrap();
+
+    // Act
+    // TODO check if the arrange did not create diagnostics
+    let result = service
+        .inner()
+        .document_symbol(DocumentSymbolParams {
+            text_document: TextDocumentIdentifier { uri: url.clone() },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    match result.unwrap() {
+        DocumentSymbolResponse::Flat(symbol_informations) => {
+            let info = symbol_informations.iter().exactly_one().unwrap();
+            assert_eq!(info.name, "http://ontology-a.org/ontology#ClassA2");
+        }
+        DocumentSymbolResponse::Nested(_document_symbols) => todo!(),
     }
 }
 
