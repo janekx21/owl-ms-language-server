@@ -1568,7 +1568,7 @@ async fn backend_document_symbols_in_multi_file_ontology_should_just_show_symbol
     // Arrange
     let (service, tmp_dir) = arrange_multi_file_ontology().await;
 
-    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a2.omn")).unwrap();
 
     // Act
     // TODO check if the arrange did not create diagnostics
@@ -1587,8 +1587,13 @@ async fn backend_document_symbols_in_multi_file_ontology_should_just_show_symbol
         .unwrap();
 
     // Assert
-    let result = result.unwrap();
-    result.
+    match result.unwrap() {
+        DocumentSymbolResponse::Flat(symbol_informations) => {
+            let info = symbol_informations.iter().exactly_one().unwrap();
+            assert_eq!(info.name, "http://ontology-a.org/ontology#ClassA2");
+        }
+        DocumentSymbolResponse::Nested(_document_symbols) => todo!(),
+    }
 }
 
 //////////////////////////
