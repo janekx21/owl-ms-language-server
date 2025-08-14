@@ -657,6 +657,20 @@ impl LanguageServer for Backend {
                 .named_descendant_for_point_range(position.into(), position.into())
                 .unwrap();
 
+            // This excludes prefix declaration, import and annotation target IRIs
+            match node.parent().unwrap().kind() {
+                "datatype_iri"
+                | "class_iri"
+                | "annotation_property_iri"
+                | "ontology_iri"
+                | "data_property_iri"
+                | "version_iri"
+                | "object_property_iri"
+                | "annotation_property_iri_annotated_list"
+                | "individual_iri" => {}
+                _ => return Ok(None),
+            }
+
             match node.kind() {
                 "full_iri" => {
                     let mut range: Range = node.range().into();
