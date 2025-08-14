@@ -738,3 +738,81 @@ Import: <http://external.org/shared.omn>
     (import
 	    (keyword_import)
       (full_iri))))
+
+==============
+Complex class expression
+==============
+
+
+Prefix: : <https://example.com/ontology#>
+
+Ontology:
+
+ObjectProperty: p
+Class: A
+Class: B
+Class: C
+    SubClassOf: p some (A and B)
+    SubClassOf: inverse p some (A and B)
+    # SubClassOf: (p) some A and B this is invalid
+    SubClassOf: inverse p some A and B
+---
+
+(source_file
+      (prefix_declaration
+        (keyword_prefix)
+        (prefix_name)
+        (full_iri))
+      (ontology
+        (keyword_ontology)
+        (object_property_frame
+          (keyword_object_property)
+          (object_property_iri
+            (simple_iri)))
+        (class_frame
+          (keyword_class)
+          (class_iri
+            (simple_iri)))
+        (class_frame
+          (keyword_class)
+          (class_iri
+            (simple_iri)))
+        (class_frame
+          (keyword_class)
+          (class_iri
+            (simple_iri))
+          (sub_class_of
+            (keyword_sub_class_of)
+            (description
+              (object_property_iri
+                (simple_iri))
+              (keyword_some)
+              (description
+                (class_iri
+                  (simple_iri))
+                (class_iri
+                  (simple_iri)))))
+          (sub_class_of
+            (keyword_sub_class_of)
+            (description
+              (keyword_inverse)
+              (object_property_iri
+                (simple_iri))
+              (keyword_some)
+              (description
+                (class_iri
+                  (simple_iri))
+                (class_iri
+                  (simple_iri)))))
+          (comment)
+          (sub_class_of
+            (keyword_sub_class_of)
+            (description
+              (keyword_inverse)
+              (object_property_iri
+                (simple_iri))
+              (keyword_some)
+              (class_iri
+                (simple_iri))
+              (class_iri
+                (simple_iri)))))))

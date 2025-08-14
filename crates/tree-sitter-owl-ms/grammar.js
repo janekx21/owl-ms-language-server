@@ -173,13 +173,13 @@ module.exports = grammar({
 
     _restriction: $ =>
       choice(
-        seq($._data_property_expression, $.keyword_some, $._primary),
+        seq($._object_property_expression, $.keyword_some, $._primary),
         seq($._data_property_expression, $.keyword_some, $._data_primary),
-        seq($._data_property_expression, $.keyword_only, $._primary),
+        seq($._object_property_expression, $.keyword_only, $._primary),
         seq($._data_property_expression, $.keyword_only, $._data_primary),
-        seq($._data_property_expression, $.keyword_self),
+        seq($._object_property_expression, $.keyword_self),
         seq(
-          $._data_property_expression,
+          $._object_property_expression,
           'min',
           $.non_negative_integer,
           optional($._primary),
@@ -191,7 +191,7 @@ module.exports = grammar({
           optional($._data_primary),
         ),
         seq(
-          $._data_property_expression,
+          $._object_property_expression,
           'max',
           $.non_negative_integer,
           optional($._primary),
@@ -203,7 +203,7 @@ module.exports = grammar({
           optional($._data_primary),
         ),
         seq(
-          $._data_property_expression,
+          $._object_property_expression,
           'exactly',
           $.non_negative_integer,
           optional($._primary),
