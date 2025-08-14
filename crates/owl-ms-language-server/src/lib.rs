@@ -97,6 +97,7 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 position_encoding: Some(encoding),
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
@@ -176,6 +177,11 @@ impl LanguageServer for Backend {
             .collect_vec();
 
         info!("Initialized languag server with workspaces: {workspace_paths:?}");
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        info!("formatting {params:#?}");
+        Ok(None)
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
