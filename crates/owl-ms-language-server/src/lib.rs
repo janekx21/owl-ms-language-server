@@ -148,6 +148,12 @@ impl LanguageServer for Backend {
                     resolve_provider: Some(false),
                 })),
                 references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions {
+                        work_done_progress: None,
+                    },
+                })),
                 ..Default::default()
             },
         })
@@ -630,6 +636,139 @@ impl LanguageServer for Backend {
                     })
                     .collect_vec();
                 return Ok(Some(locations));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let url = params.text_document.uri;
+        let position: Position = params.position.into();
+
+        let workspace = self.find_workspace(&url);
+        if let Some(doc) = workspace.internal_documents.get(&url) {
+            let doc = doc.read();
+            let node = doc
+                .tree
+                .root_node()
+                .named_descendant_for_point_range(position.into(), position.into())
+                .unwrap();
+
+            match node.kind() {
+                "full_iri" => {
+                    let mut range: Range = node.range().into();
+                    range.start.character += 1;
+                    range.end.character -= 1;
+                    return Ok(Some(PrepareRenameResponse::Range(range.into())));
+                }
+                "simple_iri" => {
+                    let range: Range = node.range().into();
+                    return Ok(Some(PrepareRenameResponse::Range(range.into())));
+                }
+                "abbreviated_iri" => {
+                    let mut range: Range = node.range().into();
+                    let text = node_text(&node, &doc.rope).to_string();
+                    let col_offset = text.find(':').unwrap() + 1;
+                    range.start.character += col_offset as u32;
+                    return Ok(Some(PrepareRenameResponse::Range(range.into())));
+                }
+                _ => {}
+            }
+        }
+        Ok(None)
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let url = params.text_document_position.text_document.uri;
+        let position: Position = params.text_document_position.position.into();
+        let new_name = params.new_name;
+
+        let workspace = self.find_workspace(&url);
+        if let Some(doc) = workspace.internal_documents.get(&url) {
+            let doc = doc.read();
+            let node = doc
+                .tree
+                .root_node()
+                .named_descendant_for_point_range(position.into(), position.into())
+                .unwrap();
+
+            let old_and_new_iri = match node.kind() {
+                "full_iri" => {
+                    let iri = trim_full_iri(node_text(&node, &doc.rope));
+                    Some((iri, new_name))
+                }
+                "simple_iri" => {
+                    let iri = node_text(&node, &doc.rope);
+                    Some((
+                        doc.abbreviated_iri_to_full_iri(iri.to_string()),
+                        doc.abbreviated_iri_to_full_iri(new_name),
+                    ))
+                }
+                "abbreviated_iri" => {
+                    let iri = node_text(&node, &doc.rope).to_string();
+                    let (prefix, _) = iri.split_once(':').unwrap();
+                    Some((
+                        doc.abbreviated_iri_to_full_iri(iri.clone()),
+                        doc.abbreviated_iri_to_full_iri(format!("{prefix}:{new_name}")),
+                    ))
+                }
+                _ => None,
+            };
+
+            drop(doc);
+            drop(url);
+
+            if let Some((full_iri, new_iri)) = old_and_new_iri {
+                let changes = workspace
+                    .internal_documents
+                    .iter()
+                    .map(|doc| {
+                        let doc = doc.value().read();
+                        let edits = doc
+                            .query(&ALL_QUERIES.iri_query)
+                            .into_iter()
+                            .filter_map(|m| {
+                                let (iri, range) = match &m.captures[..] {
+                                    [iri_capture] => (
+                                        match iri_capture.node.kind.as_str() {
+                                            "full_iri" => {
+                                                trim_full_iri(iri_capture.node.text.clone())
+                                            }
+                                            "simple_iri" | "abbreviated_iri" => doc
+                                                .abbreviated_iri_to_full_iri(
+                                                    iri_capture.node.text.clone(),
+                                                ),
+
+                                            _ => unreachable!(),
+                                        },
+                                        iri_capture.node.range,
+                                    ),
+                                    _ => unreachable!(),
+                                };
+                                if iri == full_iri {
+                                    Some(TextEdit {
+                                        range: range.into(),
+                                        new_text: doc
+                                            .full_iri_to_abbreviated_iri(new_iri.clone())
+                                            .unwrap_or(format!("<{}>", new_iri.clone())),
+                                    })
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect_vec();
+                        (doc.uri.clone(), edits)
+                    })
+                    .collect();
+
+                return Ok(Some(WorkspaceEdit {
+                    changes: Some(changes),
+                    document_changes: None,
+                    change_annotations: None,
+                }));
             }
         }
         Ok(None)
