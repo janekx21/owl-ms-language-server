@@ -1,13 +1,13 @@
-use crate::{catalog::Catalog, web::StaticClient, *};
+use crate::{catalog::Catalog, range::range_overlaps, web::StaticClient, *};
 use anyhow::anyhow;
 use indoc::indoc;
 use position::Position;
-use pretty_assertions::assert_eq;
-use std::{fs, path::Path};
+use pretty_assertions::{assert_eq, assert_ne};
+use std::{any, fs, path::Path};
 use tempdir::{self, TempDir};
 use test_log::test;
 use tower_lsp::LspService;
-use tree_sitter_c2rust::Parser;
+use tree_sitter_c2rust::{ParseOptions, Parser};
 
 /// This module contains tests.
 /// Each test function name is in the form of `<function>_<thing>_<condition>_<expectation>`.
@@ -752,6 +752,117 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
     info!("contents={contents}");
     assert!(!contents.contains("**ClassA2**"));
     assert!(contents.contains("Some class in A2"));
+}
+
+#[test(tokio::test)]
+async fn backend_formatting_on_file_should_correctly_format() {
+    // Arrange
+
+    let source = indoc! {"
+    Ontology: foo
+
+    Class:    A    SubClassOf: Y    Annotations:   rdfs:label    \"Y\"    EquivalentTo:    Y
+
+                 DisjointWith:    Y   DisjointUnionOf:    Y,Z    HasKey:    Y
+
+
+     
+    Datatype:     B
+               EquivalentTo:    Y
+    DataProperty:    C
+    ObjectProperty:    D
+    AnnotationProperty:    E
+    Individual:    F
+    "};
+
+    let target = indoc! {"
+    Ontology: foo
+
+    Class: A
+        SubClassOf: Y
+        Annotations: rdfs:label \"Y\"
+        EquivalentTo: Y
+        DisjointWith: Y
+        DisjointUnionOf: Y,Z
+        HasKey: Y
+
+    Datatype: B
+        EquivalentTo: Y
+
+    DataProperty: C
+    ObjectProperty: D
+    AnnotationProperty: E
+    Individual: F
+    "};
+
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+
+    let service = arrange_backend(None, vec![]).await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: source.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    // TODO check if the arrange did not create diagnostics
+    let result = service
+        .inner()
+        .formatting(DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri: url.clone() },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            options: FormattingOptions::default(),
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    let edits = result.unwrap();
+
+    let any_overlaps = edits
+        .iter()
+        .tuple_combinations()
+        .any(|(a, b)| range_overlaps(&a.range.into(), &b.range.into()));
+    assert!(!any_overlaps);
+
+    assert!(edits.iter().is_sorted_by_key(|e| e.range.start));
+
+    // TODO this will not work because clients change the edits order (in secret) to match the did change top to bottom order
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: url.clone(),
+                version: 1,
+            },
+            content_changes: edits
+                .iter()
+                .map(|e| TextDocumentContentChangeEvent {
+                    range: Some(e.range),
+                    range_length: None,
+                    text: e.new_text.clone(),
+                })
+                .collect(),
+        })
+        .await;
+
+    let ws = service.inner().find_workspace(&url);
+    // let ws = workspaces.iter().exactly_one().unwrap();
+    let doc = ws.internal_documents.get(&url).unwrap();
+    let doc = doc.read();
+    assert_eq!(doc.diagnostics, vec![], "doc:\n{}", doc.rope.to_string());
+    assert_eq!(doc.rope.to_string(), target);
 }
 
 #[test(tokio::test)]

@@ -67,6 +67,7 @@ pub struct AllQueries {
     pub frame_query: Query,
     pub ontology_id: Query,
     pub prefix: Query,
+    pub format: Query,
 }
 
 pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
@@ -115,6 +116,40 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
         &LANGUAGE,
         "
             (prefix_declaration (prefix_name)@name (full_iri)@iri)
+        ",
+    )
+    .unwrap(),
+    format: Query::new(
+        &LANGUAGE,
+        "
+            ((keyword_class) @start . (class_iri) @space_single)
+            ((keyword_datatype) @start . (datatype_iri) @space_single)
+            ((keyword_object_property) @start . (object_property_iri) @space_single)
+            ((keyword_data_property) @start . (data_property_iri) @space_single)
+            ((keyword_annotation_property) @start . (annotation_property_iri) @space_single)
+            ((keyword_individual) @start . (individual_iri) @space_single)
+
+            ((keyword_annotations) @start . (_) @space_single)
+            ((annotation_property_iri) @start . (_) @space_single)
+
+            (((keyword_annotations) . (_) @start  .) . (_) @newline_single)
+
+            ((datatype_iri) @start . (_) @newline_single)
+            ((keyword_equivalent_to) @start . (_) @space_single)
+            ((keyword_disjoint_with) @start . (_) @space_single)
+            ((keyword_disjoint_union_of) @start . (_) @space_single)
+            ((keyword_has_key) @start . (_) @space_single)
+
+            ((class_iri) @start . (_) @newline_single)
+            ((sub_class_of) @start . (_) @newline_single)
+            ((class_equivalent_to) @start . (_) @newline_single)
+            ((class_disjoint_with) @start . (_) @newline_single)
+            ((disjoint_union_of) @start . (_) @newline_single)
+            ((has_key) @start . (_) @newline_single)
+
+            ((class_frame) @start . (_) @newline_double)
+            ((datatype_frame) @start . (_) @newline_double)
+
         ",
     )
     .unwrap(),

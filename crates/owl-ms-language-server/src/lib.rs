@@ -25,7 +25,7 @@ use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
-use tree_sitter_c2rust::Language;
+use tree_sitter_c2rust::{Language, Node};
 use web::{HttpClient, UreqClient};
 use workspace::{node_text, trim_full_iri, InternalDocument, Workspace};
 
@@ -181,7 +181,53 @@ impl LanguageServer for Backend {
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         info!("formatting {params:#?}");
-        Ok(None)
+        let url = params.text_document.uri;
+
+        let workspace = self.find_workspace(&url);
+        if let Some(doc) = workspace.internal_documents.get(&url) {
+            let doc = doc.read();
+
+            // let capture_names = .format.capture_names();
+            // let q = &ALL_QUERIES.format;
+
+            let edits = doc
+                .query(&ALL_QUERIES.format)
+                .iter()
+                .flat_map(|m| {
+                    // let l = m.capture_by_name(q, "space_single");
+                    // let a = m.captures.iter().find(|p|capture_names[p.index])
+                    let capture_names = ALL_QUERIES.format.capture_names();
+                    match &m.captures[..] {
+                        [l, r] => {
+                            let name = capture_names[r.index as usize];
+                            debug!("capture name: {name} at {:#?}", l.node.range);
+                            let new_text = match name {
+                                "space_single" => " ",
+                                "newline_single" => "\n    ",
+                                "newline_double" => "\n\n",
+                                _ => unreachable!("{name}"),
+                            };
+                            let range = Range {
+                                start: l.node.range.end,
+                                end: r.node.range.start,
+                            };
+                            vec![TextEdit {
+                                range: range.into(),
+                                new_text: new_text.to_string(),
+                            }]
+                        }
+                        _ => {
+                            vec![]
+                        }
+                    }
+                })
+                .sorted_by_key(|e| e.range.end)
+                .collect();
+            debug!("edits {:#?}", edits);
+            return Ok(Some(edits));
+        }
+
+        Ok(Some(vec![]))
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
