@@ -17,6 +17,7 @@ use parking_lot::{MappedRwLockWriteGuard, RwLock, RwLockWriteGuard};
 use position::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
 use range::Range;
+use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -328,7 +329,7 @@ impl LanguageServer for Backend {
 
             if ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind()) {
                 let iri = trim_full_iri(node_text(&leaf_node, &doc.rope));
-                let iri = doc.abbreviated_iri_to_full_iri(iri);
+                let iri = doc.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
 
                 debug!("Try goto definition of {}", iri);
 
@@ -589,7 +590,10 @@ impl LanguageServer for Backend {
                 "full_iri" => Some(trim_full_iri(node_text(&node, &doc.rope))),
                 "simple_iri" | "abbreviated_iri" => {
                     let iri = node_text(&node, &doc.rope);
-                    Some(doc.abbreviated_iri_to_full_iri(iri.to_string()))
+                    Some(
+                        doc.abbreviated_iri_to_full_iri(iri.to_string())
+                            .unwrap_or(iri.to_string()),
+                    )
                 }
                 _ => None,
             };
@@ -615,7 +619,8 @@ impl LanguageServer for Backend {
                                             "simple_iri" | "abbreviated_iri" => doc
                                                 .abbreviated_iri_to_full_iri(
                                                     iri_capture.node.text.clone(),
-                                                ),
+                                                )
+                                                .unwrap_or(iri_capture.node.text.clone()),
 
                                             _ => unreachable!(),
                                         },
@@ -649,50 +654,74 @@ impl LanguageServer for Backend {
         let position: Position = params.position.into();
 
         let workspace = self.find_workspace(&url);
-        if let Some(doc) = workspace.internal_documents.get(&url) {
+        let x = if let Some(doc) = workspace.internal_documents.get(&url) {
             let doc = doc.read();
-            let node = doc
-                .tree
-                .root_node()
-                .named_descendant_for_point_range(position.into(), position.into())
-                .unwrap();
 
-            // This excludes prefix declaration, import and annotation target IRIs
-            match node.parent().unwrap().kind() {
-                "datatype_iri"
-                | "class_iri"
-                | "annotation_property_iri"
-                | "ontology_iri"
-                | "data_property_iri"
-                | "version_iri"
-                | "object_property_iri"
-                | "annotation_property_iri_annotated_list"
-                | "individual_iri" => {}
-                _ => return Ok(None),
+            fn node_range(position: Position, doc: &InternalDocument) -> Option<Range> {
+                debug!("prepare_rename try {position:?}");
+                let node = doc
+                    .tree
+                    .root_node()
+                    .named_descendant_for_point_range(position.into(), position.into())?;
+
+                // This excludes prefix declaration, import and annotation target IRIs
+                match node.parent()?.kind() {
+                    "datatype_iri"
+                    | "class_iri"
+                    | "annotation_property_iri"
+                    | "ontology_iri"
+                    | "data_property_iri"
+                    | "version_iri"
+                    | "object_property_iri"
+                    | "annotation_property_iri_annotated_list"
+                    | "individual_iri" => {}
+                    _ => return None,
+                }
+
+                match node.kind() {
+                    "full_iri" => {
+                        let mut range: Range = node.range().into();
+                        range.start.character += 1;
+                        range.end.character -= 1;
+                        Some(range)
+                    }
+                    "simple_iri" => {
+                        let range: Range = node.range().into();
+                        Some(range)
+                    }
+                    "abbreviated_iri" => {
+                        let mut range: Range = node.range().into();
+                        let text = node_text(&node, &doc.rope).to_string();
+                        let col_offset = text.find(':').unwrap() + 1;
+                        range.start.character += col_offset as u32;
+                        Some(range)
+                    }
+                    _ => None,
+                }
             }
 
-            match node.kind() {
-                "full_iri" => {
-                    let mut range: Range = node.range().into();
-                    range.start.character += 1;
-                    range.end.character -= 1;
-                    return Ok(Some(PrepareRenameResponse::Range(range.into())));
-                }
-                "simple_iri" => {
-                    let range: Range = node.range().into();
-                    return Ok(Some(PrepareRenameResponse::Range(range.into())));
-                }
-                "abbreviated_iri" => {
-                    let mut range: Range = node.range().into();
-                    let text = node_text(&node, &doc.rope).to_string();
-                    let col_offset = text.find(':').unwrap() + 1;
-                    range.start.character += col_offset as u32;
-                    return Ok(Some(PrepareRenameResponse::Range(range.into())));
-                }
-                _ => {}
-            }
-        }
-        Ok(None)
+            let range = node_range(position, &doc)
+                .or_else(|| {
+                    // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
+                    // For example: ThisIsSomeIri| other text
+                    //                           ^
+                    //                       Cursor
+                    debug!("prepare rename try one position left");
+                    let position = Position {
+                        line: position.line,
+                        character: position.character.saturating_sub(1),
+                    };
+                    node_range(position, &doc)
+                })
+                .map(|range| PrepareRenameResponse::Range(range.into()));
+            debug!("prepare rename found range {range:?}");
+
+            Ok(range)
+        } else {
+            // TODO #24 this should be some document not found error
+            Ok(None)
+        };
+        x
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
@@ -700,42 +729,74 @@ impl LanguageServer for Backend {
         let position: Position = params.text_document_position.position.into();
         let new_name = params.new_name;
 
+        debug!("rename {url}:{position:?} with {new_name}");
+
         let workspace = self.find_workspace(&url);
         if let Some(doc) = workspace.internal_documents.get(&url) {
             let doc = doc.read();
-            let node = doc
-                .tree
-                .root_node()
-                .named_descendant_for_point_range(position.into(), position.into())
-                .unwrap();
 
-            let old_and_new_iri = match node.kind() {
-                "full_iri" => {
-                    let iri = trim_full_iri(node_text(&node, &doc.rope));
-                    Some((iri, new_name))
+            fn rename_helper(
+                position: Position,
+                doc: &InternalDocument,
+                new_name: String,
+            ) -> Option<(String, Option<String>, String, String)> {
+                let node = doc
+                    .tree
+                    .root_node()
+                    .named_descendant_for_point_range(position.into(), position.into())
+                    .unwrap();
+
+                match node.kind() {
+                    "full_iri" => {
+                        let iri_kind = node.parent().unwrap().kind().to_string();
+                        let iri = trim_full_iri(node_text(&node, &doc.rope));
+                        Some((iri.clone(), Some(new_name.clone()), iri_kind, new_name))
+                    }
+                    "simple_iri" => {
+                        let iri = node_text(&node, &doc.rope);
+                        let iri_kind = node.parent().unwrap().kind().to_string();
+                        Some((
+                            doc.abbreviated_iri_to_full_iri(iri.to_string())
+                                .unwrap_or(iri.to_string()),
+                            doc.abbreviated_iri_to_full_iri(new_name.clone()),
+                            iri_kind,
+                            new_name,
+                        ))
+                    }
+                    "abbreviated_iri" => {
+                        let iri_kind = node.parent().unwrap().kind().to_string();
+                        let iri = node_text(&node, &doc.rope).to_string();
+                        let (prefix, _) = iri.split_once(':').unwrap();
+                        Some((
+                            doc.abbreviated_iri_to_full_iri(iri.clone())
+                                .unwrap_or(iri.clone()),
+                            doc.abbreviated_iri_to_full_iri(format!("{prefix}:{new_name}")),
+                            iri_kind,
+                            format!("{prefix}:{new_name}"),
+                        ))
+                    }
+                    _ => None,
                 }
-                "simple_iri" => {
-                    let iri = node_text(&node, &doc.rope);
-                    Some((
-                        doc.abbreviated_iri_to_full_iri(iri.to_string()),
-                        doc.abbreviated_iri_to_full_iri(new_name),
-                    ))
-                }
-                "abbreviated_iri" => {
-                    let iri = node_text(&node, &doc.rope).to_string();
-                    let (prefix, _) = iri.split_once(':').unwrap();
-                    Some((
-                        doc.abbreviated_iri_to_full_iri(iri.clone()),
-                        doc.abbreviated_iri_to_full_iri(format!("{prefix}:{new_name}")),
-                    ))
-                }
-                _ => None,
-            };
+            }
+
+            let old_and_new_iri = rename_helper(position, &doc, new_name.clone()).or_else(|| {
+                // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
+                // For example: ThisIsSomeIri| other text
+                //                           ^
+                //                       Cursor
+                debug!("prepare rename try one position left");
+                let position = Position {
+                    line: position.line,
+                    character: position.character.saturating_sub(1),
+                };
+                rename_helper(position, &doc, new_name)
+            });
 
             drop(doc);
             drop(url);
 
-            if let Some((full_iri, new_iri)) = old_and_new_iri {
+            if let Some((full_iri, new_iri, iri_kind, original)) = old_and_new_iri {
+                debug!("renaming resolved iris from {full_iri:?} to {new_iri:?}");
                 let changes = workspace
                     .internal_documents
                     .iter()
@@ -745,7 +806,7 @@ impl LanguageServer for Backend {
                             .query(&ALL_QUERIES.iri_query)
                             .into_iter()
                             .filter_map(|m| {
-                                let (iri, range) = match &m.captures[..] {
+                                let (iri, range, parent_kind) = match &m.captures[..] {
                                     [iri_capture] => (
                                         match iri_capture.node.kind.as_str() {
                                             "full_iri" => {
@@ -754,20 +815,30 @@ impl LanguageServer for Backend {
                                             "simple_iri" | "abbreviated_iri" => doc
                                                 .abbreviated_iri_to_full_iri(
                                                     iri_capture.node.text.clone(),
-                                                ),
+                                                )
+                                                .unwrap_or(iri_capture.node.text.clone()),
 
                                             _ => unreachable!(),
                                         },
                                         iri_capture.node.range,
+                                        doc.node_by_id(iri_capture.node.id)
+                                            .unwrap()
+                                            .parent()
+                                            .unwrap()
+                                            .kind(),
                                     ),
                                     _ => unreachable!(),
                                 };
-                                if iri == full_iri {
+                                if iri == full_iri && iri_kind == parent_kind {
                                     Some(TextEdit {
                                         range: range.into(),
-                                        new_text: doc
-                                            .full_iri_to_abbreviated_iri(new_iri.clone())
-                                            .unwrap_or(format!("<{}>", new_iri.clone())),
+                                        new_text: new_iri
+                                            .clone()
+                                            .map(|new_iri| {
+                                                doc.full_iri_to_abbreviated_iri(new_iri.clone())
+                                                    .unwrap_or(format!("<{}>", new_iri))
+                                            })
+                                            .unwrap_or(original.clone()),
                                     })
                                 } else {
                                     None

@@ -12,10 +12,11 @@ This Language Server works for omn files. It has the following language features
 - Syntax highlighting
 - Auto completions
 - Realtime diagnostics
-- Go to definition
+- Go to definition/reference
 - Hover information
 - Inlay hints (resolved `rdfs:label`)
-- Workspace symbol search `<Ctrl-N>`
+- Rename of IRI's
+- Workspace symbol search `<Ctrl-N>` and Document Symbols
 - Multiple files with catalog-v001.xml support
 - Multiple workspaces
 
