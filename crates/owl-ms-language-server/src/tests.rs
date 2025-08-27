@@ -1520,6 +1520,48 @@ async fn backend_completion_should_work_for_keywords() {
 }
 
 #[test(tokio::test)]
+async fn backend_references_in_multi_file_ontology_should_work() {
+    // Arrange
+    let (service, tmp_dir) = arrange_multi_file_ontology().await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+
+    // Act
+    // TODO check if the arrange did not create diagnostics
+    let result = service
+        .inner()
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url.clone() },
+                position: Position {
+                    line: 7,
+                    character: 31,
+                }
+                .into(),
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    let url2 = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a2.omn")).unwrap();
+    let result = result.unwrap();
+    info!("{result:#?}");
+    assert_eq!(result.len(), 2);
+    assert!(result.iter().any(|l| l.uri == url));
+    assert!(result.iter().any(|l| l.uri == url2));
+}
+
+#[test(tokio::test)]
 async fn backend_goto_definition_in_multi_file_ontology_should_work() {
     // Arrange
     let (service, tmp_dir) = arrange_multi_file_ontology().await;

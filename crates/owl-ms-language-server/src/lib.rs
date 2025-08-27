@@ -147,6 +147,7 @@ impl LanguageServer for Backend {
                     },
                     resolve_provider: Some(false),
                 })),
+                references_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
         })
@@ -563,6 +564,75 @@ impl LanguageServer for Backend {
             .collect_vec();
 
         Ok(Some(symbols))
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let url = params.text_document_position.text_document.uri;
+        let position: Position = params.text_document_position.position.into();
+
+        let workspace = self.find_workspace(&url);
+        if let Some(doc) = workspace.internal_documents.get(&url) {
+            let doc = doc.read();
+            let node = doc
+                .tree
+                .root_node()
+                .named_descendant_for_point_range(position.into(), position.into())
+                .unwrap();
+
+            let full_iri_option = match node.kind() {
+                "full_iri" => Some(trim_full_iri(node_text(&node, &doc.rope))),
+                "simple_iri" | "abbreviated_iri" => {
+                    let iri = node_text(&node, &doc.rope);
+                    Some(doc.abbreviated_iri_to_full_iri(iri.to_string()))
+                }
+                _ => None,
+            };
+
+            drop(doc);
+            drop(url);
+
+            if let Some(full_iri) = full_iri_option {
+                let locations = workspace
+                    .internal_documents
+                    .iter()
+                    .flat_map(|doc| {
+                        let doc = doc.value().read();
+                        doc.query(&ALL_QUERIES.iri_query)
+                            .into_iter()
+                            .filter_map(|m| {
+                                let (iri, range) = match &m.captures[..] {
+                                    [iri_capture] => (
+                                        match iri_capture.node.kind.as_str() {
+                                            "full_iri" => {
+                                                trim_full_iri(iri_capture.node.text.clone())
+                                            }
+                                            "simple_iri" | "abbreviated_iri" => doc
+                                                .abbreviated_iri_to_full_iri(
+                                                    iri_capture.node.text.clone(),
+                                                ),
+
+                                            _ => unreachable!(),
+                                        },
+                                        iri_capture.node.range,
+                                    ),
+                                    _ => unreachable!(),
+                                };
+                                if iri == full_iri {
+                                    Some(Location {
+                                        uri: doc.uri.clone(),
+                                        range: range.into(),
+                                    })
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect_vec()
+                    })
+                    .collect_vec();
+                return Ok(Some(locations));
+            }
+        }
+        Ok(None)
     }
 
     async fn shutdown(&self) -> Result<()> {
