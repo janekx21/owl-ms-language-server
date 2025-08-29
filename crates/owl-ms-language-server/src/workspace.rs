@@ -1469,7 +1469,8 @@ impl InternalDocument {
         let change_ranges = params
             .content_changes
             .iter()
-            .rev() // See https://github.com/helix-editor/helix/blob/0815b52e0959e21ec792ea41d508a050b552f850/helix-core/src/syntax.rs#L1293C1-L1297C26
+            // First I thougt the order must be changed but the LSP defines it as "S -> S' -> S''"
+            //  https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#didChangeTextDocumentParams
             .map(|change| {
                 if let Some(range) = change.range {
                     let old_range: Range = range.into();
