@@ -1,0 +1,30 @@
+Prefix: : <http://example.org/myontology#>
+Prefix: foaf: <http://xmlns.com/foaf/0.1/>
+Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+
+Ontology: <http://example.org/myontology>
+
+Class: :Person
+
+Class: foaf:Animal
+
+Individual: :Alice
+    Types: :Person
+    Facts: foaf:name "Alice"^^xsd:string
+
+Individual: <http://example.org/myontology#Bob>
+    Types: :Person
+    Facts: foaf:name "Bob"^^xsd:string
+
+Individual: foaf:Dog
+    Types: foaf:Animal
+
+ObjectProperty: :hasPet
+    Domain: :Person
+    Range: foaf:Animal
+
+Individual: :Alice
+    Facts: :hasPet foaf:Dog
