@@ -15,7 +15,7 @@ This Language Server works for omn files. It has the following language features
 - Go to definition/reference
 - Hover information
 - Inlay hints (resolved `rdfs:label`)
-- Rename of IRI's
+- Rename of IRI's (only .omn files)
 - Workspace symbol search `<Ctrl-N>` and Document Symbols
 - Multiple files with catalog-v001.xml support
 - Multiple workspaces

@@ -107,6 +107,9 @@ To integrate the language server into an editor not listed above use the documen
 ### Where can i find logs?
 Logs can be found under `<tempdir>/owl-ms-lanugage-server.log`. On Windows `<tempdir>` is most likely `C:\Users\<username>\AppData\Local\Temp`, on Linux `/tmp` and on MacOS `/private/var/tmp`.
 
+### Do renames work for non .omn files like .owl or .xml?
+
+No. Only .omn files.
 
 ## Roadmap
 
