@@ -1605,31 +1605,29 @@ impl InternalDocument {
     pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: String) -> Option<String> {
         let prefixes = self.prefixes();
         if let Some((prefix, simple_iri)) = abbriviated_iri.split_once(':') {
-            if let Some(resolved_prefix) = prefixes.get(prefix) {
-                Some(resolved_prefix.clone() + simple_iri)
-            } else {
-                None
-            }
+            prefixes
+                .get(prefix)
+                .map(|resolved_prefix| resolved_prefix.clone() + simple_iri)
         } else {
             // Simple IRIs get a free colon prependet
             // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
-            if let Some(resolved_prefix) = prefixes.get("") {
-                Some(resolved_prefix.clone() + &abbriviated_iri)
-            } else {
-                None
-            }
+            prefixes
+                .get("")
+                .map(|resolved_prefix| resolved_prefix.clone() + &abbriviated_iri)
         }
     }
 
     pub fn full_iri_to_abbreviated_iri(&self, full_iri: String) -> Option<String> {
         self.prefixes()
             .into_iter()
-            .find_map(|(prefix, url)| match full_iri.split_once(&url) {
+            .filter_map(|(prefix, url)| match full_iri.split_once(&url) {
                 Some(("", post)) if prefix.is_empty() => Some(post.to_string()),
                 Some(("", post)) => Some(prefix + ":" + post),
                 Some(_) => None,
                 None => None,
             })
+            .sorted_by_key(|s| s.len()) // short IRI's are preferred
+            .next()
     }
 
     pub fn ontology_id(&self) -> Option<Iri> {
