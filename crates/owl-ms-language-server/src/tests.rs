@@ -1670,6 +1670,83 @@ async fn backend_rename_simple_iri_should_work() {
 }
 
 #[test(tokio::test)]
+async fn backend_rename_at_end_should_work() {
+    let ontology = indoc! {"
+        Prefix: : <https://example.com/ontology#>
+
+        Ontology:
+        Class: B
+    "};
+    let new_ontology = indoc! {"
+        Prefix: : <https://example.com/ontology#>
+
+        Ontology:
+        Class: beta
+    "};
+
+    backend_rename_helper(
+        ontology,
+        new_ontology,
+        Position {
+            line: 3,
+            character: 8,
+        },
+        "beta",
+    )
+    .await;
+}
+
+#[test(tokio::test)]
+async fn backend_rename_prefixless_simple_iri_should_work() {
+    let ontology = indoc! {"
+        Ontology:
+        Class: B
+            SubClassOf: B
+    "};
+    let new_ontology = indoc! {"
+        Ontology:
+        Class: beta
+            SubClassOf: beta
+    "};
+
+    backend_rename_helper(
+        ontology,
+        new_ontology,
+        Position {
+            line: 1,
+            character: 7,
+        },
+        "beta",
+    )
+    .await;
+}
+
+#[test(tokio::test)]
+async fn backend_rename_unknown_abbriviated_iri_should_work() {
+    let ontology = indoc! {"
+        Ontology:
+        Class: unknown:B
+            SubClassOf: unknown:B
+    "};
+    let new_ontology = indoc! {"
+        Ontology:
+        Class: unknown:beta
+            SubClassOf: unknown:beta
+    "};
+
+    backend_rename_helper(
+        ontology,
+        new_ontology,
+        Position {
+            line: 1,
+            character: 7,
+        },
+        "beta",
+    )
+    .await;
+}
+
+#[test(tokio::test)]
 async fn backend_rename_full_iri_should_shorten() {
     let ontology = indoc! {"
         Prefix: : <https://example.com/ontology#>
@@ -1750,6 +1827,35 @@ async fn backend_rename_full_iri_should_work_for_matching() {
             character: 9,
         },
         "https://example.com/ontology#beta",
+    )
+    .await;
+}
+
+#[test(tokio::test)]
+async fn backend_rename_full_iri_should_not_shorten() {
+    let ontology = indoc! {"
+        Prefix: o: https://example.com/ontology#B
+
+        Ontology:
+        Class: <https://example.com/ontology#B>
+            SubClassOf: o:B, B, <https://example.com/ontology#B>
+    "};
+    let new_ontology = indoc! {"
+        Prefix: o: https://example.com/ontology#B
+
+        Ontology:
+        Class: <https://example.com/things#beta>
+            SubClassOf: o:B, B, <https://example.com/things#beta>
+    "};
+
+    backend_rename_helper(
+        ontology,
+        new_ontology,
+        Position {
+            line: 3,
+            character: 9,
+        },
+        "https://example.com/things#beta",
     )
     .await;
 }
