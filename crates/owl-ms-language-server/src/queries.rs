@@ -122,6 +122,24 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
     format: Query::new(
         &LANGUAGE,
         "
+            ((keyword_ontology) @start . (ontology_iri) @space_single)
+            ((keyword_prefix) @start . (prefix_name) @space_single)
+            ((prefix_name) @start . (full_iri) @space_single)
+
+            ((ontology_iri) @start . (version_iri) @space_single)
+
+            ((prefix_declaration) @start . (ontology) @newline_double)
+            ((prefix_declaration) @start . (prefix_declaration) @newline_single_no_tab)
+
+            ([(version_iri) (ontology_iri)] @start . [
+                (datatype_frame)
+                (class_frame)
+                (object_property_frame)
+                (data_property_frame)
+                (annotation_property_frame)
+                (individual_frame)
+            ] @newline_double)
+   
             ((keyword_class) @start . (class_iri) @space_single)
             ((keyword_datatype) @start . (datatype_iri) @space_single)
             ((keyword_object_property) @start . (object_property_iri) @space_single)
@@ -147,9 +165,22 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
             ((disjoint_union_of) @start . (_) @newline_single)
             ((has_key) @start . (_) @newline_single)
 
-            ((class_frame) @start . (_) @newline_double)
-            ((datatype_frame) @start . (_) @newline_double)
-
+            ([
+                (datatype_frame)
+                (class_frame)
+                (object_property_frame)
+                (data_property_frame)
+                (annotation_property_frame)
+                (individual_frame)
+            ] @start .
+            [
+                (datatype_frame)
+                (class_frame)
+                (object_property_frame)
+                (data_property_frame)
+                (annotation_property_frame)
+                (individual_frame)
+            ] @newline_double)
         ",
     )
     .unwrap(),

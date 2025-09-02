@@ -760,8 +760,10 @@ async fn backend_formatting_on_file_should_correctly_format() {
     // Arrange
 
     let source = indoc! {"
-    Ontology: foo
+    Prefix:    a:    <http://a.b/c/>
 
+    Prefix:    b:    <http://a.b/b/>
+    Ontology:   foo    ver
     Class:    A    SubClassOf: Y    Annotations:   rdfs:label    \"Y\"    EquivalentTo:    Y
 
                  DisjointWith:    Y   DisjointUnionOf:    Y,Z    HasKey:    Y
@@ -777,7 +779,10 @@ async fn backend_formatting_on_file_should_correctly_format() {
     "};
 
     let target = indoc! {"
-    Ontology: foo
+    Prefix: a: <http://a.b/c/>
+    Prefix: b: <http://a.b/b/>
+
+    Ontology: foo ver
 
     Class: A
         SubClassOf: Y
@@ -791,8 +796,11 @@ async fn backend_formatting_on_file_should_correctly_format() {
         EquivalentTo: Y
 
     DataProperty: C
+
     ObjectProperty: D
+
     AnnotationProperty: E
+
     Individual: F
     "};
 

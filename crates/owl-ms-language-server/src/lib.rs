@@ -199,6 +199,7 @@ impl LanguageServer for Backend {
                             let new_text = match name {
                                 "space_single" => " ",
                                 "newline_single" => "\n    ",
+                                "newline_single_no_tab" => "\n",
                                 "newline_double" => "\n\n",
                                 _ => unreachable!("{name}"),
                             };
