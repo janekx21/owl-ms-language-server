@@ -134,11 +134,13 @@ async fn backend_did_change_should_update_internal_rope() {
                         Range {
                             start: (Position {
                                 line: 0,
-                                character: 3,
+                                // Changes depend on each other in order. By the time that the first
+                                // change is applied the line ends at charater 6 not 3.
+                                character: 6,
                             }),
                             end: Position {
                                 line: 0,
-                                character: 3,
+                                character: 6,
                             },
                         }
                         .into(),
@@ -1914,6 +1916,8 @@ async fn backend_rename_helper(
                 },
                 content_changes: edits
                     .iter()
+                    .sorted_by_key(|e| e.range.start)
+                    .rev()
                     .map(|e| TextDocumentContentChangeEvent {
                         range: Some(e.range),
                         range_length: None,
