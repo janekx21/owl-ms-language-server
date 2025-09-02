@@ -1119,7 +1119,7 @@ checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
 name = "owl-ms-language-server"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "cached",
@@ -2069,7 +2069,7 @@ checksum = "c4013970217383f67b18aef68f6fb2e8d409bc5755227092d32efb0422ba24b8"
 
 [[package]]
 name = "tree-sitter-owl-ms"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "cc",
  "tree-sitter-c2rust",

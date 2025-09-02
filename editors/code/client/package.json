@@ -3,7 +3,7 @@
 	"description": "OWL 2 manchester syntax plugin for vscode",
 	"author": "Janek Winkler",
 	"license": "MIT",
-	"version": "0.5.5",
+	"version": "0.6.0",
 	"publisher": "JanekWinkler",
 	"repository": {
 		"type": "git",
