@@ -1,0 +1,11 @@
+Prefix: : <https://example.com/ontology#>
+
+Ontology:
+Class: <https://example.com/ontology#B>
+    SubClassOf: owl:Thing
+Class: B
+    SubClassOf: owl:Thing
+Class: :B
+    SubClassOf: owl:Thing
+Class: <https://example.com/ontology#B>
+    SubClassOf: owl:Thing

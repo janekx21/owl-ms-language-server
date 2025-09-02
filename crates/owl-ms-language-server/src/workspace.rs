@@ -197,7 +197,7 @@ impl Workspace {
             "simple_iri" | "abbreviated_iri" => {
                 let iri = node_text(node, &doc.rope);
                 debug!("Getting node info for {iri} at doc {}", doc.uri);
-                let iri = doc.abbreviated_iri_to_full_iri(iri.to_string());
+                let iri = doc.abbreviated_iri_to_full_iri(iri.to_string()).unwrap_or(iri.to_string());
                 self.get_frame_info(&iri)
                     .map(|fi| fi.info_display(self))
                     .unwrap_or(iri)
@@ -1344,6 +1344,24 @@ impl InternalDocument {
             .collect_vec()
     }
 
+    pub fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
+        let mut w = self.tree.walk();
+        loop {
+            if w.node().id() == id {
+                return Some(w.node());
+            }
+
+            // In order triversal
+            if !w.goto_first_child() {
+                while !w.goto_next_sibling() {
+                    if !w.goto_parent() {
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+
     fn reachable_docs_recusive(
         &self,
         workspace: &Workspace,
@@ -1451,7 +1469,8 @@ impl InternalDocument {
         let change_ranges = params
             .content_changes
             .iter()
-            .rev() // See https://github.com/helix-editor/helix/blob/0815b52e0959e21ec792ea41d508a050b552f850/helix-core/src/syntax.rs#L1293C1-L1297C26
+            // First I thougt the order must be changed but the LSP defines it as "S -> S' -> S''"
+            //  https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#didChangeTextDocumentParams
             .map(|change| {
                 if let Some(range) = change.range {
                     let old_range: Range = range.into();
@@ -1584,34 +1603,32 @@ impl InternalDocument {
         });
     }
 
-    pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: String) -> String {
+    pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: String) -> Option<String> {
         let prefixes = self.prefixes();
         if let Some((prefix, simple_iri)) = abbriviated_iri.split_once(':') {
-            if let Some(resolved_prefix) = prefixes.get(prefix) {
-                resolved_prefix.clone() + simple_iri
-            } else {
-                abbriviated_iri.clone()
-            }
+            prefixes
+                .get(prefix)
+                .map(|resolved_prefix| resolved_prefix.clone() + simple_iri)
         } else {
             // Simple IRIs get a free colon prependet
             // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
-            if let Some(resolved_prefix) = prefixes.get("") {
-                resolved_prefix.clone() + &abbriviated_iri
-            } else {
-                abbriviated_iri.clone()
-            }
+            prefixes
+                .get("")
+                .map(|resolved_prefix| resolved_prefix.clone() + &abbriviated_iri)
         }
     }
 
     pub fn full_iri_to_abbreviated_iri(&self, full_iri: String) -> Option<String> {
         self.prefixes()
             .into_iter()
-            .find_map(|(prefix, url)| match full_iri.split_once(&url) {
+            .filter_map(|(prefix, url)| match full_iri.split_once(&url) {
                 Some(("", post)) if prefix.is_empty() => Some(post.to_string()),
                 Some(("", post)) => Some(prefix + ":" + post),
                 Some(_) => None,
                 None => None,
             })
+            .sorted_by_key(|s| s.len()) // short IRI's are preferred
+            .next()
     }
 
     pub fn ontology_id(&self) -> Option<Iri> {
@@ -1651,7 +1668,7 @@ impl InternalDocument {
             .flat_map(|match_| match_.captures)
             .filter_map(|capture| {
                 let iri = trim_full_iri(capture.node.text);
-                let iri = self.abbreviated_iri_to_full_iri(iri);
+                let iri = self.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
 
                 let label = workspace
                     .get_frame_info_recursive(&iri, self, http_client)
@@ -1946,10 +1963,10 @@ fn document_annotations(doc: &InternalDocument) -> Vec<(String, String, String)>
         .iter()
         .map(|m| match &m.captures[..] {
             [frame_iri, annoation_iri, literal] => {
-                let frame_iri =
-                    doc.abbreviated_iri_to_full_iri(trim_full_iri(frame_iri.node.text.clone()));
-                let annoation_iri =
-                    doc.abbreviated_iri_to_full_iri(trim_full_iri(annoation_iri.node.text.clone()));
+                let iri = trim_full_iri(frame_iri.node.text.clone());
+                let frame_iri = doc.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
+                let iri = trim_full_iri(annoation_iri.node.text.clone());
+                let annoation_iri = doc.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
                 let literal = trim_string_value(&literal.node.text);
 
                 (frame_iri, annoation_iri, literal)
@@ -1964,8 +1981,8 @@ fn document_definitions(doc: &InternalDocument) -> Vec<(String, Range, String)> 
         .iter()
         .map(|m| match &m.captures[..] {
             [frame_iri, frame] => {
-                let frame_iri =
-                    doc.abbreviated_iri_to_full_iri(trim_full_iri(frame_iri.node.text.clone()));
+                let iri = trim_full_iri(frame_iri.node.text.clone());
+                let frame_iri = doc.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
 
                 (frame_iri, frame.node.range, frame.node.kind.clone())
             }
@@ -2582,10 +2599,16 @@ mod tests {
         let full_iri = doc.abbreviated_iri_to_full_iri("owl:Nothing".into());
         let full_iri_2 = doc.abbreviated_iri_to_full_iri("ja:Janek".into());
 
-        assert_eq!(full_iri, "http://www.w3.org/2002/07/owl#Nothing");
+        assert_eq!(
+            full_iri,
+            Some("http://www.w3.org/2002/07/owl#Nothing".to_string())
+        );
         assert_eq!(
             full_iri_2,
-            "http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3/Janek"
+            Some(
+                "http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3/Janek"
+                    .to_string()
+            )
         );
     }
 
@@ -2603,8 +2626,14 @@ mod tests {
         let full_iri = doc.abbreviated_iri_to_full_iri(":Nothing".into());
         let full_iri_2 = doc.abbreviated_iri_to_full_iri("Nothing".into());
 
-        assert_eq!(full_iri, "http://www.w3.org/2002/07/owl#Nothing");
-        assert_eq!(full_iri_2, "http://www.w3.org/2002/07/owl#Nothing");
+        assert_eq!(
+            full_iri,
+            Some("http://www.w3.org/2002/07/owl#Nothing".to_string())
+        );
+        assert_eq!(
+            full_iri_2,
+            Some("http://www.w3.org/2002/07/owl#Nothing".to_string())
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@ use pretty_assertions::assert_eq;
 use std::{fs, path::Path};
 use tempdir::{self, TempDir};
 use test_log::test;
-use tower_lsp::{lsp_types::request::DocumentSymbolRequest, LspService};
+use tower_lsp::LspService;
 use tree_sitter_c2rust::Parser;
 
 /// This module contains tests.
@@ -134,11 +134,13 @@ async fn backend_did_change_should_update_internal_rope() {
                         Range {
                             start: (Position {
                                 line: 0,
-                                character: 3,
+                                // Changes depend on each other in order. By the time that the first
+                                // change is applied the line ends at charater 6 not 3.
+                                character: 6,
                             }),
                             end: Position {
                                 line: 0,
-                                character: 3,
+                                character: 6,
                             },
                         }
                         .into(),
@@ -1636,6 +1638,303 @@ async fn backend_document_symbols_in_multi_file_ontology_should_just_show_symbol
         }
         DocumentSymbolResponse::Nested(_document_symbols) => todo!(),
     }
+}
+
+#[test(tokio::test)]
+async fn backend_rename_simple_iri_should_work() {
+    let ontology = indoc! {"
+        Prefix: : <https://example.com/ontology#>
+        Prefix: o: <https://example.com/ontology#>
+
+        Ontology:
+        Class: B
+            SubClassOf: o:B, B, <https://example.com/ontology#B>
+    "};
+    let new_ontology = indoc! {"
+        Prefix: : <https://example.com/ontology#>
+        Prefix: o: <https://example.com/ontology#>
+
+        Ontology:
+        Class: beta
+            SubClassOf: beta, beta, beta
+    "};
+
+    backend_rename_helper(
+        ontology,
+        new_ontology,
+        Position {
+            line: 4,
+            character: 7,
+        },
+        "beta",
+    )
+    .await;
+}
+
+#[test(tokio::test)]
+async fn backend_rename_at_end_should_work() {
+    let ontology = indoc! {"
+        Prefix: : <https://example.com/ontology#>
+
+        Ontology:
+        Class: B
+    "};
+    let new_ontology = indoc! {"
+        Prefix: : <https://example.com/ontology#>
+
+        Ontology:
+        Class: beta
+    "};
+
+    backend_rename_helper(
+        ontology,
+        new_ontology,
+        Position {
+            line: 3,
+            character: 8,
+        },
+        "beta",
+    )
+    .await;
+}
+
+#[test(tokio::test)]
+async fn backend_rename_prefixless_simple_iri_should_work() {
+    let ontology = indoc! {"
+        Ontology:
+        Class: B
+            SubClassOf: B
+    "};
+    let new_ontology = indoc! {"
+        Ontology:
+        Class: beta
+            SubClassOf: beta
+    "};
+
+    backend_rename_helper(
+        ontology,
+        new_ontology,
+        Position {
+            line: 1,
+            character: 7,
+        },
+        "beta",
+    )
+    .await;
+}
+
+#[test(tokio::test)]
+async fn backend_rename_unknown_abbriviated_iri_should_work() {
+    let ontology = indoc! {"
+        Ontology:
+        Class: unknown:B
+            SubClassOf: unknown:B
+    "};
+    let new_ontology = indoc! {"
+        Ontology:
+        Class: unknown:beta
+            SubClassOf: unknown:beta
+    "};
+
+    backend_rename_helper(
+        ontology,
+        new_ontology,
+        Position {
+            line: 1,
+            character: 7,
+        },
+        "beta",
+    )
+    .await;
+}
+
+#[test(tokio::test)]
+async fn backend_rename_full_iri_should_shorten() {
+    let ontology = indoc! {"
+        Prefix: : <https://example.com/ontology#>
+        Prefix: o: <https://example.com/ontology#>
+
+        Ontology:
+        Class: <https://example.com/ontology#B>
+            SubClassOf: o:B, B, <https://example.com/ontology#B>
+    "};
+    let new_ontology = indoc! {"
+        Prefix: : <https://example.com/ontology#>
+        Prefix: o: <https://example.com/ontology#>
+
+        Ontology:
+        Class: beta
+            SubClassOf: beta, beta, beta
+    "};
+
+    backend_rename_helper(
+        ontology,
+        new_ontology,
+        Position {
+            line: 4,
+            character: 7,
+        },
+        "https://example.com/ontology#beta",
+    )
+    .await;
+}
+
+#[test(tokio::test)]
+async fn backend_rename_abbriviated_iri_should_work_for_matching() {
+    let ontology = indoc! {"
+        Prefix: o: <https://example.com/ontology#>
+
+        Ontology:
+        Class: o:B
+            SubClassOf: o:B, B, <https://example.com/ontology#B>
+    "};
+    let new_ontology = indoc! {"
+        Prefix: o: <https://example.com/ontology#>
+
+        Ontology:
+        Class: o:beta
+            SubClassOf: o:beta, B, o:beta
+    "};
+
+    backend_rename_helper(
+        ontology,
+        new_ontology,
+        Position {
+            line: 3,
+            character: 9,
+        },
+        "beta",
+    )
+    .await;
+}
+
+#[test(tokio::test)]
+async fn backend_rename_full_iri_should_work_for_matching() {
+    let ontology = indoc! {"
+        Ontology:
+        Class: <https://example.com/ontology#B>
+            SubClassOf: o:B, B, <https://example.com/ontology#B>
+    "};
+    let new_ontology = indoc! {"
+        Ontology:
+        Class: <https://example.com/ontology#beta>
+            SubClassOf: o:B, B, <https://example.com/ontology#beta>
+    "};
+
+    backend_rename_helper(
+        ontology,
+        new_ontology,
+        Position {
+            line: 1,
+            character: 9,
+        },
+        "https://example.com/ontology#beta",
+    )
+    .await;
+}
+
+#[test(tokio::test)]
+async fn backend_rename_full_iri_should_not_shorten() {
+    let ontology = indoc! {"
+        Prefix: o: https://example.com/ontology#B
+
+        Ontology:
+        Class: <https://example.com/ontology#B>
+            SubClassOf: o:B, B, <https://example.com/ontology#B>
+    "};
+    let new_ontology = indoc! {"
+        Prefix: o: https://example.com/ontology#B
+
+        Ontology:
+        Class: <https://example.com/things#beta>
+            SubClassOf: o:B, B, <https://example.com/things#beta>
+    "};
+
+    backend_rename_helper(
+        ontology,
+        new_ontology,
+        Position {
+            line: 3,
+            character: 9,
+        },
+        "https://example.com/things#beta",
+    )
+    .await;
+}
+
+async fn backend_rename_helper(
+    old_ontology: &str,
+    new_ontology: &str,
+    position: Position,
+    new_name: &str,
+) {
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let url = Url::from_file_path(dir.path().join("foo.omn")).unwrap();
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: old_ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let result = service
+        .inner()
+        .rename(RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url.clone() },
+                position: position.into(),
+            },
+            new_name: new_name.to_string(),
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await;
+
+    // Assert
+    let result = result.unwrap();
+    let result = result.unwrap();
+
+    let changes = result.changes.unwrap();
+    for (url, edits) in changes {
+        service
+            .inner()
+            .did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: url.clone(),
+                    version: 1,
+                },
+                content_changes: edits
+                    .iter()
+                    .sorted_by_key(|e| e.range.start)
+                    .rev()
+                    .map(|e| TextDocumentContentChangeEvent {
+                        range: Some(e.range),
+                        range_length: None,
+                        text: e.new_text.clone(),
+                    })
+                    .collect(),
+            })
+            .await;
+    }
+
+    let workspaces = service.inner().workspaces.read();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let doc = workspace.internal_documents.get(&url).unwrap();
+    let doc = doc.read();
+    let doc_content = doc.rope.to_string();
+
+    assert_eq!(doc_content, new_ontology);
 }
 
 //////////////////////////
