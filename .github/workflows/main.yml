@@ -5,8 +5,7 @@ on:
     tags: ['v*.*.*']
 
 jobs:
-  publish:
-
+  build:
     strategy:
       fail-fast: false
       matrix:
@@ -15,24 +14,9 @@ jobs:
           target: x86_64-pc-windows-msvc
           code-target: win32-x64
           bin-ext: .exe
-        # NOT WORKING
-        # - os: windows-latest
-        #   target: i686-pc-windows-msvc
-        # NOT WORKING
-        # - os: windows-latest
-        #   target: aarch64-pc-windows-msvc
-        #   code-target: win32-arm64
         - os: ubuntu-latest
           target: x86_64-unknown-linux-musl
           code-target: linux-x64
-        # NOT WORKING
-        # - os: ubuntu-20.04
-        #   target: aarch64-unknown-linux-gnu
-        #   code-target: linux-arm64
-        # NOT WORKING
-        #- os: ubuntu-20.04
-        #  target: arm-unknown-linux-gnueabihf
-        #  code-target: linux-armhf
         - os: macos-14
           target: x86_64-apple-darwin
           code-target: darwin-x64
@@ -40,8 +24,11 @@ jobs:
           target: aarch64-apple-darwin
           code-target: darwin-arm64
 
-    name: Build and Publish (${{ matrix.target }})
+    name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+
+    outputs:
+      targets: ${{ steps.set-targets.outputs.targets }}
 
     steps:
     - name: Checkout repository
@@ -63,13 +50,6 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '22.x'
-
-    # This seems to not compile for windows and macos maybe fix this later
-    #  cargo install --locked cargo-zigbuild
-    # - name: Setup Zig Compiler
-    #   if: 
-    #   uses: mlugg/setup-zig@v1.2.1
-    # for zigbuild
         
     - name: Install Node Dependencies
       working-directory: editors/code
@@ -82,10 +62,65 @@ jobs:
       run: |
         mv target/${{ matrix.target }}/release/owl-ms-language-server${{ matrix.bin-ext }} editors/code/server/owl-ms-language-server${{ matrix.bin-ext }}
 
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: extension-${{ matrix.code-target }}
+        path: editors/code/
+        retention-days: 1
+
+    - name: Set targets output
+      id: set-targets
+      run: echo "targets=${{ matrix.code-target }}" >> $GITHUB_OUTPUT
+
+  publish-ovsx:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [win32-x64, linux-x64, darwin-x64, darwin-arm64]
+
+    name: Publish to OVSX (${{ matrix.target }})
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Download build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: extension-${{ matrix.target }}
+        path: editors/code/
+
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22.x'
+
     - name: Publish on OVSX
       working-directory: editors/code
-      run: npx ovsx publish --pat ${{ secrets.PAT_OVSX }} --target ${{ matrix.code-target }}
+      run: npx ovsx publish --pat ${{ secrets.PAT_OVSX }} --target ${{ matrix.target }}
+
+  publish-vsce:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [win32-x64, linux-x64, darwin-x64, darwin-arm64]
+
+    name: Publish to VSCE (${{ matrix.target }})
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Download build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: extension-${{ matrix.target }}
+        path: editors/code/
+
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22.x'
 
     - name: Publish on VSCE
       working-directory: editors/code
-      run: npx vsce publish --pat ${{ secrets.PAT_VSCE }} --target ${{ matrix.code-target }}
+      run: npx vsce publish --pat ${{ secrets.PAT_VSCE }} --target ${{ matrix.target }}
