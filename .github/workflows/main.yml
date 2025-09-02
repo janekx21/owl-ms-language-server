@@ -123,4 +123,4 @@ jobs:
 
     - name: Publish on VSCE
       working-directory: editors/code
-      run: npx vsce publish --pat ${{ secrets.PAT_VSCE }} --target ${{ matrix.target }}
+      run: npx @vscode/vsce publish --pat ${{ secrets.PAT_VSCE }} --target ${{ matrix.target }}
