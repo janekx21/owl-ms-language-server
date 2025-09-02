@@ -187,15 +187,10 @@ impl LanguageServer for Backend {
         if let Some(doc) = workspace.internal_documents.get(&url) {
             let doc = doc.read();
 
-            // let capture_names = .format.capture_names();
-            // let q = &ALL_QUERIES.format;
-
             let edits = doc
                 .query(&ALL_QUERIES.format)
                 .iter()
                 .flat_map(|m| {
-                    // let l = m.capture_by_name(q, "space_single");
-                    // let a = m.captures.iter().find(|p|capture_names[p.index])
                     let capture_names = ALL_QUERIES.format.capture_names();
                     match &m.captures[..] {
                         [l, r] => {
@@ -221,7 +216,6 @@ impl LanguageServer for Backend {
                         }
                     }
                 })
-                .sorted_by_key(|e| e.range.end)
                 .collect();
             debug!("edits {:#?}", edits);
             return Ok(Some(edits));

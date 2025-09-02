@@ -212,6 +212,7 @@ async fn backend_hover_on_class_should_show_class_info() {
         .unwrap();
 
     // Assert
+    assert_empty_diagnostics(&service);
     let hover_result = hover_result.unwrap();
     let range = hover_result.range.unwrap();
     assert_eq!(
@@ -345,7 +346,6 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     // Act
-    // TODO check if the arrange did not create diagnostics
     let hover_result = service
         .inner()
         .hover(HoverParams {
@@ -365,6 +365,7 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
         .unwrap();
 
     // Assert
+    assert_empty_diagnostics(&service);
     let hover_result = hover_result.unwrap();
     let range = hover_result.range.unwrap();
     assert_eq!(
@@ -401,7 +402,6 @@ async fn backend_hover_in_multi_file_ontology_on_not_imported_iri_should_not_wor
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     // Act
-    // TODO check if the arrange did not create diagnostics
     let hover_result = service
         .inner()
         .hover(HoverParams {
@@ -421,6 +421,7 @@ async fn backend_hover_in_multi_file_ontology_on_not_imported_iri_should_not_wor
         .unwrap();
 
     // Assert
+    assert_empty_diagnostics(&service);
     let hover_result = hover_result.unwrap();
 
     let contents = match hover_result.contents {
@@ -511,7 +512,6 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     // Act
-    // TODO check if the arrange did not create diagnostics
     let hover_result = service
         .inner()
         .hover(HoverParams {
@@ -531,6 +531,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
         .unwrap();
 
     // Assert
+    assert_empty_diagnostics(&service);
     let hover_result = hover_result.unwrap();
 
     let contents = match hover_result.contents {
@@ -595,7 +596,7 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     let ontology = r#"
-        Prefix: rdfs: http://www.w3.org/2000/01/rdf-schema#
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
         Ontology: <http://ontology-a.org/a1>
             Import: <http://ontology-a.org/a2>
             Class: ClassA1
@@ -620,7 +621,6 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     // Act
-    // TODO check if the arrange did not create diagnostics
     let hover_result = service
         .inner()
         .hover(HoverParams {
@@ -640,6 +640,7 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
         .unwrap();
 
     // Assert
+    assert_empty_diagnostics(&service);
     let hover_result = hover_result.unwrap();
 
     let contents = match hover_result.contents {
@@ -722,7 +723,6 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     // Act
-    // TODO check if the arrange did not create diagnostics
     let hover_result = service
         .inner()
         .hover(HoverParams {
@@ -742,6 +742,7 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
         .unwrap();
 
     // Assert
+    assert_empty_diagnostics(&service);
     let hover_result = hover_result.unwrap();
 
     let contents = match hover_result.contents {
@@ -813,7 +814,6 @@ async fn backend_formatting_on_file_should_correctly_format() {
         .await;
 
     // Act
-    // TODO check if the arrange did not create diagnostics
     let result = service
         .inner()
         .formatting(DocumentFormattingParams {
@@ -827,6 +827,7 @@ async fn backend_formatting_on_file_should_correctly_format() {
         .unwrap();
 
     // Assert
+    assert_empty_diagnostics(&service);
     let edits = result.unwrap();
 
     let any_overlaps = edits
@@ -834,10 +835,6 @@ async fn backend_formatting_on_file_should_correctly_format() {
         .tuple_combinations()
         .any(|(a, b)| range_overlaps(&a.range.into(), &b.range.into()));
     assert!(!any_overlaps);
-
-    assert!(edits.iter().is_sorted_by_key(|e| e.range.start));
-
-    // TODO this will not work because clients change the edits order (in secret) to match the did change top to bottom order
 
     service
         .inner()
@@ -848,6 +845,8 @@ async fn backend_formatting_on_file_should_correctly_format() {
             },
             content_changes: edits
                 .iter()
+                .sorted_by_key(|e| e.range.start)
+                .rev()
                 .map(|e| TextDocumentContentChangeEvent {
                     range: Some(e.range),
                     range_length: None,
@@ -944,7 +943,6 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     // Act
-    // TODO check if the arrange did not create diagnostics
     let result = service
         .inner()
         .inlay_hint(InlayHintParams {
@@ -968,6 +966,7 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
         .unwrap();
 
     // Assert
+    assert_empty_diagnostics(&service);
     let result = result.unwrap();
 
     info!("result={result:#?}");
@@ -1033,7 +1032,7 @@ async fn backend_import_resolve_should_load_documents() {
         .await;
 
     // Assert
-
+    assert_empty_diagnostics(&service);
     let workspaces = service.inner().workspaces.read();
     assert_eq!(workspaces.len(), 1, "all files should be in one workspace");
     let workspace = workspaces.first().unwrap();
@@ -1196,7 +1195,7 @@ async fn backend_workspace_symbols_should_work() {
         .await;
 
     // Assert
-
+    assert_empty_diagnostics(&service);
     let symbols = result
         .expect("Symbols should not throw errors")
         .expect("Symbols should contain something");
@@ -1287,6 +1286,7 @@ async fn backend_did_open_should_load_external_documents_via_http() {
 
     // Assert
 
+    assert_empty_diagnostics(&service);
     let workspaces = service.inner().workspaces.read();
     let workspace = workspaces
         .iter()
@@ -1380,6 +1380,7 @@ async fn backend_did_open_should_load_external_documents_via_file() {
 
     // Assert
 
+    assert_empty_diagnostics(&service);
     let workspaces = service.inner().workspaces.read();
     let workspace = workspaces
         .iter()
@@ -1640,7 +1641,6 @@ async fn backend_references_in_multi_file_ontology_should_work() {
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     // Act
-    // TODO check if the arrange did not create diagnostics
     let result = service
         .inner()
         .references(ReferenceParams {
@@ -1666,6 +1666,7 @@ async fn backend_references_in_multi_file_ontology_should_work() {
         .unwrap();
 
     // Assert
+    assert_empty_diagnostics(&service);
     let url2 = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a2.omn")).unwrap();
     let result = result.unwrap();
     info!("{result:#?}");
@@ -1682,7 +1683,6 @@ async fn backend_goto_definition_in_multi_file_ontology_should_work() {
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     // Act
-    // TODO check if the arrange did not create diagnostics
     let result = service
         .inner()
         .goto_definition(GotoDefinitionParams {
@@ -1705,6 +1705,7 @@ async fn backend_goto_definition_in_multi_file_ontology_should_work() {
         .unwrap();
 
     // Assert
+    assert_empty_diagnostics(&service);
     info!("{:#?}", service.inner().workspaces.read());
     let url2 = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a2.omn")).unwrap();
     let result = result.unwrap();
@@ -1726,7 +1727,6 @@ async fn backend_document_symbols_in_multi_file_ontology_should_just_show_symbol
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a2.omn")).unwrap();
 
     // Act
-    // TODO check if the arrange did not create diagnostics
     let result = service
         .inner()
         .document_symbol(DocumentSymbolParams {
@@ -1742,6 +1742,7 @@ async fn backend_document_symbols_in_multi_file_ontology_should_just_show_symbol
         .unwrap();
 
     // Assert
+    assert_empty_diagnostics(&service);
     match result.unwrap() {
         DocumentSymbolResponse::Flat(symbol_informations) => {
             let info = symbol_informations.iter().exactly_one().unwrap();
@@ -1947,14 +1948,14 @@ async fn backend_rename_full_iri_should_work_for_matching() {
 #[test(tokio::test)]
 async fn backend_rename_full_iri_should_not_shorten() {
     let ontology = indoc! {"
-        Prefix: o: https://example.com/ontology#B
+        Prefix: o: <https://example.com/ontology#B>
 
         Ontology:
         Class: <https://example.com/ontology#B>
             SubClassOf: o:B, B, <https://example.com/ontology#B>
     "};
     let new_ontology = indoc! {"
-        Prefix: o: https://example.com/ontology#B
+        Prefix: o: <https://example.com/ontology#B>
 
         Ontology:
         Class: <https://example.com/things#beta>
@@ -2013,6 +2014,7 @@ async fn backend_rename_helper(
         .await;
 
     // Assert
+    assert_empty_diagnostics(&service);
     let result = result.unwrap();
     let result = result.unwrap();
 
@@ -2159,4 +2161,14 @@ async fn arrange_backend(
     });
     arrange_init_backend(&service, workspace_folder).await;
     service
+}
+
+fn assert_empty_diagnostics(service: &LspService<Backend>) {
+    let workspaces = service.inner().workspaces.read();
+    for workspace in workspaces.iter() {
+        for doc in workspace.internal_documents.iter() {
+            let doc = doc.value().read();
+            assert_eq!(doc.diagnostics, vec![], "rope:\n{}", doc.rope.to_string());
+        }
+    }
 }
