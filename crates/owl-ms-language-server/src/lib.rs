@@ -217,6 +217,8 @@ impl LanguageServer for Backend {
                         }
                     }
                 })
+                .sorted_unstable_by_key(|e| e.range.start)
+                .rev()
                 .collect();
             debug!("edits {:#?}", edits);
             return Ok(Some(edits));

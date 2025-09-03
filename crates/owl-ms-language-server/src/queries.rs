@@ -81,13 +81,14 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
         &LANGUAGE,
         "
         (_ iri: (_)@frame_iri
-            (annotation
-                (annotation_property_iri)@iri
-                [
-                    (string_literal_no_language)
-                    (string_literal_with_language)
-                    (typed_literal)
-                ]@literal))
+            (annotations
+                (annotation
+                    (annotation_property_iri)@iri
+                    [
+                        (string_literal_no_language)
+                        (string_literal_with_language)
+                        (typed_literal)
+                    ]@literal)))
         ",
     )
     .unwrap(),
@@ -139,6 +140,7 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
                 (annotation_property_frame)
                 (individual_frame)
             ] @newline_double)
+            ([(version_iri) (ontology_iri)] @start . (annotations) @newline_single_no_tab)
    
             ((keyword_class) @start . (class_iri) @space_single)
             ((keyword_datatype) @start . (datatype_iri) @space_single)
@@ -150,7 +152,11 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
             ((keyword_annotations) @start . (_) @space_single)
             ((annotation_property_iri) @start . (_) @space_single)
 
-            (((keyword_annotations) . (_) @start  .) . (_) @newline_single)
+            (ontology (_
+                (annotations)@start . (_) @newline_single))
+
+            (ontology
+                (annotations)@start . (_) @newline_double)
 
             ((datatype_iri) @start . (_) @newline_single)
             ((keyword_equivalent_to) @start . (_) @space_single)
@@ -164,6 +170,13 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
             ((class_disjoint_with) @start . (_) @newline_single)
             ((disjoint_union_of) @start . (_) @newline_single)
             ((has_key) @start . (_) @newline_single)
+
+            (data_property_frame (keyword_data_property) (_) @start . (_) @newline_single)
+
+            ((keyword_characteristics) @start . (_) @space_single)
+            ((keyword_domain) @start . (_) @space_single)
+            ((keyword_range) @start . (_) @space_single)
+            ((keyword_sub_property_of) @start . (_) @space_single)
 
             ([
                 (datatype_frame)
@@ -181,6 +194,8 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
                 (annotation_property_frame)
                 (individual_frame)
             ] @newline_double)
+
+            ;(ontology (annotation) @start . (_) @newline_single)
         ",
     )
     .unwrap(),

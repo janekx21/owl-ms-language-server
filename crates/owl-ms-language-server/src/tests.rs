@@ -764,6 +764,8 @@ async fn backend_formatting_on_file_should_correctly_format() {
 
     Prefix:    b:    <http://a.b/b/>
     Ontology:   foo    ver
+            Annotations: rdfs:comment \"hi\", other \"bar\"
+
     Class:    A    SubClassOf: Y    Annotations:   rdfs:label    \"Y\"    EquivalentTo:    Y
 
                  DisjointWith:    Y   DisjointUnionOf:    Y,Z    HasKey:    Y
@@ -773,6 +775,12 @@ async fn backend_formatting_on_file_should_correctly_format() {
     Datatype:     B
                EquivalentTo:    Y
     DataProperty:    C
+     SubPropertyOf:    a
+      Characteristics:    Functional
+          Domain:    B
+            Range:    c
+              EquivalentTo:    Y
+                DisjointWith:  T
     ObjectProperty:    D
     AnnotationProperty:    E
     Individual:    F
@@ -783,6 +791,7 @@ async fn backend_formatting_on_file_should_correctly_format() {
     Prefix: b: <http://a.b/b/>
 
     Ontology: foo ver
+    Annotations: rdfs:comment \"hi\", other \"bar\"
 
     Class: A
         SubClassOf: Y
@@ -796,6 +805,12 @@ async fn backend_formatting_on_file_should_correctly_format() {
         EquivalentTo: Y
 
     DataProperty: C
+        SubPropertyOf: a
+        Characteristics: Functional
+        Domain: B
+        Range: c
+        EquivalentTo: Y
+        DisjointWith: T
 
     ObjectProperty: D
 
@@ -821,6 +836,20 @@ async fn backend_formatting_on_file_should_correctly_format() {
         })
         .await;
 
+    info!(
+        "AST:\n{}",
+        service
+            .inner()
+            .find_workspace(&url)
+            .internal_documents
+            .get(&url)
+            .unwrap()
+            .read()
+            .tree
+            .root_node()
+            .to_sexp()
+    );
+
     // Act
     let result = service
         .inner()
@@ -838,11 +867,12 @@ async fn backend_formatting_on_file_should_correctly_format() {
     assert_empty_diagnostics(&service);
     let edits = result.unwrap();
 
-    let any_overlaps = edits
+    let overlaps = edits
         .iter()
         .tuple_combinations()
-        .any(|(a, b)| range_overlaps(&a.range.into(), &b.range.into()));
-    assert!(!any_overlaps);
+        .filter(|(a, b)| range_overlaps(&a.range.into(), &b.range.into()))
+        .collect_vec();
+    assert_eq!(overlaps, vec![]);
 
     service
         .inner()
