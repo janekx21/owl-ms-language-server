@@ -187,9 +187,15 @@ impl LanguageServer for Backend {
         if let Some(doc) = workspace.internal_documents.get(&url) {
             let doc = doc.read();
 
-            // TODO
+            // TODO just send the diff
+            let text = doc.formatted();
 
-            return Ok(Some(vec![]));
+            let range: Range = doc.tree.root_node().range().into();
+
+            return Ok(Some(vec![TextEdit {
+                range: range.into(),
+                new_text: text,
+            }]));
         }
 
         Ok(Some(vec![]))

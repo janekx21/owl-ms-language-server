@@ -1533,57 +1533,88 @@
   {
     "type": "ontology",
     "named": true,
-    "fields": {},
+    "fields": {
+      "annotations": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "annotations",
+            "named": true
+          }
+        ]
+      },
+      "frame": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "annotation_property_frame",
+            "named": true
+          },
+          {
+            "type": "class_frame",
+            "named": true
+          },
+          {
+            "type": "data_property_frame",
+            "named": true
+          },
+          {
+            "type": "datatype_frame",
+            "named": true
+          },
+          {
+            "type": "individual_frame",
+            "named": true
+          },
+          {
+            "type": "misc",
+            "named": true
+          },
+          {
+            "type": "object_property_frame",
+            "named": true
+          }
+        ]
+      },
+      "import": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "import",
+            "named": true
+          }
+        ]
+      },
+      "iri": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "ontology_iri",
+            "named": true
+          }
+        ]
+      },
+      "version_iri": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "version_iri",
+            "named": true
+          }
+        ]
+      }
+    },
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": true,
       "types": [
         {
-          "type": "annotation_property_frame",
-          "named": true
-        },
-        {
-          "type": "annotations",
-          "named": true
-        },
-        {
-          "type": "class_frame",
-          "named": true
-        },
-        {
-          "type": "data_property_frame",
-          "named": true
-        },
-        {
-          "type": "datatype_frame",
-          "named": true
-        },
-        {
-          "type": "import",
-          "named": true
-        },
-        {
-          "type": "individual_frame",
-          "named": true
-        },
-        {
           "type": "keyword_ontology",
-          "named": true
-        },
-        {
-          "type": "misc",
-          "named": true
-        },
-        {
-          "type": "object_property_frame",
-          "named": true
-        },
-        {
-          "type": "ontology_iri",
-          "named": true
-        },
-        {
-          "type": "version_iri",
           "named": true
         }
       ]

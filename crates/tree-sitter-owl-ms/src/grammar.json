@@ -556,15 +556,23 @@
               "type": "SEQ",
               "members": [
                 {
-                  "type": "SYMBOL",
-                  "name": "ontology_iri"
+                  "type": "FIELD",
+                  "name": "iri",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "ontology_iri"
+                  }
                 },
                 {
                   "type": "CHOICE",
                   "members": [
                     {
-                      "type": "SYMBOL",
-                      "name": "version_iri"
+                      "type": "FIELD",
+                      "name": "version_iri",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "version_iri"
+                      }
                     },
                     {
                       "type": "BLANK"
@@ -579,24 +587,36 @@
           ]
         },
         {
-          "type": "REPEAT",
+          "type": "FIELD",
+          "name": "import",
           "content": {
-            "type": "SYMBOL",
-            "name": "import"
+            "type": "REPEAT",
+            "content": {
+              "type": "SYMBOL",
+              "name": "import"
+            }
           }
         },
         {
-          "type": "REPEAT",
+          "type": "FIELD",
+          "name": "annotations",
           "content": {
-            "type": "SYMBOL",
-            "name": "annotations"
+            "type": "REPEAT",
+            "content": {
+              "type": "SYMBOL",
+              "name": "annotations"
+            }
           }
         },
         {
-          "type": "REPEAT",
+          "type": "FIELD",
+          "name": "frame",
           "content": {
-            "type": "SYMBOL",
-            "name": "_frame"
+            "type": "REPEAT",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_frame"
+            }
           }
         }
       ]
