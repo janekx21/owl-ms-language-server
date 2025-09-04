@@ -77,10 +77,11 @@ Ontology:
 	    (class_frame 
   			(keyword_class)
   			(class_iri (simple_iri))
-          (keyword_annotations)
-          (annotation
-    				(annotation_property_iri (simple_iri))
-    				(string_literal_no_language)))))
+		  (annotations
+	          (keyword_annotations)
+	          (annotation
+	    				(annotation_property_iri (simple_iri))
+	    				(string_literal_no_language))))))
 
 ===================
 Datatype Frame integer
@@ -132,10 +133,11 @@ Ontology:
 		(datatype_frame 
 			(keyword_datatype)
 			(keyword_integer)
-			(keyword_annotations)
-      (annotation
-        (annotation_property_iri (simple_iri))
-        (simple_iri)))))
+	    (annotations
+		(keyword_annotations)
+	        (annotation
+	        	(annotation_property_iri (simple_iri))
+	        	(simple_iri))))))
 
 ===================
 Datatype Frame EquivalentTo
@@ -157,10 +159,11 @@ Ontology:
 				(datatype_iri (simple_iri))
 				(datatype_equavalent_to
 				  (keyword_equivalent_to)
+				(annotations
 				  (keyword_annotations)
-          (annotation
-						(annotation_property_iri (simple_iri))
-            (simple_iri))
+		          (annotation
+					(annotation_property_iri (simple_iri))
+		            (simple_iri)))
           (data_range
               (datatype_restriction
                 (keyword_integer)
