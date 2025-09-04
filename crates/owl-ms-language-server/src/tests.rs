@@ -2,12 +2,12 @@ use crate::{catalog::Catalog, range::range_overlaps, web::StaticClient, *};
 use anyhow::anyhow;
 use indoc::indoc;
 use position::Position;
-use pretty_assertions::assert_eq;
-use std::{fs, path::Path};
+use pretty_assertions::{assert_eq, assert_ne};
+use std::{any, fs, path::Path};
 use tempdir::{self, TempDir};
 use test_log::test;
 use tower_lsp::LspService;
-use tree_sitter_c2rust::Parser;
+use tree_sitter_c2rust::{ParseOptions, Parser};
 
 /// This module contains tests.
 /// Each test function name is in the form of `<function>_<thing>_<condition>_<expectation>`.
