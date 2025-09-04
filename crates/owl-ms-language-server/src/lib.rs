@@ -24,7 +24,7 @@ use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
-use tree_sitter_c2rust::Language;
+use tree_sitter_c2rust::{Language, Node};
 use web::{HttpClient, UreqClient};
 use workspace::{node_text, trim_full_iri, InternalDocument, Workspace};
 
@@ -96,6 +96,7 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 position_encoding: Some(encoding),
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
@@ -175,6 +176,22 @@ impl LanguageServer for Backend {
             .collect_vec();
 
         info!("Initialized languag server with workspaces: {workspace_paths:?}");
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        info!("formatting {params:#?}");
+        let url = params.text_document.uri;
+
+        let workspace = self.find_workspace(&url);
+        if let Some(doc) = workspace.internal_documents.get(&url) {
+            let doc = doc.read();
+
+            // TODO
+
+            return Ok(Some(vec![]));
+        }
+
+        Ok(Some(vec![]))
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
