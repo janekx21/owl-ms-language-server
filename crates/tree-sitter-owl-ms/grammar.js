@@ -89,10 +89,15 @@ module.exports = grammar({
     ontology: $ =>
       seq(
         $.keyword_ontology,
-        optional(seq($.ontology_iri, optional($.version_iri))),
-        repeat($.import),
-        repeat($.annotations),
-        repeat($._frame),
+        optional(
+          seq(
+            field('iri', $.ontology_iri),
+            optional(field('version_iri', $.version_iri)),
+          ),
+        ),
+        field('import', repeat($.import)),
+        field('annotations', repeat($.annotations)),
+        field('frame', repeat($._frame)),
       ),
 
     import: $ => seq($.keyword_import, $._iri),

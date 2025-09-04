@@ -22,6 +22,7 @@ use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, MutexGuard, RwLock};
+use pretty::RcDoc;
 use ropey::Rope;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -1306,6 +1307,13 @@ impl InternalDocument {
         }
     }
 
+    pub fn formatted(&self) -> String {
+        let root = self.tree.root_node();
+        let doc = to_doc(&root, &self.rope);
+        info!("{:#?}", doc);
+        doc.pretty(30).to_string()
+    }
+
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
         self.query_helper(query, None)
     }
@@ -2536,6 +2544,130 @@ fn prefixes_helper(doc: &InternalDocument) -> HashMap<String, String> {
         .collect()
 }
 
+fn to_doc<'a>(node: &Node, rope: &'a Rope) -> RcDoc<'a, ()> {
+    let text = node_text(node, rope);
+    let mut cursor = node.walk();
+    match node.kind() {
+        "source_file" => RcDoc::intersperse(
+            once(RcDoc::intersperse(
+                node.children(&mut cursor)
+                    .filter(|n| n.kind() == "prefix_declaration")
+                    .map(|n| to_doc(&n, rope)),
+                RcDoc::hardline(),
+            ))
+            .chain(
+                node.children(&mut cursor)
+                    .find(|n| n.kind() == "ontology")
+                    .into_iter()
+                    .map(|n| to_doc(&n, rope)),
+            ),
+            RcDoc::hardline().append(RcDoc::hardline()),
+        )
+        .append(RcDoc::line()),
+        // "ontology" => RcDoc::intersperse(
+        //     once(
+        //         RcDoc::intersperse(
+        //             once(RcDoc::text("Ontology:")).chain(once(
+        //                 RcDoc::intersperse(
+        //                     node.child_by_field_name("iri")
+        //                         .into_iter()
+        //                         .map(|n| to_doc(&n, rope))
+        //                         .chain(
+        //                             node.child_by_field_name("version_iri")
+        //                                 .into_iter()
+        //                                 .map(|n| to_doc(&n, rope)),
+        //                         ),
+        //                     RcDoc::line(),
+        //                 )
+        //                 .group(),
+        //             )),
+        //             RcDoc::line(),
+        //         )
+        //         .nest(1)
+        //         .group(),
+        //     )
+        //     .chain(once(RcDoc::intersperse(
+        //         node.children_by_field_name("import", &mut cursor.clone())
+        //             .map(|n| to_doc(&n, rope)),
+        //         RcDoc::hardline(),
+        //     )))
+        //     .chain(once(RcDoc::intersperse(
+        //         node.children_by_field_name("frame", &mut cursor)
+        //             .map(|n| to_doc(&n, rope)),
+        //         RcDoc::hardline().append(RcDoc::hardline()),
+        //     ))),
+        //     RcDoc::hardline(),
+        // ),
+        // "prefix_declaration" => RcDoc::intersperse(
+        //     node.children(&mut cursor).map(|n| to_doc(&n, rope)),
+        //     RcDoc::line(),
+        // )
+        // .nest(1)
+        // .group(),
+        "ontology" => RcDoc::text("Ontology:")
+            .append(RcDoc::line())
+            .append(RcDoc::intersperse(
+                node.child_by_field_name("iri")
+                    .into_iter()
+                    .map(|n| to_doc(&n, rope))
+                    .chain(
+                        node.child_by_field_name("version_iri")
+                            .into_iter()
+                            .map(|n| to_doc(&n, rope)),
+                    ),
+                RcDoc::line(),
+            ))
+            .nest(1)
+            .group()
+            .append(RcDoc::hardline())
+            .append(RcDoc::intersperse(
+                node.children_by_field_name("import", &mut cursor.clone())
+                    .map(|n| to_doc(&n, rope)),
+                RcDoc::hardline(),
+            ))
+            .append(RcDoc::hardline().append(RcDoc::hardline()))
+            .append(RcDoc::intersperse(
+                node.children_by_field_name("annotations", &mut cursor.clone())
+                    .map(|n| to_doc(&n, rope)),
+                RcDoc::hardline(),
+            ))
+            .append(RcDoc::hardline().append(RcDoc::hardline()))
+            .append(RcDoc::intersperse(
+                node.children_by_field_name("frame", &mut cursor)
+                    .map(|n| to_doc(&n, rope)),
+                RcDoc::hardline().append(RcDoc::hardline()),
+            )),
+        "prefix_declaration" | "import" | "annotations" | "annotation" | "sub_class_of" => {
+            RcDoc::intersperse(
+                node.children(&mut cursor).map(|n| to_doc(&n, rope)),
+                RcDoc::line(),
+            )
+            .nest(1)
+            .group()
+        }
+        "class_frame" => node
+            .child(0)
+            .map(|n| to_doc(&n, rope))
+            .unwrap_or(RcDoc::nil())
+            .append(RcDoc::line())
+            .append(
+                node.child(1)
+                    .map(|n| to_doc(&n, rope))
+                    .unwrap_or(RcDoc::nil()),
+            )
+            .nest(1)
+            .group()
+            .append(RcDoc::hardline())
+            .append(RcDoc::intersperse(
+                node.children(&mut cursor).skip(2).map(|n| to_doc(&n, rope)),
+                RcDoc::hardline(),
+            ))
+            .nest(1)
+            .group(),
+        _ => RcDoc::text(text),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::position::Position;
@@ -2543,6 +2675,42 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use test_log::test;
+
+    #[test]
+    fn internal_document_formatted_should_format_correctly() {
+        let doc = InternalDocument::new(
+            Url::parse("http://formatted").unwrap(),
+            -1,
+            indoc! {"
+                Prefix:  a:  <http://a/a>  Prefix:  a:  <http://a/a>    Ontology:   a   v   Import:    <http://a/a>    Import:    <http://a/a> Annotations:    rdfs:label     \"a\"    Class:   a   SubClassOf:   b,e,f SubClassOf:   c   Class:   a
+            "}
+            .into(),
+        );
+
+        info!("sexp:\n{}", doc.tree.root_node().to_sexp());
+
+        let result = doc.formatted();
+
+        assert_eq!(
+            result,
+            indoc! {"
+                Prefix: a: <http://a/a>
+                Prefix: a: <http://a/a>
+
+                Ontology: a v
+                Import: <http://a/a>
+                Import: <http://a/a>
+
+                Annotations: rdfs:label \"a\"
+
+                Class: a
+                 SubClassOf: b,e,f
+                 SubClassOf: c
+
+                Class: a
+            "}
+        );
+    }
 
     #[test]
     fn internal_document_ontology_id_should_return_none() {
