@@ -784,6 +784,10 @@ async fn backend_formatting_on_file_should_correctly_format() {
     ObjectProperty:    D
     AnnotationProperty:    E
     Individual:    F
+Class: C
+    SubClassOf: p some (A and B)
+    SubClassOf: inverse p some (A and B)
+    SubClassOf: inverse p some A and B
     "};
 
     let target = indoc! {"
@@ -817,6 +821,11 @@ async fn backend_formatting_on_file_should_correctly_format() {
     AnnotationProperty: E
 
     Individual: F
+
+    Class: C
+        SubClassOf: p some (A and B)
+        SubClassOf: inverse p some (A and B)
+        SubClassOf: inverse p some A and B
     "};
 
     let tmp_dir = arrange_workspace_folders(|_| vec![]);
@@ -900,6 +909,7 @@ async fn backend_formatting_on_file_should_correctly_format() {
     let doc = doc.read();
     assert_eq!(doc.diagnostics, vec![], "doc:\n{}", doc.rope.to_string());
     assert_eq!(doc.rope.to_string(), target);
+    panic!();
 }
 
 #[test(tokio::test)]

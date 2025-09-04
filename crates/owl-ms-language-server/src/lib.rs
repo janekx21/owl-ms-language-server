@@ -207,10 +207,20 @@ impl LanguageServer for Backend {
                                 start: l.node.range.end,
                                 end: r.node.range.start,
                             };
-                            vec![TextEdit {
-                                range: range.into(),
-                                new_text: new_text.to_string(),
-                            }]
+                            let start_char = doc.rope.line_to_char(range.start.line as usize)
+                                + range.start.character as usize;
+                            let end_char = doc.rope.line_to_char(range.end.line as usize)
+                                + range.end.character as usize;
+                            let text = doc.rope.slice(start_char..end_char).to_string();
+                            info!("formatting text: {text}");
+                            if text.trim().is_empty() {
+                                vec![TextEdit {
+                                    range: range.into(),
+                                    new_text: new_text.to_string(),
+                                }]
+                            } else {
+                                vec![]
+                            }
                         }
                         _ => {
                             vec![]
