@@ -1444,7 +1444,7 @@ impl InternalDocument {
                             range: c.node.range().into(),
                             kind: c.node.kind().into(),
                         },
-                        _index: c.index,
+                        index: c.index,
                     })
                     .collect_vec(),
             })
@@ -1464,6 +1464,8 @@ impl InternalDocument {
             // Change the whole file
             panic!("Whole file changes are not supported yet");
         }
+
+        debug!("content changes {:#?}", params.content_changes);
 
         // This range is relative to the *old* document not the new one
         params
@@ -1486,7 +1488,11 @@ impl InternalDocument {
 
                     // rope replace
                     timeit("rope operations", || {
-                        // TODO #24 change to try_* functions
+                        if old_end_char < start_char {
+                            error!(
+                                "Invalid rope remove operation range. {start_char}..{old_end_char}"
+                            );
+                        }
                         self.rope.remove(start_char..old_end_char);
                         self.rope.insert(start_char, &change.text);
                     });
@@ -2154,11 +2160,19 @@ pub struct UnwrappedQueryMatch {
     _id: u32,
 }
 
+impl UnwrappedQueryMatch {
+    pub fn capture_by_name(&self, query: &Query, name: &str) -> Option<&UnwrappedQueryCapture> {
+        query
+            .capture_index_for_name(name)
+            .map(|i| &self.captures[i as usize])
+    }
+}
+
 /// This is a version of a query capture that has no reference to the tree or cursor
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnwrappedQueryCapture {
     pub node: UnwrappedNode,
-    _index: u32,
+    pub index: u32,
 }
 
 /// This is a version of a node that has no reference to the tree
