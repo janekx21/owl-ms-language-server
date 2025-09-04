@@ -1,4 +1,4 @@
-use crate::{catalog::Catalog, web::StaticClient, *};
+use crate::{catalog::Catalog, range::range_overlaps, web::StaticClient, *};
 use anyhow::anyhow;
 use indoc::indoc;
 use pos::Position;
@@ -8,7 +8,7 @@ use std::{fs, path::Path, thread};
 use tempdir::{self, TempDir};
 use test_log::test;
 use tower_lsp::LspService;
-use tree_sitter_c2rust::Parser;
+use tree_sitter_c2rust::{ParseOptions, Parser};
 
 /// This module contains tests.
 /// Each test function name is in the form of `<function>_<thing>_<condition>_<expectation>`.
