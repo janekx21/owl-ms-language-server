@@ -571,7 +571,11 @@ impl InternalDocument {
 
                     // rope replace
                     timeit("rope operations", || {
-                        // TODO #24 change to try_* functions
+                        if old_end_char < start_char {
+                            error!(
+                                "Invalid rope remove operation range. {start_char}..{old_end_char}"
+                            );
+                        }
                         self.rope.remove(start_char..old_end_char);
                         self.rope.insert(start_char, &change.text);
                     });
