@@ -162,20 +162,32 @@ impl Workspace {
         doc: &InternalDocument,
         http_client: &dyn HttpClient,
     ) -> Option<FrameInfo> {
-        doc.reachable_docs_recusive(self, http_client)
-            .iter()
-            .filter_map(|url| {
-                if let Ok(doc) = self.resolve_url_to_document(url, http_client) {
-                    match &doc {
-                        DocumentReference::Internal(rw_lock) => rw_lock.read().get_frame_info(iri),
-                        DocumentReference::External(rw_lock) => rw_lock.write().get_frame_info(iri),
+        timeit("rechable docs", || {
+            doc.reachable_docs_recusive(self, http_client)
+        })
+        .iter()
+        .filter_map(|url| {
+            if let Ok(doc) = timeit("\tresolve document", || {
+                self.resolve_url_to_document(url, http_client)
+            }) {
+                match &doc {
+                    DocumentReference::Internal(rw_lock) => {
+                        timeit("\t|-> get frame info internal", || {
+                            rw_lock.read().get_frame_info(iri)
+                        })
                     }
-                } else {
-                    None
+                    DocumentReference::External(rw_lock) => {
+                        timeit("\t|-> get frame info external", || {
+                            rw_lock.write().get_frame_info(iri)
+                        })
+                    }
                 }
-            })
-            .chain(get_fixed_infos(iri))
-            .tree_reduce(FrameInfo::merge)
+            } else {
+                None
+            }
+        })
+        .chain(get_fixed_infos(iri))
+        .tree_reduce(FrameInfo::merge)
     }
 
     pub fn node_info(&self, node: &Node, doc: &InternalDocument) -> String {
@@ -1307,11 +1319,11 @@ impl InternalDocument {
         }
     }
 
-    pub fn formatted(&self) -> String {
+    pub fn formatted(&self, tab_size: u32) -> String {
         let root = self.tree.root_node();
-        let doc = to_doc(&root, &self.rope);
-        info!("{:#?}", doc);
-        doc.pretty(30).to_string()
+        let doc = to_doc(&root, &self.rope, tab_size);
+        debug!("{:#?}", doc);
+        doc.pretty(120).to_string()
     }
 
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
@@ -1393,14 +1405,14 @@ impl InternalDocument {
 
         result.insert(self.uri.clone());
 
-        let docs = self
-            .imports()
+        let docs = timeit("\timports query", || self.imports())
             .iter()
             .filter_map(|url| {
-                workspace
-                    .resolve_url_to_document(url, http_client)
-                    .inspect_err(|e| error!("{e:?}"))
-                    .ok()
+                timeit("\t resolve url to doc", || {
+                    workspace.resolve_url_to_document(url, http_client)
+                })
+                .inspect_err(|e| error!("{e:?}"))
+                .ok()
             })
             .collect_vec();
 
@@ -1418,15 +1430,7 @@ impl InternalDocument {
     }
 
     fn imports(&self) -> Vec<Url> {
-        self.query(&ALL_QUERIES.import_query)
-            .iter()
-            .filter_map(|m| match &m.captures[..] {
-                [iri] => Url::parse(&trim_full_iri(&iri.node.text)[..])
-                    .inspect_err(|e| warn!("Url could not be parsed {e:#}"))
-                    .ok(),
-                _ => unimplemented!(),
-            })
-            .collect_vec()
+        imports_helper(self)
     }
 
     pub fn query_helper(&self, query: &Query, range: Option<Range>) -> Vec<UnwrappedQueryMatch> {
@@ -1506,6 +1510,7 @@ impl InternalDocument {
                                 "Invalid rope remove operation range. {start_char}..{old_end_char}"
                             );
                         }
+                        // TODO this panics now while formatting oeo physical :<
                         self.rope.remove(start_char..old_end_char);
                         self.rope.insert(start_char, &change.text);
                     });
@@ -1685,12 +1690,18 @@ impl InternalDocument {
                 let iri = trim_full_iri(capture.node.text);
                 let iri = self.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
 
-                let label = workspace
-                    .get_frame_info_recursive(&iri, self, http_client)
-                    .and_then(|frame_info| frame_info.label())
-                    .unwrap_or_default();
+                let label = timeit("get frame info recursive", || {
+                    workspace.get_frame_info_recursive(&iri, self, http_client)
+                })
+                .and_then(|frame_info| frame_info.label())
+                .unwrap_or_default();
 
-                if label.is_empty() {
+                let mut label_normalized = label.clone().to_lowercase();
+                label_normalized.retain(char::is_alphanumeric);
+
+                let same = iri.to_lowercase().contains(&label_normalized);
+
+                if label.is_empty() || same {
                     None
                 } else {
                     Some(InlayHint {
@@ -1882,9 +1893,30 @@ pub fn word_before_character(character: usize, line: &str) -> String {
     size = 20,
     key = "u64",
     convert = r#"{
-            let mut hasher = DefaultHasher::new();
-            doc.hash(&mut hasher);
-            hasher.finish()
+        let mut hasher = DefaultHasher::new();
+        doc.hash(&mut hasher);
+        hasher.finish()
+     } "#
+)]
+fn imports_helper(doc: &InternalDocument) -> Vec<Url> {
+    doc.query(&ALL_QUERIES.import_query)
+        .iter()
+        .filter_map(|m| match &m.captures[..] {
+            [iri] => Url::parse(&trim_full_iri(&iri.node.text)[..])
+                .inspect_err(|e| warn!("Url could not be parsed {e:#}"))
+                .ok(),
+            _ => unimplemented!(),
+        })
+        .collect_vec()
+}
+
+#[cached(
+    size = 20,
+    key = "u64",
+    convert = r#"{
+        let mut hasher = DefaultHasher::new();
+        doc.hash(&mut hasher);
+        hasher.finish()
      } "#
 )]
 fn document_all_frame_infos(doc: &InternalDocument) -> HashMap<Iri, FrameInfo> {
@@ -1932,10 +1964,10 @@ fn document_all_frame_infos(doc: &InternalDocument) -> HashMap<Iri, FrameInfo> {
     size = 200,
     key = "u64",
     convert = r#"{
-            let mut hasher = DefaultHasher::new();
-            doc.hash(&mut hasher);
-            iri.hash(&mut hasher);
-            hasher.finish()
+        let mut hasher = DefaultHasher::new();
+        doc.hash(&mut hasher);
+        iri.hash(&mut hasher);
+        hasher.finish()
      } "#
 )]
 fn get_frame_info_helper(doc: &InternalDocument, iri: &Iri) -> Option<FrameInfo> {
@@ -2573,7 +2605,8 @@ fn prefixes_helper(doc: &InternalDocument) -> HashMap<String, String> {
         .collect()
 }
 
-fn to_doc<'a>(node: &Node, rope: &'a Rope) -> RcDoc<'a, ()> {
+fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
+    let nest_depth = tab_size as isize;
     let text = node_text(node, rope);
     let mut cursor = node.walk();
     match node.kind() {
@@ -2581,14 +2614,14 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope) -> RcDoc<'a, ()> {
             once(RcDoc::intersperse(
                 node.children(&mut cursor)
                     .filter(|n| n.kind() == "prefix_declaration")
-                    .map(|n| to_doc(&n, rope)),
+                    .map(|n| to_doc(&n, rope, tab_size)),
                 RcDoc::hardline(),
             ))
             .chain(
                 node.children(&mut cursor)
                     .find(|n| n.kind() == "ontology")
                     .into_iter()
-                    .map(|n| to_doc(&n, rope)),
+                    .map(|n| to_doc(&n, rope, tab_size)),
             ),
             RcDoc::hardline().append(RcDoc::hardline()),
         )
@@ -2600,16 +2633,16 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope) -> RcDoc<'a, ()> {
         //                 RcDoc::intersperse(
         //                     node.child_by_field_name("iri")
         //                         .into_iter()
-        //                         .map(|n| to_doc(&n, rope))
+        //                         .map(|n| to_doc(&n, rope, tab_size))
         //                         .chain(
         //                             node.child_by_field_name("version_iri")
         //                                 .into_iter()
-        //                                 .map(|n| to_doc(&n, rope)),
+        //                                 .map(|n| to_doc(&n, rope, tab_size)),
         //                         ),
         //                     RcDoc::line(),
         //                 )
         //                 .group(),
-        //             )),
+        // )),
         //             RcDoc::line(),
         //         )
         //         .nest(1)
@@ -2617,18 +2650,18 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope) -> RcDoc<'a, ()> {
         //     )
         //     .chain(once(RcDoc::intersperse(
         //         node.children_by_field_name("import", &mut cursor.clone())
-        //             .map(|n| to_doc(&n, rope)),
+        //             .map(|n| to_doc(&n, rope, tab_size)),
         //         RcDoc::hardline(),
         //     )))
         //     .chain(once(RcDoc::intersperse(
         //         node.children_by_field_name("frame", &mut cursor)
-        //             .map(|n| to_doc(&n, rope)),
+        //             .map(|n| to_doc(&n, rope, tab_size)),
         //         RcDoc::hardline().append(RcDoc::hardline()),
         //     ))),
         //     RcDoc::hardline(),
         // ),
         // "prefix_declaration" => RcDoc::intersperse(
-        //     node.children(&mut cursor).map(|n| to_doc(&n, rope)),
+        //     node.children(&mut cursor).map(|n| to_doc(&n, rope, tab_size)),
         //     RcDoc::line(),
         // )
         // .nest(1)
@@ -2638,60 +2671,119 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope) -> RcDoc<'a, ()> {
             .append(RcDoc::intersperse(
                 node.child_by_field_name("iri")
                     .into_iter()
-                    .map(|n| to_doc(&n, rope))
+                    .map(|n| to_doc(&n, rope, tab_size))
                     .chain(
                         node.child_by_field_name("version_iri")
                             .into_iter()
-                            .map(|n| to_doc(&n, rope)),
+                            .map(|n| to_doc(&n, rope, tab_size)),
                     ),
                 RcDoc::line(),
             ))
-            .nest(1)
+            .nest(nest_depth)
             .group()
             .append(RcDoc::hardline())
             .append(RcDoc::intersperse(
                 node.children_by_field_name("import", &mut cursor.clone())
-                    .map(|n| to_doc(&n, rope)),
+                    .map(|n| to_doc(&n, rope, tab_size)),
                 RcDoc::hardline(),
             ))
             .append(RcDoc::hardline().append(RcDoc::hardline()))
             .append(RcDoc::intersperse(
                 node.children_by_field_name("annotations", &mut cursor.clone())
-                    .map(|n| to_doc(&n, rope)),
+                    .map(|n| to_doc(&n, rope, tab_size)),
                 RcDoc::hardline(),
             ))
             .append(RcDoc::hardline().append(RcDoc::hardline()))
             .append(RcDoc::intersperse(
                 node.children_by_field_name("frame", &mut cursor)
-                    .map(|n| to_doc(&n, rope)),
+                    .map(|n| to_doc(&n, rope, tab_size)),
                 RcDoc::hardline().append(RcDoc::hardline()),
             )),
-        "prefix_declaration" | "import" | "annotations" | "annotation" | "sub_class_of" => {
-            RcDoc::intersperse(
-                node.children(&mut cursor).map(|n| to_doc(&n, rope)),
-                RcDoc::line(),
-            )
-            .nest(1)
-            .group()
+        "prefix_declaration" | "import" | "annotation" => RcDoc::intersperse(
+            node.children(&mut cursor)
+                .map(|n| to_doc(&n, rope, tab_size)),
+            RcDoc::line(),
+        )
+        .nest(nest_depth)
+        .group(),
+        "annotations"
+        | "sub_class_of"
+        | "class_equivalent_to"
+        | "datatype_equavalent_to"
+        | "class_disjoint_with"
+        | "disjoint_union_of"
+        | "has_key" => {
+            let mut docs = vec![];
+
+            // for child in node.children(&mut cursor) {
+            //     if child.is_named() {
+            //         docs.push(to_doc(&child, rope, tab_size));
+            //         info!("{}", child.kind());
+            //         if let Some(sib) = node.next_sibling() {
+            //             info!("{}", sib.kind());
+            //             if node_text(&sib, rope) == "," {
+            //                 docs.push(RcDoc::text("HERE"));
+            //             }
+            //         } else {
+            //             info!("no sib");
+            //         }
+            //         // docs.push(RcDoc::line());
+            //     } else {
+            //         info!("unnamned {}", child.kind());
+            //         docs.push(to_doc(&child, rope, tab_size));
+            //         docs.push(RcDoc::line())
+            //     }
+            // }
+            // for (a, b) in docs.iter().tuple_windows() {
+            //     info!("tuple: {:?},{:?}", a, b);
+            // }
+            for (a, b) in node.children(&mut cursor).tuple_windows() {
+                docs.push(to_doc(&a, rope, tab_size));
+                if b.kind() != "," {
+                    docs.push(RcDoc::line());
+                } else {
+                    // do not render line between them
+                }
+            }
+            if let Some(last) = node.child(node.child_count() - 1) {
+                docs.push(to_doc(&last, rope, tab_size));
+            }
+
+            // let docs = docs.into_iter().intersperse(RcDoc::line());
+
+            // RcDoc::intersperse(
+            //     node.children(&mut cursor).map(|n| to_doc(&n, rope, tab_size)),
+            //     RcDoc::line(),
+            // )
+            // .nest(1)
+            // .group()
+            RcDoc::concat(docs).nest(nest_depth).group()
         }
-        "class_frame" => node
+        "class_frame"
+        | "datatype_frame"
+        | "data_property_frame"
+        | "object_property_frame"
+        | "annotation_property_frame"
+        | "individual_frame" => node
             .child(0)
-            .map(|n| to_doc(&n, rope))
+            .map(|n| to_doc(&n, rope, tab_size))
             .unwrap_or(RcDoc::nil())
             .append(RcDoc::line())
             .append(
                 node.child(1)
-                    .map(|n| to_doc(&n, rope))
+                    .map(|n| to_doc(&n, rope, tab_size))
                     .unwrap_or(RcDoc::nil()),
             )
-            .nest(1)
+            .nest(nest_depth)
             .group()
             .append(RcDoc::hardline())
             .append(RcDoc::intersperse(
-                node.children(&mut cursor).skip(2).map(|n| to_doc(&n, rope)),
+                node.children(&mut cursor)
+                    .skip(2)
+                    .map(|n| to_doc(&n, rope, tab_size)),
                 RcDoc::hardline(),
             ))
-            .nest(1)
+            .nest(nest_depth)
             .group(),
         _ => RcDoc::text(text),
     }
@@ -2711,20 +2803,22 @@ mod tests {
             Url::parse("http://formatted").unwrap(),
             -1,
             indoc! {"
-                Prefix:  a:  <http://a/a>  Prefix:  a:  <http://a/a>    Ontology:   a   v   Import:    <http://a/a>    Import:    <http://a/a> Annotations:    rdfs:label     \"a\"    Class:   a   SubClassOf:   b,e,f SubClassOf:   c   Class:   a
+                Prefix:  a:  <http://a/a>  Prefix:  a:  <http://a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa>    Ontology:   a   v   Import:    <http://a/a>    Import:    <http://a/a> Annotations:    rdfs:label     \"a\"    Class:   a   SubClassOf:   b,e,f SubClassOf:   cccccccccccccccccccccccc,ddddddddddddddddddddd,eeeeeeeeeee   Class:   a     SubClassOf: a    Annotations:   rdfs:label    \"Y\"    EquivalentTo:    a   ,   a DisjointWith:    a  ,  a   DisjointUnionOf:  Annotations: y 12, a 2    a,a    HasKey:    a
             "}
             .into(),
         );
 
         info!("sexp:\n{}", doc.tree.root_node().to_sexp());
 
-        let result = doc.formatted();
+        let result = doc.formatted(4);
 
         assert_eq!(
             result,
             indoc! {"
                 Prefix: a: <http://a/a>
-                Prefix: a: <http://a/a>
+                Prefix:
+                    a:
+                    <http://a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa>
 
                 Ontology: a v
                 Import: <http://a/a>
@@ -2733,10 +2827,22 @@ mod tests {
                 Annotations: rdfs:label \"a\"
 
                 Class: a
-                 SubClassOf: b,e,f
-                 SubClassOf: c
+                    SubClassOf: b, e, f
+                    SubClassOf:
+                        cccccccccccccccccccccccc,
+                        ddddddddddddddddddddd,
+                        eeeeeeeeeee
 
                 Class: a
+                    SubClassOf: a
+                    Annotations: rdfs:label \"Y\"
+                    EquivalentTo: a, a
+                    DisjointWith: a, a
+                    DisjointUnionOf:
+                        Annotations: y 12, a 2
+                        a,
+                        a
+                    HasKey: a
             "}
         );
     }

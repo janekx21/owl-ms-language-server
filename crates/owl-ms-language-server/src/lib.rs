@@ -183,12 +183,14 @@ impl LanguageServer for Backend {
         info!("formatting {params:#?}");
         let url = params.text_document.uri;
 
+        let tab_size = params.options.tab_size;
+
         let workspace = self.find_workspace(&url);
         if let Some(doc) = workspace.internal_documents.get(&url) {
             let doc = doc.read();
 
             // TODO just send the diff
-            let text = doc.formatted();
+            let text = doc.formatted(if tab_size == 0 { 4 } else { tab_size });
 
             let range: Range = doc.tree.root_node().range().into();
 
@@ -548,7 +550,7 @@ impl LanguageServer for Backend {
                         deprecated: None,
                         location: Location {
                             uri: url.clone(),
-                            range: info.definitions.first().unwrap().range.into(),
+                            range: info.definitions.first().unwrap().range.into(), //TODO remove unwrap
                         },
                         container_name: None,
                     })

@@ -756,7 +756,6 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
 }
 
 #[test(tokio::test)]
-#[ignore = "use internal document test first"] // TODO reactivate
 async fn backend_formatting_on_file_should_correctly_format() {
     // Arrange
 
@@ -789,12 +788,15 @@ async fn backend_formatting_on_file_should_correctly_format() {
 
     Ontology: foo ver
 
+
+
+
     Class: A
         SubClassOf: Y
         Annotations: rdfs:label \"Y\"
         EquivalentTo: Y
         DisjointWith: Y
-        DisjointUnionOf: Y,Z
+        DisjointUnionOf: Y, Z
         HasKey: Y
 
     Datatype: B
@@ -802,11 +804,15 @@ async fn backend_formatting_on_file_should_correctly_format() {
 
     DataProperty: C
 
+
     ObjectProperty: D
+
 
     AnnotationProperty: E
 
+
     Individual: F
+
 
     Class: C
         SubClassOf: p some (A and B)
@@ -839,7 +845,11 @@ async fn backend_formatting_on_file_should_correctly_format() {
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
             },
-            options: FormattingOptions::default(),
+            options: FormattingOptions {
+                tab_size: 4,
+                insert_spaces: true,
+                ..FormattingOptions::default()
+            },
         })
         .await
         .unwrap();
@@ -880,7 +890,6 @@ async fn backend_formatting_on_file_should_correctly_format() {
     let doc = doc.read();
     assert_eq!(doc.diagnostics, vec![], "doc:\n{}", doc.rope.to_string());
     assert_eq!(doc.rope.to_string(), target);
-    panic!();
 }
 
 #[test(tokio::test)]
