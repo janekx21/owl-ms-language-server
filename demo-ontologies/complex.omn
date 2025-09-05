@@ -1,0 +1,513 @@
+Prefix: : <http://example.com/owl/complete#>
+Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+Prefix: foaf: <http://xmlns.com/foaf/0.1/>
+Prefix: ext: <http://example.com/external#>
+
+Ontology: <http://example.com/owl/complete> <http://example.com/owl/complete-v2.1>
+
+
+Annotations:
+    rdfs:label "Complete OWL Manchester Syntax Example"@en,
+    rdfs:label "Ejemplo Completo de Sintaxis Manchester OWL"@es,
+    rdfs:comment "This ontology demonstrates all major constructs  available in OWL Manchester Syntax."@en,
+    creator "AI Assistant",
+    Annotations: rdfs:comment "Version annotation"
+    version "2.1.0",
+    Annotations: creator "Original Designer", rdfs:seeAlso <http://example.com/docs>
+    designedBy "John Doe",
+    creationDate "2025-09-05"^^xsd:date,
+    license <http://creativecommons.org/licenses/by/4.0/>,
+    mainDomain "Knowledge Representation"
+
+ObjectProperty: hasParent
+    Annotations:
+        rdfs:label "has parent"@en,
+        rdfs:comment "Relates a person to their biological or adoptive parent"@en,
+        creator "Ontology Team",
+        Annotations: rdfs:comment "Property creation date"
+        dateCreated "2025-01-01"^^xsd:date
+    Characteristics: Asymmetric, Irreflexive
+    Domain: Annotations: rdfs:comment "Primary domain - living beings" LivingBeing, Annotations: rdfs:comment "More specific domain" Person
+    Range: Person, Animal
+    SubPropertyOf: hasAncestor, relatedTo
+    InverseOf: hasChild
+    DisjointWith: hasSibling, hasSpouse
+
+ObjectProperty: hasChild
+    Annotations: rdfs:label "has child"@en, rdfs:comment "Inverse of hasParent"@en
+    Characteristics: Asymmetric, Irreflexive
+    Domain: Person, Animal
+    Range: Person, Animal
+    SubPropertyOf: hasDescendant, relatedTo
+    InverseOf: hasParent
+    DisjointWith: hasSibling, hasSpouse
+
+ObjectProperty: hasSpouse
+    Annotations: rdfs:label "has spouse"@en, rdfs:comment "Relates a person to their spouse"@en
+    Characteristics: Symmetric, Irreflexive
+    Domain: Person
+    Range: Person
+    SubPropertyOf: hasPartner, relatedTo
+    EquivalentTo: marriedTo, ext:isMarriedTo
+    DisjointWith: hasParent, hasChild, hasSibling
+
+ObjectProperty: hasWife
+    Annotations: rdfs:label "has wife"@en
+    Characteristics: Functional, Asymmetric, Irreflexive
+    Domain: Man
+    Range: Woman
+    SubPropertyOf: hasSpouse, hasPartner
+
+ObjectProperty: hasHusband
+    Annotations: rdfs:label "has husband"@en
+    Characteristics: Functional, Asymmetric, Irreflexive
+    Domain: Woman
+    Range: Man
+    SubPropertyOf: hasSpouse, hasPartner
+    InverseOf: hasWife
+
+ObjectProperty: hasSibling
+    Annotations: rdfs:label "has sibling"@en, rdfs:comment "Relates a person to their sibling"@en
+    Characteristics: Symmetric, Irreflexive
+    Domain: Person
+    Range: Person
+    SubPropertyOf: relatedTo
+    DisjointWith: hasParent, hasChild, hasSpouse
+
+ObjectProperty: owns
+    Annotations: rdfs:label "owns"@en, rdfs:comment "Ownership relationship between person and object"@en
+    Domain: Person
+    Range: PhysicalObject
+    SubPropertyOf: hasProperty
+    DisjointWith: isOwnedBy
+
+ObjectProperty: livesIn
+    Annotations: rdfs:label "lives in"@en
+    Characteristics: Functional
+    Domain: Person, Animal
+    Range: Place, Address
+    SubPropertyOf: locatedIn
+
+ObjectProperty: worksWith
+    Annotations: rdfs:label "works with"@en
+    Characteristics: Symmetric
+    Domain: Person
+    Range: Person
+    SubPropertyOf: associatedWith
+    SubPropertyChain: Annotations: rdfs:comment "Transitivity through employment" worksFor o employs
+
+ObjectProperty: teaches
+    Annotations: rdfs:label "teaches"@en
+    Domain: Teacher
+    Range: Student
+    SubPropertyOf: interactsWith
+    InverseOf: learnFrom
+
+DataProperty: hasAge
+    Annotations: rdfs:label "has age"@en, rdfs:comment "Age of a person in years"@en, creator "Demographics Team"
+    Characteristics: Functional
+    Domain: Person, Animal
+    Range: xsd:nonNegativeInteger, AgeRange
+    SubPropertyOf: hasNumericalAttribute
+    DisjointWith: hasSSN, hasPhoneNumber
+
+DataProperty: hasFirstName
+    Annotations: rdfs:label "has first name"@en, rdfs:comment "Given name of a person"@en
+    Characteristics: Functional
+    Domain: Person
+    Range: xsd:string, NameString
+    SubPropertyOf: hasName
+    DisjointWith: hasAge, hasSSN
+
+DataProperty: hasLastName
+    Annotations: rdfs:label "has last name"@en, rdfs:comment "Family name of a person"@en
+    Characteristics: Functional
+    Domain: Person
+    Range: xsd:string, NameString
+    SubPropertyOf: hasName
+    DisjointWith: hasAge, hasSSN
+
+DataProperty: hasSSN
+    Annotations: rdfs:label "has Social Security Number"@en, rdfs:comment "US Social Security Number"@en
+    Characteristics: Functional
+    Domain: USCitizen
+    Range: SSNFormat
+    DisjointWith: hasAge, hasFirstName, hasLastName
+
+DataProperty: hasEmail
+    Annotations: rdfs:label "has email"@en
+    Domain: Person
+    Range: EmailFormat
+    SubPropertyOf: hasContactInfo
+    DisjointWith: hasAge
+
+DataProperty: hasPhoneNumber
+    Annotations: rdfs:label "has phone number"@en
+    Domain: Person
+    Range: PhoneFormat
+    SubPropertyOf: hasContactInfo
+    DisjointWith: hasAge, hasSSN
+
+DataProperty: hasSalary
+    Annotations: rdfs:label "has salary"@en
+    Characteristics: Functional
+    Domain: Employee
+    Range: xsd:decimal, SalaryRange
+    SubPropertyOf: hasFinancialAttribute
+
+DataProperty: hasHeight
+    Annotations: rdfs:label "has height"@en, rdfs:comment "Height in centimeters"@en
+    Characteristics: Functional
+    Domain: Person, Animal
+    Range: xsd:positiveInteger
+    SubPropertyOf: hasPhysicalAttribute
+
+AnnotationProperty: creator
+    Annotations: rdfs:label "creator"@en, rdfs:comment "The person or entity that created this resource"@en
+    Domain: owl:Thing
+    Range: xsd:string, Person
+    SubPropertyOf: rdfs:contributor
+
+AnnotationProperty: version
+    Annotations: rdfs:label "version"@en, rdfs:comment "Version identifier for the resource"@en
+    Domain: owl:Thing
+    Range: xsd:string
+
+AnnotationProperty: creationDate
+    Annotations: rdfs:label "creation date"@en
+    Domain: owl:Thing
+    Range: xsd:date, xsd:dateTime
+
+AnnotationProperty: license
+    Annotations: rdfs:label "license"@en, rdfs:comment "License under which the resource is made available"@en
+    Domain: owl:Thing
+    Range: xsd:anyURI
+
+AnnotationProperty: designedBy
+    Annotations: rdfs:label "designed by"@en
+    Domain: owl:Thing
+    Range: xsd:string, Person
+    SubPropertyOf: creator
+
+Datatype: AgeRange
+    Annotations: rdfs:label "Age Range"@en, rdfs:comment "Valid age range for humans"@en
+    EquivalentTo: xsd:integer[>= 0, <= 150]
+
+Datatype: SalaryRange
+    Annotations: rdfs:label "Salary Range"@en, rdfs:comment "Reasonable salary range"@en
+    EquivalentTo: xsd:decimal[>= 0, <= 10000000]
+
+Datatype: SSNFormat
+    Annotations: rdfs:label "Social Security Number Format"@en
+    EquivalentTo: xsd:string[pattern "[0-9]{3}-[0-9]{2}-[0-9]{4}"]
+
+Datatype: EmailFormat
+    Annotations: rdfs:label "Email Format"@en
+    EquivalentTo: xsd:string[pattern "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"]
+
+Datatype: PhoneFormat
+    Annotations: rdfs:label "Phone Number Format"@en
+    EquivalentTo: xsd:string[pattern "\\+?[0-9]{1,3}[-\\s]?\\(?[0-9]{1,4}\\)?[-\\s]?[0-9]{1,4}[-\\s]?[0-9]{1,9}"]
+
+Datatype: NameString
+    Annotations: rdfs:label "Name String"@en, rdfs:comment "String suitable for names"@en
+    EquivalentTo: xsd:string[minLength 1, maxLength 100]
+
+Datatype: PositiveInteger
+    Annotations: rdfs:label "Positive Integer"@en
+    EquivalentTo: xsd:integer[> 0]
+
+Datatype: NegativeInteger
+    Annotations: rdfs:label "Negative Integer"@en
+    EquivalentTo: xsd:integer[< 0]
+
+Class: owl:Thing
+    Annotations: rdfs:label "Thing"@en, rdfs:comment "The root of the class hierarchy"@en
+
+Class: Entity
+    Annotations: rdfs:label "Entity"@en, rdfs:comment "Top-level class for all entities in our domain"@en
+    SubClassOf: owl:Thing
+    DisjointUnionOf: Annotations: rdfs:comment "Fundamental partition of entities" PhysicalEntity, AbstractEntity
+
+Class: PhysicalEntity
+    Annotations: rdfs:label "Physical Entity"@en, rdfs:comment "Entities that have physical existence"@en
+    SubClassOf: Entity
+    DisjointWith: AbstractEntity
+
+Class: AbstractEntity
+    Annotations: rdfs:label "Abstract Entity"@en, rdfs:comment "Entities that do not have physical existence"@en
+    SubClassOf: Entity
+    DisjointWith: PhysicalEntity
+
+Class: LivingBeing
+    Annotations: rdfs:label "Living Being"@en, rdfs:comment "Any living organism"@en
+    SubClassOf: PhysicalEntity
+    SubClassOf: hasAge exactly 1 and hasAge only AgeRange
+    DisjointWith: PhysicalObject
+
+Class: Person
+    Annotations:
+        rdfs:label "Person"@en,
+        rdfs:comment "A human being"@en,
+        creator "Core Ontology Team",
+        Annotations: rdfs:seeAlso <http://xmlns.com/foaf/0.1/Person>
+        sameAsInFOAF foaf:Person
+    SubClassOf: LivingBeing
+    SubClassOf: hasFirstName exactly 1 and hasFirstName only NameString
+    SubClassOf: hasLastName exactly 1 and hasLastName only NameString
+    SubClassOf: hasAge exactly 1 and hasAge only AgeRange
+    SubClassOf: hasGender exactly 1 and hasGender only {male, female, other}
+    SubClassOf: hasSSN max 1 and hasSSN only SSNFormat
+    SubClassOf: hasEmail min 0 and hasEmail only EmailFormat
+    SubClassOf: hasPhoneNumber max 3
+    SubClassOf: livesIn max 1
+    SubClassOf: not (hasParent Self)
+    SubClassOf: not (hasChild Self)
+    SubClassOf: not (hasSpouse Self)
+    EquivalentTo: ext:Human, foaf:Person
+    DisjointWith: Animal, PhysicalObject, Place
+    HasKey: Annotations: rdfs:comment "SSN uniquely identifies US citizens" hasSSN
+
+Class: Man
+    Annotations: rdfs:label "Man"@en, rdfs:comment "Adult male person"@en
+    SubClassOf: Person
+    SubClassOf: Adult
+    SubClassOf: hasGender value male
+    SubClassOf: hasWife max 1
+    DisjointWith: Woman
+
+Class: Woman
+    Annotations: rdfs:label "Woman"@en, rdfs:comment "Adult female person"@en
+    SubClassOf: Person
+    SubClassOf: Adult
+    SubClassOf: hasGender value female
+    SubClassOf: hasHusband max 1
+    DisjointWith: Man
+
+Class: Child
+    Annotations: rdfs:label "Child"@en, rdfs:comment "Person under 18 years of age"@en
+    SubClassOf: Person
+    SubClassOf: hasAge some xsd:integer[< 18]
+    SubClassOf: not (hasSpouse some Person)
+    DisjointWith: Adult
+
+Class: Adult
+    Annotations: rdfs:label "Adult"@en, rdfs:comment "Person 18 years of age or older"@en
+    SubClassOf: Person
+    SubClassOf: hasAge some xsd:integer[>= 18]
+    DisjointWith: Child
+
+Class: Employee
+    Annotations: rdfs:label "Employee"@en, rdfs:comment "Person who works for an organization"@en
+    SubClassOf: Adult
+    SubClassOf: hasSalary exactly 1 and hasSalary only SalaryRange
+    SubClassOf: worksFor some Organization
+
+Class: Teacher
+    Annotations: rdfs:label "Teacher"@en, rdfs:comment "Person who teaches others"@en
+    SubClassOf: Employee
+    SubClassOf: teaches some Student
+
+Class: Student
+    Annotations: rdfs:label "Student"@en, rdfs:comment "Person who is learning"@en
+    SubClassOf: Person
+    SubClassOf: learnFrom some Teacher
+
+Class: USCitizen
+    Annotations: rdfs:label "US Citizen"@en, rdfs:comment "Citizen of the United States"@en
+    SubClassOf: Person
+    SubClassOf: hasSSN exactly 1 and hasSSN only SSNFormat
+    SubClassOf: livesIn some USLocation
+
+Class: Animal
+    Annotations: rdfs:label "Animal"@en, rdfs:comment "Non-human living being"@en
+    SubClassOf: LivingBeing
+    SubClassOf: hasAge exactly 1 and hasAge only AgeRange
+    DisjointWith: Person, PhysicalObject
+    DisjointUnionOf: Annotations: rdfs:comment "Basic animal classification" Mammal, Bird, Fish, Reptile, Amphibian
+
+Class: Mammal
+    Annotations: rdfs:label "Mammal"@en
+    SubClassOf: Animal
+    DisjointWith: Bird, Fish, Reptile, Amphibian
+
+Class: Bird
+    Annotations: rdfs:label "Bird"@en
+    SubClassOf: Animal
+    DisjointWith: Mammal, Fish, Reptile, Amphibian
+
+Class: Fish
+    Annotations: rdfs:label "Fish"@en
+    SubClassOf: Animal
+    DisjointWith: Mammal, Bird, Reptile, Amphibian
+
+Class: Reptile
+    Annotations: rdfs:label "Reptile"@en
+    SubClassOf: Animal
+    DisjointWith: Mammal, Bird, Fish, Amphibian
+
+Class: Amphibian
+    Annotations: rdfs:label "Amphibian"@en
+    SubClassOf: Animal
+    DisjointWith: Mammal, Bird, Fish, Reptile
+
+Class: PhysicalObject
+    Annotations: rdfs:label "Physical Object"@en, rdfs:comment "Inanimate physical entity"@en
+    SubClassOf: PhysicalEntity
+    DisjointWith: LivingBeing
+
+Class: Place
+    Annotations: rdfs:label "Place"@en, rdfs:comment "A location or geographic area"@en
+    SubClassOf: PhysicalEntity
+    DisjointWith: LivingBeing, PhysicalObject
+
+Class: Address
+    Annotations: rdfs:label "Address"@en, rdfs:comment "Specific location address"@en
+    SubClassOf: Place
+
+Class: USLocation
+    Annotations: rdfs:label "US Location"@en, rdfs:comment "Location within the United States"@en
+    SubClassOf: Place
+
+Class: Organization
+    Annotations: rdfs:label "Organization"@en, rdfs:comment "Organized group of people"@en
+    SubClassOf: AbstractEntity
+
+Class: Parent
+    Annotations: rdfs:label "Parent"@en, rdfs:comment "Person who has at least one child"@en
+    EquivalentTo: Person and hasChild some Person
+
+Class: Father
+    Annotations: rdfs:label "Father"@en
+    EquivalentTo: Man and hasChild some Person
+
+Class: Mother
+    Annotations: rdfs:label "Mother"@en
+    EquivalentTo: Woman and hasChild some Person
+
+Class: Grandparent
+    Annotations: rdfs:label "Grandparent"@en
+    EquivalentTo: Person and hasChild some Parent
+
+Class: ChildlessPerson
+    Annotations: rdfs:label "Childless Person"@en
+    EquivalentTo: Person and not (hasChild some Person)
+
+Class: MarriedPerson
+    Annotations: rdfs:label "Married Person"@en
+    EquivalentTo: Person and hasSpouse some Person
+
+Class: SinglePerson
+    Annotations: rdfs:label "Single Person"@en
+    EquivalentTo: Person and not (hasSpouse some Person)
+
+Class: Teenager
+    Annotations: rdfs:label "Teenager"@en
+    EquivalentTo: Person and hasAge some xsd:integer[>= 13, <= 19]
+
+Class: Senior
+    Annotations: rdfs:label "Senior"@en
+    EquivalentTo: Person and hasAge some xsd:integer[>= 65]
+
+Class: MiddleAged
+    Annotations: rdfs:label "Middle Aged"@en
+    EquivalentTo: Person and hasAge some xsd:integer[>= 30, <= 64]
+
+Class: HighEarner
+    Annotations: rdfs:label "High Earner"@en
+    EquivalentTo: Employee and hasSalary some xsd:decimal[>= 100000]
+
+Individual: John
+    Annotations:
+        rdfs:label "John Smith"@en,
+        rdfs:comment "Example individual representing a typical person"@en,
+        creator "Demo Data Generator",
+        Annotations: rdfs:comment "Added for testing"
+        testIndividual true
+    Types: Man, Adult, Employee, Father, MarriedPerson, USCitizen
+    Types: hasAge value 35
+    Types: hasFirstName value "John"
+    Types: hasLastName value "Smith"
+    Types: hasGender value male
+    Facts: hasWife Mary, hasChild Susan, hasChild Tommy, hasAge 35, hasFirstName "John", hasLastName "Smith", hasSSN "123-45-6789", hasEmail "john.smith@example.com", hasSalary 75000.00, hasHeight 180, livesIn _:johnAddress, worksWith Alice, not hasChild Bob
+    SameAs: JohnSmith, ext:JohnS
+    DifferentFrom: Mary, Susan, Tommy, Alice, Bob
+
+Individual: Mary
+    Annotations: rdfs:label "Mary Smith"@en, rdfs:comment "John's wife"@en
+    Types: Woman, Adult, Mother, MarriedPerson, USCitizen
+    Types: hasAge value 33
+    Facts: hasHusband John, hasChild Susan, hasChild Tommy, hasAge 33, hasFirstName "Mary", hasLastName "Smith",  hasSSN "987-65-4321", hasEmail "mary.smith@example.com", hasHeight 165, livesIn _:johnAddress
+    SameAs: MarySmith
+    DifferentFrom: John, Susan, Tommy, Alice, Bob
+
+Individual: Susan
+    Annotations: rdfs:label "Susan Smith"@en, rdfs:comment "John and Mary's daughter"@en
+    Types: Child, Student
+    Types: hasAge value 12
+    Facts: hasParent John, hasParent Mary, hasSibling Tommy, hasAge 12, hasFirstName "Susan", hasLastName "Smith", hasHeight 145, livesIn _:johnAddress
+    DifferentFrom: John, Mary, Tommy, Alice, Bob
+
+Individual: Tommy
+    Annotations: rdfs:label "Tommy Smith"@en, rdfs:comment "John and Mary's son"@en
+    Types: Child
+    Types: hasAge value 8
+    Facts: hasParent John, hasParent Mary, hasSibling Susan, hasAge 8, hasFirstName "Tommy", hasLastName "Smith", hasHeight 125, livesIn _:johnAddress
+    DifferentFrom: John, Mary, Susan, Alice, Bob
+
+Individual: Alice
+    Annotations: rdfs:label "Alice Johnson"@en, rdfs:comment "John's colleague"@en
+    Types: Woman, Adult, Employee, Teacher, SinglePerson, ChildlessPerson
+    Facts: hasAge 28, hasFirstName "Alice", hasLastName "Johnson", hasEmail "alice.johnson@example.com", hasSalary 65000.00, hasHeight 170, worksWith John, teaches _:student1, teaches _:student2
+    DifferentFrom: John, Mary, Susan, Tommy, Bob
+
+Individual: Bob
+    Annotations: rdfs:label "Bob Wilson"@en, rdfs:comment "Another example person"@en
+    Types: Man, Adult, Senior, SinglePerson, ChildlessPerson
+    Facts: hasAge 70, hasFirstName "Bob", hasLastName "Wilson", hasHeight 175
+    DifferentFrom: John, Mary, Susan, Tommy, Alice
+
+Individual: _:johnAddress
+    Annotations: rdfs:comment "Anonymous individual for John's address"
+    Types: Address, USLocation
+    Facts: hasValue "123 Main St, Anytown, NY 12345"
+
+Individual: _:student1
+    Annotations: rdfs:comment "Anonymous student taught by Alice"
+    Types: Student, Child
+    Facts: learnFrom Alice
+
+Individual: _:student2
+    Annotations: rdfs:comment "Another anonymous student taught by Alice"
+    Types: Student, Teenager
+    Facts: learnFrom Alice, hasAge 16
+
+Individual: Fluffy
+    Annotations: rdfs:label "Fluffy the Cat"@en, rdfs:comment "John's family pet"@en
+    Types: Mammal, Animal
+    Facts: hasAge 3, livesIn _:johnAddress, isOwnedBy John
+
+DisjointClasses: Annotations: rdfs:comment "Fundamental disjointness of top-level classes" LivingBeing, PhysicalObject, Place, AbstractEntity
+
+EquivalentClasses: Annotations: rdfs:comment "Alternative names for the same concept" Parent, PersonWithChild
+
+DisjointClasses: Annotations: rdfs:comment "Age-based disjointness" Child, Adult
+
+DisjointClasses: Annotations: rdfs:comment "Gender disjointness"   Man, Woman
+
+EquivalentProperties: Annotations: rdfs:comment "Equivalent object properties" hasSpouse, marriedTo, ext:isMarriedTo
+
+DisjointProperties: Annotations: rdfs:comment "Disjoint family relationships" hasParent, hasChild, hasSibling, hasSpouse
+
+DisjointProperties: Annotations: rdfs:comment "Disjoint data properties" hasAge, hasSSN, hasFirstName, hasLastName
+
+EquivalentProperties: Annotations: rdfs:comment "Equivalent data properties" hasFirstName, givenName, firstName
+
+SameIndividual: Annotations: rdfs:comment "Same individual under different names" John, JohnSmith, ext:JohnS
+
+DifferentIndividuals: Annotations: rdfs:comment "Explicitly different family members" John, Mary, Susan, Tommy
+
+DifferentIndividuals: Annotations: rdfs:comment "More distinct individuals" Alice, Bob, Fluffy
