@@ -1319,11 +1319,11 @@ impl InternalDocument {
         }
     }
 
-    pub fn formatted(&self, tab_size: u32) -> String {
+    pub fn formatted(&self, tab_size: u32, ruler_with: usize) -> String {
         let root = self.tree.root_node();
         let doc = to_doc(&root, &self.rope, tab_size);
         debug!("{:#?}", doc);
-        doc.pretty(120).to_string()
+        doc.pretty(ruler_with).to_string()
     }
 
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
@@ -2626,46 +2626,6 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
             RcDoc::hardline().append(RcDoc::hardline()),
         )
         .append(RcDoc::line()),
-        // "ontology" => RcDoc::intersperse(
-        //     once(
-        //         RcDoc::intersperse(
-        //             once(RcDoc::text("Ontology:")).chain(once(
-        //                 RcDoc::intersperse(
-        //                     node.child_by_field_name("iri")
-        //                         .into_iter()
-        //                         .map(|n| to_doc(&n, rope, tab_size))
-        //                         .chain(
-        //                             node.child_by_field_name("version_iri")
-        //                                 .into_iter()
-        //                                 .map(|n| to_doc(&n, rope, tab_size)),
-        //                         ),
-        //                     RcDoc::line(),
-        //                 )
-        //                 .group(),
-        // )),
-        //             RcDoc::line(),
-        //         )
-        //         .nest(1)
-        //         .group(),
-        //     )
-        //     .chain(once(RcDoc::intersperse(
-        //         node.children_by_field_name("import", &mut cursor.clone())
-        //             .map(|n| to_doc(&n, rope, tab_size)),
-        //         RcDoc::hardline(),
-        //     )))
-        //     .chain(once(RcDoc::intersperse(
-        //         node.children_by_field_name("frame", &mut cursor)
-        //             .map(|n| to_doc(&n, rope, tab_size)),
-        //         RcDoc::hardline().append(RcDoc::hardline()),
-        //     ))),
-        //     RcDoc::hardline(),
-        // ),
-        // "prefix_declaration" => RcDoc::intersperse(
-        //     node.children(&mut cursor).map(|n| to_doc(&n, rope, tab_size)),
-        //     RcDoc::line(),
-        // )
-        // .nest(1)
-        // .group(),
         "ontology" => RcDoc::text("Ontology:")
             .append(RcDoc::line())
             .append(RcDoc::intersperse(
@@ -2707,56 +2667,98 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
         .nest(nest_depth)
         .group(),
         "annotations"
+        // class
         | "sub_class_of"
         | "class_equivalent_to"
-        | "datatype_equavalent_to"
         | "class_disjoint_with"
         | "disjoint_union_of"
-        | "has_key" => {
+        | "has_key"
+        // datatype
+        | "datatype_equavalent_to"
+        // individual
+        | "individual_facts"
+        | "individual_same_as"
+        | "individual_different_from"
+        | "individual_types"
+        // annotation property
+        | "annotation_property_domin"
+        | "annotation_property_range"
+        | "annotation_property_sub_property_of"
+        // data property
+        | "data_property_domain"
+        | "data_property_range"
+        | "data_property_characteristics"
+        | "data_property_sub_property_of"
+        | "data_property_equivalent_to"
+        | "data_property_disjoint_with"
+        // object property
+        |"domain"
+        |"range"
+        |"sub_property_of"
+        |"object_property_equivalent_to"
+        |"object_property_disjoint_with"
+        |"inverse_of"
+        |"characteristics"
+        |"sub_property_chain"
+         => {
             let mut docs = vec![];
 
-            // for child in node.children(&mut cursor) {
-            //     if child.is_named() {
-            //         docs.push(to_doc(&child, rope, tab_size));
-            //         info!("{}", child.kind());
-            //         if let Some(sib) = node.next_sibling() {
-            //             info!("{}", sib.kind());
-            //             if node_text(&sib, rope) == "," {
-            //                 docs.push(RcDoc::text("HERE"));
-            //             }
-            //         } else {
-            //             info!("no sib");
-            //         }
-            //         // docs.push(RcDoc::line());
-            //     } else {
-            //         info!("unnamned {}", child.kind());
-            //         docs.push(to_doc(&child, rope, tab_size));
-            //         docs.push(RcDoc::line())
-            //     }
-            // }
-            // for (a, b) in docs.iter().tuple_windows() {
-            //     info!("tuple: {:?},{:?}", a, b);
-            // }
-            for (a, b) in node.children(&mut cursor).tuple_windows() {
-                docs.push(to_doc(&a, rope, tab_size));
-                if b.kind() != "," {
-                    docs.push(RcDoc::line());
+            // This should be the keyword
+            if let Some(child) = node.child(0) {
+                docs.push(to_doc(&child, rope, tab_size).append(RcDoc::line()));
+            }
+
+            for(is_seperator, chunk) in &node.children(&mut cursor).skip(1).chunk_by(|x| x.kind()==","||x.kind()=="o") {
+                // {
+                //     info!("chunk {:?}", &chunk.collect_vec());
+                // }
+                if is_seperator {
+                    let n = 
+                        &chunk.exactly_one()
+                            .map_err(|_|anyhow!("not one"))
+                        .expect("chunk should contain exacly one seperator node");
+
+
+                    if n.kind()=="o" {
+                        docs.push(RcDoc::text(" o").append(RcDoc::line()));
+                    } else {
+                        docs.push(RcDoc::text(",").append(RcDoc::line()));
+                    }
+                    // docs.push(
+                        // to_doc(, rope, tab_size).append(RcDoc::line()));
+                    // docs.push(RcDoc::text("( CHUNK END )"));
                 } else {
-                    // do not render line between them
+                    
+                    docs.push(RcDoc::intersperse(chunk.map(|n|to_doc(&n, rope, tab_size)), RcDoc::line()));
                 }
             }
-            if let Some(last) = node.child(node.child_count() - 1) {
-                docs.push(to_doc(&last, rope, tab_size));
-            }
 
-            // let docs = docs.into_iter().intersperse(RcDoc::line());
+            // for d in node.children(&mut cursor).(|x,y| {
+            //     if y.kind()==","{
+            //         Ok(to_doc(&x, rope, tab_size).append(to_doc(&y, rope, tab_size)).group())
+            //     } else  {
+            //         Err((to_doc(&x, rope, tab_size), to_doc(&y, rope, tab_size)))
+            //     }
+            // }) {
+            //     // {
+            //     //     info!("chunk {:?}", &chunk.collect_vec());
+            //     // }
+            //     docs.push(RcDoc::intersperse(chunk.map(|n|to_doc(&n, rope, tab_size)), RcDoc::space()));
+            //     docs.push(RcDoc::text("( CHUNK END )"));
+            // }
 
-            // RcDoc::intersperse(
-            //     node.children(&mut cursor).map(|n| to_doc(&n, rope, tab_size)),
-            //     RcDoc::line(),
-            // )
-            // .nest(1)
-            // .group()
+            // for (a, b) in node.children(&mut cursor).tuple_windows() {
+            //     docs.push(to_doc(&a, rope, tab_size));
+            //     if b.kind() != "," {
+            //         docs.push(RcDoc::line());
+            //     } else {
+            //         // do not render line between them
+            //     }
+            // }
+            // if let Some(last) = node.child(node.child_count() - 1) {
+            //     docs.push(to_doc(&last, rope, tab_size));
+            // }
+
             RcDoc::concat(docs).nest(nest_depth).group()
         }
         "class_frame"
@@ -2803,14 +2805,14 @@ mod tests {
             Url::parse("http://formatted").unwrap(),
             -1,
             indoc! {"
-                Prefix:  a:  <http://a/a>  Prefix:  a:  <http://a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa>    Ontology:   a   v   Import:    <http://a/a>    Import:    <http://a/a> Annotations:    rdfs:label     \"a\"    Class:   a   SubClassOf:   b,e,f SubClassOf:   cccccccccccccccccccccccc,ddddddddddddddddddddd,eeeeeeeeeee   Class:   a     SubClassOf: a    Annotations:   rdfs:label    \"Y\"    EquivalentTo:    a   ,   a DisjointWith:    a  ,  a   DisjointUnionOf:  Annotations: y 12, a 2    a,a    HasKey:    a
+                Prefix:  a:  <http://a/a>  Prefix:  a:  <http://a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa>    Ontology:   a   v   Import:    <http://a/a>    Import:    <http://a/a> Annotations:    rdfs:label     \"a\"    Class:   a   SubClassOf:   b,e,f SubClassOf:   cccccccccccccccccccccccc,ddddddddddddddddddddd,eeeeeeeeeee   Class:   a     SubClassOf: a    Annotations:   rdfs:label    \"Y\"    EquivalentTo:    a   ,   a DisjointWith:    a  ,  a   DisjointUnionOf:  Annotations: y 12, a 2    a,a    HasKey:    a
             "}
             .into(),
         );
 
         info!("sexp:\n{}", doc.tree.root_node().to_sexp());
 
-        let result = doc.formatted(4);
+        let result = doc.formatted(4, 35);
 
         assert_eq!(
             result,
@@ -2818,7 +2820,7 @@ mod tests {
                 Prefix: a: <http://a/a>
                 Prefix:
                     a:
-                    <http://a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa>
+                    <http://a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa>
 
                 Ontology: a v
                 Import: <http://a/a>

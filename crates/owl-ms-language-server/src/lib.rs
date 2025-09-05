@@ -17,7 +17,6 @@ use parking_lot::{MappedRwLockWriteGuard, RwLock, RwLockWriteGuard};
 use position::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
 use range::Range;
-use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -25,7 +24,7 @@ use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
-use tree_sitter_c2rust::{Language, Node};
+use tree_sitter_c2rust::Language;
 use web::{HttpClient, UreqClient};
 use workspace::{node_text, trim_full_iri, InternalDocument, Workspace};
 
@@ -190,7 +189,7 @@ impl LanguageServer for Backend {
             let doc = doc.read();
 
             // TODO just send the diff
-            let text = doc.formatted(if tab_size == 0 { 4 } else { tab_size });
+            let text = doc.formatted(if tab_size == 0 { 4 } else { tab_size }, 80);
 
             let range: Range = doc.tree.root_node().range().into();
 
@@ -268,7 +267,7 @@ impl LanguageServer for Backend {
                 .uri
                 .path_segments()
                 .unwrap()
-                .last()
+                .next_back()
                 .unwrap(),
         );
         // We do not close yet :> because of refences
@@ -315,7 +314,7 @@ impl LanguageServer for Backend {
 
         debug!(
             "inlay_hint at {}:{range}",
-            url.path_segments().unwrap().last().unwrap()
+            url.path_segments().unwrap().next_back().unwrap()
         );
 
         let workspace = self.find_workspace(&url);

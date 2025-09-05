@@ -1010,6 +1010,57 @@
     }
   },
   {
+    "type": "fact",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "data_property_iri",
+          "named": true
+        },
+        {
+          "type": "decimal_literal",
+          "named": true
+        },
+        {
+          "type": "floating_point_literal",
+          "named": true
+        },
+        {
+          "type": "individual_iri",
+          "named": true
+        },
+        {
+          "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "node_id",
+          "named": true
+        },
+        {
+          "type": "object_property_iri",
+          "named": true
+        },
+        {
+          "type": "string_literal_no_language",
+          "named": true
+        },
+        {
+          "type": "string_literal_with_language",
+          "named": true
+        },
+        {
+          "type": "typed_literal",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "floating_point_literal",
     "named": true,
     "fields": {}
@@ -1117,47 +1168,11 @@
           "named": true
         },
         {
-          "type": "data_property_iri",
-          "named": true
-        },
-        {
-          "type": "decimal_literal",
-          "named": true
-        },
-        {
-          "type": "floating_point_literal",
-          "named": true
-        },
-        {
-          "type": "individual_iri",
-          "named": true
-        },
-        {
-          "type": "integer_literal",
+          "type": "fact",
           "named": true
         },
         {
           "type": "keyword_facts",
-          "named": true
-        },
-        {
-          "type": "node_id",
-          "named": true
-        },
-        {
-          "type": "object_property_iri",
-          "named": true
-        },
-        {
-          "type": "string_literal_no_language",
-          "named": true
-        },
-        {
-          "type": "string_literal_with_language",
-          "named": true
-        },
-        {
-          "type": "typed_literal",
           "named": true
         }
       ]
