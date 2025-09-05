@@ -1473,30 +1473,34 @@ impl InternalDocument {
             //  https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#didChangeTextDocumentParams
             .map(|change| {
                 if let Some(range) = change.range {
+                    // LSP ranges are in bytes when encoding is utf-8!!!
                     let old_range: Range = range.into();
-                    let start_char = self
+                    let start_byte = self
                         .rope
                         .try_line_to_char(old_range.start.line as usize)
                         .expect("line_idx out of bounds")
                         + (old_range.start.character as usize);
 
-                    let old_end_char = self
+                    let old_end_byte = self
                         .rope
                         .try_line_to_char(old_range.end.line as usize)
                         .expect("line_idx out of bounds")
                         + (old_range.end.character as usize); // exclusive
 
                     // must come before the rope is changed!
-                    let old_end_byte = self.rope.char_to_byte(old_end_char);
+                    let start_char = self.rope.byte_to_char(start_byte);
+                    let old_end_char = self.rope.byte_to_char(old_end_byte);
+
+                    debug!("change range in chars {start_byte}..{old_end_byte} og range {range:?} and text {}", change.text);
 
                     // rope replace
                     timeit("rope operations", || {
+                        // TODO #24 change to try_* functions
                         self.rope.remove(start_char..old_end_char);
                         self.rope.insert(start_char, &change.text);
                     });
 
                     // this must come after the rope was changed!
-                    let start_byte = self.rope.char_to_byte(start_char);
                     let new_end_byte = start_byte + change.text.len();
                     let new_end_line = self.rope.byte_to_line(new_end_byte);
                     let new_end_character =
