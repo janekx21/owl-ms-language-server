@@ -576,6 +576,7 @@ impl InternalDocument {
                                 "Invalid rope remove operation range. {start_char}..{old_end_char}"
                             );
                         }
+                        // TODO this panics now while formatting oeo physical :<
                         self.rope.remove(start_char..old_end_char);
                         self.rope.insert(start_char, &change.text);
                     });
