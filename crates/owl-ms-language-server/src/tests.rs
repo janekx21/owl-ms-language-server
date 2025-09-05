@@ -98,7 +98,7 @@ async fn backend_did_change_should_update_internal_rope() {
                 uri: ontology_url.clone(),
                 language_id: "owl2md".to_string(),
                 version: 0,
-                text: "DEF".to_string(),
+                text: "DE😊F".to_string(),
             },
         })
         .await;
@@ -127,7 +127,7 @@ async fn backend_did_change_should_update_internal_rope() {
                         .into(),
                     ),
                     range_length: None,
-                    text: "ABC".to_string(),
+                    text: "A😊BC".to_string(),
                 },
                 TextDocumentContentChangeEvent {
                     range: Some(
@@ -136,17 +136,17 @@ async fn backend_did_change_should_update_internal_rope() {
                                 line: 0,
                                 // Changes depend on each other in order. By the time that the first
                                 // change is applied the line ends at charater 6 not 3.
-                                character: 6,
+                                character: 14,
                             }),
                             end: Position {
                                 line: 0,
-                                character: 6,
+                                character: 14,
                             },
                         }
                         .into(),
                     ),
                     range_length: None,
-                    text: "GHI".to_string(),
+                    text: "GH😊I".to_string(),
                 },
             ],
         })
@@ -162,7 +162,7 @@ async fn backend_did_change_should_update_internal_rope() {
     let doc = doc.read();
     let doc_content = doc.rope.to_string();
 
-    assert_eq!(doc_content, "ABCDEFGHI");
+    assert_eq!(doc_content, "A😊BCDE😊FGH😊I");
 }
 
 #[test(tokio::test)]
