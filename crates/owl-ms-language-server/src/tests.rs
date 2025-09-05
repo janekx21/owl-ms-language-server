@@ -704,7 +704,6 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
 }
 
 #[test(tokio::test)]
-#[ignore = "use internal document test first"] // TODO reactivate
 async fn backend_formatting_on_file_should_correctly_format() {
     // Arrange
 
