@@ -2323,7 +2323,7 @@
         }
       ]
     },
-    "_fact": {
+    "fact": {
       "type": "SEQ",
       "members": [
         {
@@ -3135,7 +3135,7 @@
             },
             {
               "type": "SYMBOL",
-              "name": "_fact"
+              "name": "fact"
             }
           ]
         },
@@ -3165,7 +3165,7 @@
                   },
                   {
                     "type": "SYMBOL",
-                    "name": "_fact"
+                    "name": "fact"
                   }
                 ]
               }

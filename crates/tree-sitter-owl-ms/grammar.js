@@ -437,7 +437,7 @@ module.exports = grammar({
     individual_different_from: $ =>
       seq($.keyword_different_from, $._individual_annotated_list),
 
-    _fact: $ =>
+    fact: $ =>
       seq(
         optional('not'),
         choice($._object_property_fact, $._data_property_fact),
@@ -508,7 +508,7 @@ module.exports = grammar({
       annotated_list($.annotations, $.annotation_property_iri),
     _individual_annotated_list: $ =>
       annotated_list($.annotations, $._individual),
-    _fact_annotated_list: $ => annotated_list($.annotations, $._fact),
+    _fact_annotated_list: $ => annotated_list($.annotations, $.fact),
 
     // List2
     _description_2list: $ => seq($.description, ',', sep1($.description, ',')),

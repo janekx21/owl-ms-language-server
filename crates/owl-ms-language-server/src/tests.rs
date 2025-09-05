@@ -2,12 +2,12 @@ use crate::{catalog::Catalog, range::range_overlaps, web::StaticClient, *};
 use anyhow::anyhow;
 use indoc::indoc;
 use position::Position;
-use pretty_assertions::{assert_eq, assert_ne};
-use std::{any, fs, path::Path};
+use pretty_assertions::assert_eq;
+use std::{fs, path::Path};
 use tempdir::{self, TempDir};
 use test_log::test;
 use tower_lsp::LspService;
-use tree_sitter_c2rust::{ParseOptions, Parser};
+use tree_sitter_c2rust::Parser;
 
 /// This module contains tests.
 /// Each test function name is in the form of `<function>_<thing>_<condition>_<expectation>`.
@@ -947,7 +947,7 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
     let result = result.unwrap();
 
     info!("result={result:#?}");
-    assert_eq!(result.len(), 3); // the third is rdfs:label
+    assert_eq!(result.len(), 2); // no rdfs:label inlay hint anymore
 
     assert!(result.iter().any(|x| match &x.label {
         InlayHintLabel::String(a) => a.contains("Some class in A1"),
