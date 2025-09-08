@@ -1322,7 +1322,7 @@ impl InternalDocument {
     pub fn formatted(&self, tab_size: u32, ruler_with: usize) -> String {
         let root = self.tree.root_node();
         let doc = to_doc(&root, &self.rope, tab_size);
-        debug!("{:#?}", doc);
+        debug!("doc:\n{:#?}", doc);
         doc.pretty(ruler_with).to_string()
     }
 
@@ -2579,6 +2579,7 @@ fn prefixes_helper(doc: &InternalDocument) -> HashMap<String, String> {
 fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
     let nest_depth = tab_size as isize;
     let text = node_text(node, rope);
+    debug!("to_doc for {text} that is {} at {:?}", node.kind(), node.range());
     let mut cursor = node.walk();
     match node.kind() {
         "source_file" => RcDoc::intersperse(
@@ -2680,9 +2681,6 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
             }
 
             for(is_seperator, chunk) in &node.children(&mut cursor).skip(1).chunk_by(|x| x.kind()==","||x.kind()=="o") {
-                // {
-                //     info!("chunk {:?}", &chunk.collect_vec());
-                // }
                 if is_seperator {
                     let n = 
                         &chunk.exactly_one()
@@ -2695,43 +2693,51 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
                     } else {
                         docs.push(RcDoc::text(",").append(RcDoc::line()));
                     }
-                    // docs.push(
-                        // to_doc(, rope, tab_size).append(RcDoc::line()));
-                    // docs.push(RcDoc::text("( CHUNK END )"));
                 } else {
                     
                     docs.push(RcDoc::intersperse(chunk.map(|n|to_doc(&n, rope, tab_size)), RcDoc::line()));
                 }
             }
 
-            // for d in node.children(&mut cursor).(|x,y| {
-            //     if y.kind()==","{
-            //         Ok(to_doc(&x, rope, tab_size).append(to_doc(&y, rope, tab_size)).group())
-            //     } else  {
-            //         Err((to_doc(&x, rope, tab_size), to_doc(&y, rope, tab_size)))
-            //     }
-            // }) {
-            //     // {
-            //     //     info!("chunk {:?}", &chunk.collect_vec());
-            //     // }
-            //     docs.push(RcDoc::intersperse(chunk.map(|n|to_doc(&n, rope, tab_size)), RcDoc::space()));
-            //     docs.push(RcDoc::text("( CHUNK END )"));
-            // }
-
-            // for (a, b) in node.children(&mut cursor).tuple_windows() {
-            //     docs.push(to_doc(&a, rope, tab_size));
-            //     if b.kind() != "," {
-            //         docs.push(RcDoc::line());
-            //     } else {
-            //         // do not render line between them
-            //     }
-            // }
-            // if let Some(last) = node.child(node.child_count() - 1) {
-            //     docs.push(to_doc(&last, rope, tab_size));
-            // }
-
             RcDoc::concat(docs).nest(nest_depth).group()
-        }
+        },
+        "description"
+         => {
+                
+            RcDoc::intersperse(node.children(&mut cursor).map(|n| to_doc(&n, rope, tab_size)), RcDoc::space())
+        },
+        "nested_description"
+         => {
+
+            // if let Some(n) = node.prev_sibling()  {
+                // if n.kind() == "("{ // this is a group
+                //     let mut docs = vec![];
+                //    for(is_seperator, chunk) in &node.children(&mut cursor).chunk_by(|x| x.kind()=="or") {
+                //         if is_seperator {
+                //             docs.push(
+                //                 RcDoc::line().append(RcDoc::text("or").append(RcDoc::line())));
+                //         } else {
+                //             docs.push(RcDoc::intersperse(chunk.map(|n|to_doc(&n, rope, tab_size)), RcDoc::space()));
+                //         }
+                //     }
+                // RcDoc::concat(docs).nest(nest_depth).group()
+
+                RcDoc::text("(").append(RcDoc::line()).append(
+            to_doc(&node.named_child(0).unwrap(), rope, tab_size)
+        ).nest(nest_depth).append(RcDoc::line()).append(")")
+        //.nest(nest_depth).group()
+            //     } else {
+
+            //     RcDoc::intersperse(
+            // node.children(&mut cursor)
+            //     .map(|n| to_doc(&n, rope, tab_size)),
+            // RcDoc::line()).group()
+            //             }
+            //  } else{
+            //      RcDoc::nil()
+            //  }
+        },
+
         "class_frame"
         | "datatype_frame"
         | "data_property_frame"
@@ -2758,7 +2764,7 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
             ))
             .nest(nest_depth)
             .group(),
-        _ => RcDoc::text(text),
+        _ => RcDoc::text(text), // this applies also to "ERROR" nodes!
     }
 }
 
@@ -2817,6 +2823,33 @@ mod tests {
                         a
                     HasKey: a
             "}
+        );
+    }
+
+    #[test]
+    fn internal_document_formatted_with_description_should_format_correctly() {
+        let doc = InternalDocument::new(
+            Url::parse("http://formatted").unwrap(),
+            -1,
+            indoc! {r#"
+                Ontology:a
+                Class: a
+                SubClassOf:   (aaaaaaaa and bbbbbb)    or   (bbbb and hasRel some (ccccccc or ddddddd or eeeeeeeee))
+            "#}
+            .into(),
+        );
+
+        info!("sexp:\n{}", doc.tree.root_node().to_sexp());
+
+        let result = doc.formatted(4, 35);
+
+        assert_eq!(
+            result,
+            indoc! {r#"
+                Ontology:a
+                Class: a
+                SubClassOf: (a and b) or (b and c)
+            "#}
         );
     }
 

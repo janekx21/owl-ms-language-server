@@ -227,8 +227,10 @@ module.exports = grammar({
       choice(
         $.class_iri,
         seq('{', $._individual_list, '}'),
-        seq('(', $.description, ')'),
+        $.nested_description,
       ),
+
+    nested_description: $ => seq('(', $.description, ')'),
 
     // 2.5 Frames and Miscellaneous
 
