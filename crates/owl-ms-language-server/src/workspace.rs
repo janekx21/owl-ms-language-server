@@ -1813,6 +1813,20 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
         "primary"=>{
             RcDoc::intersperse(node.children(&mut cursor).map(|n|to_doc(&n, rope, tab_size)), RcDoc::space())
         },
+        "conjunction"
+         => {
+             let subs=node.children(&mut cursor).chunk_by(|n| n.kind()=="and").into_iter().map(|(is_or, chunks)|{
+                 if is_or {
+                     RcDoc::line().append(RcDoc::text("and").append(RcDoc::space()))
+                 } else {
+                     RcDoc::intersperse(chunks.map(|n| to_doc(&n, rope, tab_size)), RcDoc::space())
+                 }
+             }).collect_vec();
+            RcDoc::concat(subs)
+        },
+        "primary"=>{
+           RcDoc::intersperse(node.children(&mut cursor).map(|n|to_doc(&n, rope, tab_size)), RcDoc::space()) 
+        }
         "nested_description"
          => {
             RcDoc::text("(").append(RcDoc::line()).append(
