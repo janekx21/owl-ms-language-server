@@ -979,6 +979,106 @@
     }
   },
   {
+    "type": "different_individuals",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "annotations",
+          "named": true
+        },
+        {
+          "type": "individual_iri",
+          "named": true
+        },
+        {
+          "type": "keyword_different_individuals",
+          "named": true
+        },
+        {
+          "type": "node_id",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "disjoint_classes",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "annotations",
+          "named": true
+        },
+        {
+          "type": "description",
+          "named": true
+        },
+        {
+          "type": "keyword_disjoint_classes",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "disjoint_data_properties",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "annotations",
+          "named": true
+        },
+        {
+          "type": "data_property_iri",
+          "named": true
+        },
+        {
+          "type": "keyword_disjoint_properties",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "disjoint_object_properties",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "annotations",
+          "named": true
+        },
+        {
+          "type": "keyword_disjoint_properties",
+          "named": true
+        },
+        {
+          "type": "keyword_inverse",
+          "named": true
+        },
+        {
+          "type": "object_property_iri",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "disjoint_union_of",
     "named": true,
     "fields": {},
@@ -1019,6 +1119,79 @@
         },
         {
           "type": "keyword_domain",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "equivalent_classes",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "annotations",
+          "named": true
+        },
+        {
+          "type": "description",
+          "named": true
+        },
+        {
+          "type": "keyword_equivalent_classes",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "equivalent_data_properties",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "annotations",
+          "named": true
+        },
+        {
+          "type": "data_property_iri",
+          "named": true
+        },
+        {
+          "type": "keyword_equivalent_properties",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "equivalent_object_properties",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "annotations",
+          "named": true
+        },
+        {
+          "type": "keyword_equivalent_properties",
+          "named": true
+        },
+        {
+          "type": "keyword_inverse",
+          "named": true
+        },
+        {
+          "type": "object_property_iri",
           "named": true
         }
       ]
@@ -1349,69 +1522,6 @@
     }
   },
   {
-    "type": "misc",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "annotations",
-          "named": true
-        },
-        {
-          "type": "data_property_iri",
-          "named": true
-        },
-        {
-          "type": "description",
-          "named": true
-        },
-        {
-          "type": "individual_iri",
-          "named": true
-        },
-        {
-          "type": "keyword_different_individuals",
-          "named": true
-        },
-        {
-          "type": "keyword_disjoint_classes",
-          "named": true
-        },
-        {
-          "type": "keyword_disjoint_properties",
-          "named": true
-        },
-        {
-          "type": "keyword_equivalent_classes",
-          "named": true
-        },
-        {
-          "type": "keyword_equivalent_properties",
-          "named": true
-        },
-        {
-          "type": "keyword_inverse",
-          "named": true
-        },
-        {
-          "type": "keyword_same_individual",
-          "named": true
-        },
-        {
-          "type": "node_id",
-          "named": true
-        },
-        {
-          "type": "object_property_iri",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "nested_description",
     "named": true,
     "fields": {},
@@ -1610,15 +1720,43 @@
             "named": true
           },
           {
+            "type": "different_individuals",
+            "named": true
+          },
+          {
+            "type": "disjoint_classes",
+            "named": true
+          },
+          {
+            "type": "disjoint_data_properties",
+            "named": true
+          },
+          {
+            "type": "disjoint_object_properties",
+            "named": true
+          },
+          {
+            "type": "equivalent_classes",
+            "named": true
+          },
+          {
+            "type": "equivalent_data_properties",
+            "named": true
+          },
+          {
+            "type": "equivalent_object_properties",
+            "named": true
+          },
+          {
             "type": "individual_frame",
             "named": true
           },
           {
-            "type": "misc",
+            "type": "object_property_frame",
             "named": true
           },
           {
-            "type": "object_property_frame",
+            "type": "same_individual",
             "named": true
           }
         ]
@@ -1844,6 +1982,33 @@
         },
         {
           "type": "keyword_range",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "same_individual",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "annotations",
+          "named": true
+        },
+        {
+          "type": "individual_iri",
+          "named": true
+        },
+        {
+          "type": "keyword_same_individual",
+          "named": true
+        },
+        {
+          "type": "node_id",
           "named": true
         }
       ]
