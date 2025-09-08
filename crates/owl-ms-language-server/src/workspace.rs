@@ -2703,41 +2703,36 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
         },
         "description"
          => {
-                
-            RcDoc::intersperse(node.children(&mut cursor).map(|n| to_doc(&n, rope, tab_size)), RcDoc::space())
+             let subs=node.children(&mut cursor).chunk_by(|n| n.kind()=="or").into_iter().map(|(is_or, chunks)|{
+                 if is_or {
+                     RcDoc::line().append(RcDoc::text("or").append(RcDoc::space()))
+                 } else {
+                     let conjunction_node = chunks.exactly_one().map_err(|_|anyhow!("not one")).unwrap();
+                     to_doc(&conjunction_node, rope, tab_size)
+                 }
+             }).collect_vec();
+            RcDoc::concat(subs)
         },
+        "conjunction"
+         => {
+             let subs=node.children(&mut cursor).chunk_by(|n| n.kind()=="and").into_iter().map(|(is_or, chunks)|{
+                 if is_or {
+                     RcDoc::line().append(RcDoc::text("and").append(RcDoc::space()))
+                 } else {
+                     RcDoc::intersperse(chunks.map(|n| to_doc(&n, rope, tab_size)), RcDoc::space())
+                 }
+             }).collect_vec();
+            RcDoc::concat(subs)
+        },
+        "primary"=>{
+           RcDoc::intersperse(node.children(&mut cursor).map(|n|to_doc(&n, rope, tab_size)), RcDoc::space()) 
+        }
         "nested_description"
          => {
-
-            // if let Some(n) = node.prev_sibling()  {
-                // if n.kind() == "("{ // this is a group
-                //     let mut docs = vec![];
-                //    for(is_seperator, chunk) in &node.children(&mut cursor).chunk_by(|x| x.kind()=="or") {
-                //         if is_seperator {
-                //             docs.push(
-                //                 RcDoc::line().append(RcDoc::text("or").append(RcDoc::line())));
-                //         } else {
-                //             docs.push(RcDoc::intersperse(chunk.map(|n|to_doc(&n, rope, tab_size)), RcDoc::space()));
-                //         }
-                //     }
-                // RcDoc::concat(docs).nest(nest_depth).group()
-
-                RcDoc::text("(").append(RcDoc::line()).append(
-            to_doc(&node.named_child(0).unwrap(), rope, tab_size)
-        ).nest(nest_depth).append(RcDoc::line()).append(")")
-        //.nest(nest_depth).group()
-            //     } else {
-
-            //     RcDoc::intersperse(
-            // node.children(&mut cursor)
-            //     .map(|n| to_doc(&n, rope, tab_size)),
-            // RcDoc::line()).group()
-            //             }
-            //  } else{
-            //      RcDoc::nil()
-            //  }
+            RcDoc::text("(").append(RcDoc::line()).append(
+                to_doc(&node.named_child(0).unwrap(), rope, tab_size)
+            ).nest(nest_depth).append(RcDoc::line()).append(")")
         },
-
         "class_frame"
         | "datatype_frame"
         | "data_property_frame"
