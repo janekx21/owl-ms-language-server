@@ -2672,6 +2672,15 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
         |"inverse_of"
         |"characteristics"
         |"sub_property_chain"
+        // misc
+        |"equivalent_classes"
+        |"disjoint_classes"
+        |"equivalent_object_properties"
+        |"disjoint_object_properties"
+        |"equivalent_data_properties"
+        |"disjoint_data_properties"
+        |"same_individual"
+        |"different_individuals"
          => {
             let mut docs = vec![];
 
@@ -2738,7 +2747,8 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
         | "data_property_frame"
         | "object_property_frame"
         | "annotation_property_frame"
-        | "individual_frame" => node
+        | "individual_frame"
+         => node
             .child(0)
             .map(|n| to_doc(&n, rope, tab_size))
             .unwrap_or(RcDoc::nil())

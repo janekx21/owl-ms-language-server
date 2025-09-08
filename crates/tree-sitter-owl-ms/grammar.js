@@ -110,7 +110,7 @@ module.exports = grammar({
         $.data_property_frame,
         $.annotation_property_frame,
         $.individual_frame,
-        $.misc,
+        $._misc,
       ),
 
     annotations: $ => seq($.keyword_annotations, $._annotation_annotated_list),
@@ -447,49 +447,65 @@ module.exports = grammar({
     _object_property_fact: $ => seq($.object_property_iri, $._individual),
     _data_property_fact: $ => seq($.data_property_iri, $._literal),
 
-    // TODO make misc hidden and add rules for choices
-    misc: $ =>
+    _misc: $ =>
       choice(
-        seq(
-          $.keyword_equivalent_classes,
-          optional($.annotations),
-          $._description_2list,
-        ), // optional annotations is not to spec. spec wrong?
-        seq(
-          $.keyword_disjoint_classes,
-          optional($.annotations),
-          $._description_2list,
-        ),
-        seq(
-          $.keyword_equivalent_properties,
-          optional($.annotations),
-          $._object_property_2list,
-        ),
-        seq(
-          $.keyword_disjoint_properties,
-          optional($.annotations),
-          $._object_property_2list,
-        ),
-        seq(
-          $.keyword_equivalent_properties,
-          optional($.annotations),
-          $._data_property_2list,
-        ),
-        seq(
-          $.keyword_disjoint_properties,
-          optional($.annotations),
-          $._data_property_2list,
-        ),
-        seq(
-          $.keyword_same_individual,
-          optional($.annotations),
-          $._individual_2list,
-        ),
-        seq(
-          $.keyword_different_individuals,
-          optional($.annotations),
-          $._individual_2list,
-        ),
+        $.equivalent_classes,
+        $.disjoint_classes,
+        $.equivalent_object_properties,
+        $.disjoint_object_properties,
+        $.equivalent_data_properties,
+        $.disjoint_data_properties,
+        $.same_individual,
+        $.different_individuals,
+      ),
+
+    equivalent_classes: $ =>
+      seq(
+        $.keyword_equivalent_classes,
+        optional($.annotations),
+        $._description_2list,
+      ),
+    disjoint_classes: $ =>
+      seq(
+        $.keyword_disjoint_classes,
+        optional($.annotations),
+        $._description_2list,
+      ),
+    equivalent_object_properties: $ =>
+      seq(
+        $.keyword_equivalent_properties,
+        optional($.annotations),
+        $._object_property_2list,
+      ),
+    disjoint_object_properties: $ =>
+      seq(
+        $.keyword_disjoint_properties,
+        optional($.annotations),
+        $._object_property_2list,
+      ),
+    equivalent_data_properties: $ =>
+      seq(
+        $.keyword_equivalent_properties,
+        optional($.annotations),
+        $._data_property_2list,
+      ),
+    disjoint_data_properties: $ =>
+      seq(
+        $.keyword_disjoint_properties,
+        optional($.annotations),
+        $._data_property_2list,
+      ),
+    same_individual: $ =>
+      seq(
+        $.keyword_same_individual,
+        optional($.annotations),
+        $._individual_2list,
+      ),
+    different_individuals: $ =>
+      seq(
+        $.keyword_different_individuals,
+        optional($.annotations),
+        $._individual_2list,
       ),
 
     // Annotated Lists
