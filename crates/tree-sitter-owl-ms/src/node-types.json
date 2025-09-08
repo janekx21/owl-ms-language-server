@@ -2018,20 +2018,27 @@
     "type": "source_file",
     "named": true,
     "root": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "ontology",
-          "named": true
-        },
-        {
-          "type": "prefix_declaration",
-          "named": true
-        }
-      ]
+    "fields": {
+      "ontology": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "ontology",
+            "named": true
+          }
+        ]
+      },
+      "prefix": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "prefix_declaration",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {

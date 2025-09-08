@@ -744,8 +744,6 @@ async fn backend_formatting_on_file_should_correctly_format() {
     Ontology: foo ver
 
 
-
-
     Class: A
         SubClassOf: Y
         Annotations: rdfs:label \"Y\"
@@ -770,8 +768,8 @@ async fn backend_formatting_on_file_should_correctly_format() {
 
 
     Class: C
-        SubClassOf: p some (A and B)
-        SubClassOf: inverse p some (A and B)
+        SubClassOf: p some ( A and B )
+        SubClassOf: inverse p some ( A and B )
         SubClassOf: inverse p some A and B
     "};
 

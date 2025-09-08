@@ -83,7 +83,11 @@ module.exports = grammar({
     _lexial_value: $ => $._quoted_string,
 
     // 2.2 Ontologies and Annotations
-    _ontology_document: $ => seq(repeat($.prefix_declaration), $.ontology),
+    _ontology_document: $ =>
+      seq(
+        field('prefix', repeat($.prefix_declaration)),
+        field('ontology', $.ontology),
+      ),
     prefix_declaration: $ => seq($.keyword_prefix, $.prefix_name, $.full_iri),
 
     ontology: $ =>

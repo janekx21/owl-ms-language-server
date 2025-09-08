@@ -2582,23 +2582,29 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
     debug!("to_doc for {text} that is {} at {:?}", node.kind(), node.range());
     let mut cursor = node.walk();
     match node.kind() {
-        "source_file" => RcDoc::intersperse(
-            once(RcDoc::intersperse(
-                node.children(&mut cursor)
-                    .filter(|n| n.kind() == "prefix_declaration")
-                    .map(|n| to_doc(&n, rope, tab_size)),
-                RcDoc::hardline(),
-            ))
-            .chain(
-                node.children(&mut cursor)
-                    .find(|n| n.kind() == "ontology")
-                    .into_iter()
-                    .map(|n| to_doc(&n, rope, tab_size)),
-            ),
-            RcDoc::hardline().append(RcDoc::hardline()),
-        )
-        .append(RcDoc::line()),
-        "ontology" => RcDoc::text("Ontology:")
+        "source_file" =>{
+
+let prefix_docs = node.children_by_field_name("prefix", &mut cursor).map(|n| to_doc(&n, rope, tab_size)).collect_vec();
+let ontology_doc = node.child_by_field_name("ontology")
+                    .map(|n| to_doc(&n, rope, tab_size)).unwrap_or(RcDoc::nil());
+        
+if prefix_docs.is_empty() {
+    ontology_doc
+} else {
+
+        RcDoc::intersperse([
+            RcDoc::intersperse(prefix_docs , RcDoc::hardline()),
+            ontology_doc
+        ], RcDoc::hardline().append(RcDoc::hardline()))
+    }}
+
+        ,
+        "ontology" =>
+
+
+        RcDoc::intersperse(
+        [
+         RcDoc::text("Ontology:")
             .append(RcDoc::line())
             .append(RcDoc::intersperse(
                 node.child_by_field_name("iri")
@@ -2613,24 +2619,31 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
             ))
             .nest(nest_depth)
             .group()
-            .append(RcDoc::hardline())
-            .append(RcDoc::intersperse(
+,
+            
+            // imports
+            RcDoc::intersperse(
                 node.children_by_field_name("import", &mut cursor.clone())
-                    .map(|n| to_doc(&n, rope, tab_size)),
-                RcDoc::hardline(),
-            ))
-            .append(RcDoc::hardline().append(RcDoc::hardline()))
-            .append(RcDoc::intersperse(
+                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
+                RcDoc::nil(),
+            )
+,
+            // annotations
+            RcDoc::intersperse(
                 node.children_by_field_name("annotations", &mut cursor.clone())
-                    .map(|n| to_doc(&n, rope, tab_size)),
-                RcDoc::hardline(),
-            ))
-            .append(RcDoc::hardline().append(RcDoc::hardline()))
-            .append(RcDoc::intersperse(
+                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
+                RcDoc::nil(),
+            )
+,
+            // frames
+            RcDoc::intersperse(
                 node.children_by_field_name("frame", &mut cursor)
-                    .map(|n| to_doc(&n, rope, tab_size)),
-                RcDoc::hardline().append(RcDoc::hardline()),
-            )),
+                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
+                RcDoc::hardline(),
+            )
+        ], RcDoc::hardline())
+
+        ,
         "prefix_declaration" | "import" | "annotation" => RcDoc::intersperse(
             node.children(&mut cursor)
                 .map(|n| to_doc(&n, rope, tab_size)),
@@ -2851,9 +2864,23 @@ mod tests {
         assert_eq!(
             result,
             indoc! {r#"
-                Ontology:a
+                Ontology: a
+
+
                 Class: a
-                SubClassOf: (a and b) or (b and c)
+                    SubClassOf:
+                        (
+                            aaaaaaaa
+                            and bbbbbb
+                        )
+                        or (
+                            bbbb
+                            and hasRel some (
+                                ccccccc
+                                or ddddddd
+                                or eeeeeeeee
+                            )
+                        )
             "#}
         );
     }
