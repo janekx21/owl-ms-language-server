@@ -160,9 +160,9 @@ module.exports = grammar({
     _restriction_value: $ => $._literal,
 
     // 2.4 Descriptions
-    description: $ => sep1($._conjunction, 'or'),
+    description: $ => sep1($.conjunction, 'or'),
 
-    _conjunction: $ =>
+    conjunction: $ =>
       choice(
         seq(
           $.class_iri,
@@ -171,23 +171,23 @@ module.exports = grammar({
           $._restriction,
           repeat(seq('and', optional('not'), $._restriction)),
         ),
-        sep1($._primary, 'and'),
+        sep1($.primary, 'and'),
       ),
 
-    _primary: $ => seq(optional('not'), choice($._restriction, $._atomic)),
+    primary: $ => seq(optional('not'), choice($._restriction, $._atomic)),
 
     _restriction: $ =>
       choice(
-        seq($._object_property_expression, $.keyword_some, $._primary),
+        seq($._object_property_expression, $.keyword_some, $.primary),
         seq($._data_property_expression, $.keyword_some, $._data_primary),
-        seq($._object_property_expression, $.keyword_only, $._primary),
+        seq($._object_property_expression, $.keyword_only, $.primary),
         seq($._data_property_expression, $.keyword_only, $._data_primary),
         seq($._object_property_expression, $.keyword_self),
         seq(
           $._object_property_expression,
           'min',
           $.non_negative_integer,
-          optional($._primary),
+          optional($.primary),
         ),
         seq(
           $._data_property_expression,
@@ -199,7 +199,7 @@ module.exports = grammar({
           $._object_property_expression,
           'max',
           $.non_negative_integer,
-          optional($._primary),
+          optional($.primary),
         ),
         seq(
           $._data_property_expression,
@@ -211,7 +211,7 @@ module.exports = grammar({
           $._object_property_expression,
           'exactly',
           $.non_negative_integer,
-          optional($._primary),
+          optional($.primary),
         ),
         seq(
           $._data_property_expression,

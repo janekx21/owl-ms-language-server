@@ -399,6 +399,117 @@
     }
   },
   {
+    "type": "conjunction",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "class_iri",
+          "named": true
+        },
+        {
+          "type": "data_property_iri",
+          "named": true
+        },
+        {
+          "type": "data_range",
+          "named": true
+        },
+        {
+          "type": "datatype_iri",
+          "named": true
+        },
+        {
+          "type": "datatype_restriction",
+          "named": true
+        },
+        {
+          "type": "decimal_literal",
+          "named": true
+        },
+        {
+          "type": "floating_point_literal",
+          "named": true
+        },
+        {
+          "type": "individual_iri",
+          "named": true
+        },
+        {
+          "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "keyword_decimal",
+          "named": true
+        },
+        {
+          "type": "keyword_float",
+          "named": true
+        },
+        {
+          "type": "keyword_integer",
+          "named": true
+        },
+        {
+          "type": "keyword_inverse",
+          "named": true
+        },
+        {
+          "type": "keyword_only",
+          "named": true
+        },
+        {
+          "type": "keyword_self",
+          "named": true
+        },
+        {
+          "type": "keyword_some",
+          "named": true
+        },
+        {
+          "type": "keyword_string",
+          "named": true
+        },
+        {
+          "type": "keyword_value",
+          "named": true
+        },
+        {
+          "type": "node_id",
+          "named": true
+        },
+        {
+          "type": "non_negative_integer",
+          "named": true
+        },
+        {
+          "type": "object_property_iri",
+          "named": true
+        },
+        {
+          "type": "primary",
+          "named": true
+        },
+        {
+          "type": "string_literal_no_language",
+          "named": true
+        },
+        {
+          "type": "string_literal_with_language",
+          "named": true
+        },
+        {
+          "type": "typed_literal",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "data_property_characteristics",
     "named": true,
     "fields": {},
@@ -858,106 +969,10 @@
     "fields": {},
     "children": {
       "multiple": true,
-      "required": false,
+      "required": true,
       "types": [
         {
-          "type": "class_iri",
-          "named": true
-        },
-        {
-          "type": "data_property_iri",
-          "named": true
-        },
-        {
-          "type": "data_range",
-          "named": true
-        },
-        {
-          "type": "datatype_iri",
-          "named": true
-        },
-        {
-          "type": "datatype_restriction",
-          "named": true
-        },
-        {
-          "type": "decimal_literal",
-          "named": true
-        },
-        {
-          "type": "floating_point_literal",
-          "named": true
-        },
-        {
-          "type": "individual_iri",
-          "named": true
-        },
-        {
-          "type": "integer_literal",
-          "named": true
-        },
-        {
-          "type": "keyword_decimal",
-          "named": true
-        },
-        {
-          "type": "keyword_float",
-          "named": true
-        },
-        {
-          "type": "keyword_integer",
-          "named": true
-        },
-        {
-          "type": "keyword_inverse",
-          "named": true
-        },
-        {
-          "type": "keyword_only",
-          "named": true
-        },
-        {
-          "type": "keyword_self",
-          "named": true
-        },
-        {
-          "type": "keyword_some",
-          "named": true
-        },
-        {
-          "type": "keyword_string",
-          "named": true
-        },
-        {
-          "type": "keyword_value",
-          "named": true
-        },
-        {
-          "type": "nested_description",
-          "named": true
-        },
-        {
-          "type": "node_id",
-          "named": true
-        },
-        {
-          "type": "non_negative_integer",
-          "named": true
-        },
-        {
-          "type": "object_property_iri",
-          "named": true
-        },
-        {
-          "type": "string_literal_no_language",
-          "named": true
-        },
-        {
-          "type": "string_literal_with_language",
-          "named": true
-        },
-        {
-          "type": "typed_literal",
+          "type": "conjunction",
           "named": true
         }
       ]
@@ -1691,6 +1706,121 @@
         },
         {
           "type": "prefix_name",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "primary",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "class_iri",
+          "named": true
+        },
+        {
+          "type": "data_property_iri",
+          "named": true
+        },
+        {
+          "type": "data_range",
+          "named": true
+        },
+        {
+          "type": "datatype_iri",
+          "named": true
+        },
+        {
+          "type": "datatype_restriction",
+          "named": true
+        },
+        {
+          "type": "decimal_literal",
+          "named": true
+        },
+        {
+          "type": "floating_point_literal",
+          "named": true
+        },
+        {
+          "type": "individual_iri",
+          "named": true
+        },
+        {
+          "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "keyword_decimal",
+          "named": true
+        },
+        {
+          "type": "keyword_float",
+          "named": true
+        },
+        {
+          "type": "keyword_integer",
+          "named": true
+        },
+        {
+          "type": "keyword_inverse",
+          "named": true
+        },
+        {
+          "type": "keyword_only",
+          "named": true
+        },
+        {
+          "type": "keyword_self",
+          "named": true
+        },
+        {
+          "type": "keyword_some",
+          "named": true
+        },
+        {
+          "type": "keyword_string",
+          "named": true
+        },
+        {
+          "type": "keyword_value",
+          "named": true
+        },
+        {
+          "type": "nested_description",
+          "named": true
+        },
+        {
+          "type": "node_id",
+          "named": true
+        },
+        {
+          "type": "non_negative_integer",
+          "named": true
+        },
+        {
+          "type": "object_property_iri",
+          "named": true
+        },
+        {
+          "type": "primary",
+          "named": true
+        },
+        {
+          "type": "string_literal_no_language",
+          "named": true
+        },
+        {
+          "type": "string_literal_with_language",
+          "named": true
+        },
+        {
+          "type": "typed_literal",
           "named": true
         }
       ]

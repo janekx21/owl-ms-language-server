@@ -968,7 +968,7 @@
       "members": [
         {
           "type": "SYMBOL",
-          "name": "_conjunction"
+          "name": "conjunction"
         },
         {
           "type": "REPEAT",
@@ -981,14 +981,14 @@
               },
               {
                 "type": "SYMBOL",
-                "name": "_conjunction"
+                "name": "conjunction"
               }
             ]
           }
         }
       ]
     },
-    "_conjunction": {
+    "conjunction": {
       "type": "CHOICE",
       "members": [
         {
@@ -1053,7 +1053,7 @@
           "members": [
             {
               "type": "SYMBOL",
-              "name": "_primary"
+              "name": "primary"
             },
             {
               "type": "REPEAT",
@@ -1066,7 +1066,7 @@
                   },
                   {
                     "type": "SYMBOL",
-                    "name": "_primary"
+                    "name": "primary"
                   }
                 ]
               }
@@ -1075,7 +1075,7 @@
         }
       ]
     },
-    "_primary": {
+    "primary": {
       "type": "SEQ",
       "members": [
         {
@@ -1121,7 +1121,7 @@
             },
             {
               "type": "SYMBOL",
-              "name": "_primary"
+              "name": "primary"
             }
           ]
         },
@@ -1155,7 +1155,7 @@
             },
             {
               "type": "SYMBOL",
-              "name": "_primary"
+              "name": "primary"
             }
           ]
         },
@@ -1209,7 +1209,7 @@
               "members": [
                 {
                   "type": "SYMBOL",
-                  "name": "_primary"
+                  "name": "primary"
                 },
                 {
                   "type": "BLANK"
@@ -1267,7 +1267,7 @@
               "members": [
                 {
                   "type": "SYMBOL",
-                  "name": "_primary"
+                  "name": "primary"
                 },
                 {
                   "type": "BLANK"
@@ -1325,7 +1325,7 @@
               "members": [
                 {
                   "type": "SYMBOL",
-                  "name": "_primary"
+                  "name": "primary"
                 },
                 {
                   "type": "BLANK"
