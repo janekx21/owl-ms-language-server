@@ -885,10 +885,6 @@
           "named": true
         },
         {
-          "type": "description",
-          "named": true
-        },
-        {
           "type": "floating_point_literal",
           "named": true
         },
@@ -934,6 +930,10 @@
         },
         {
           "type": "keyword_value",
+          "named": true
+        },
+        {
+          "type": "nested_description",
           "named": true
         },
         {
@@ -1391,6 +1391,21 @@
         },
         {
           "type": "object_property_iri",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "nested_description",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "description",
           "named": true
         }
       ]
