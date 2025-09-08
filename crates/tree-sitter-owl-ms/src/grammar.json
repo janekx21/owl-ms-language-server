@@ -513,15 +513,23 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "REPEAT",
+          "type": "FIELD",
+          "name": "prefix",
           "content": {
-            "type": "SYMBOL",
-            "name": "prefix_declaration"
+            "type": "REPEAT",
+            "content": {
+              "type": "SYMBOL",
+              "name": "prefix_declaration"
+            }
           }
         },
         {
-          "type": "SYMBOL",
-          "name": "ontology"
+          "type": "FIELD",
+          "name": "ontology",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ontology"
+          }
         }
       ]
     },

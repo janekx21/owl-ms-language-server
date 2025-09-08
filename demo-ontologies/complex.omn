@@ -10,7 +10,6 @@ Ontology:
     <http://example.com/owl/complete>
     <http://example.com/owl/complete-v2.1>
 
-
 Annotations:
     rdfs:label "Complete OWL Manchester Syntax Example"@en,
     rdfs:label "Ejemplo Completo de Sintaxis Manchester OWL"@es,
@@ -199,7 +198,7 @@ DataProperty: hasHeight
 
 AnnotationProperty: creator
     Annotations:
-        rdfs:label "creator"@en,
+        rdfs:label "creator/developer"@en,
         rdfs:comment "The person or entity that created this resource"@en
     Domain: owl:Thing
     Range: xsd:string, Person
@@ -315,17 +314,22 @@ Class: Person
         Annotations: rdfs:seeAlso <http://xmlns.com/foaf/0.1/Person>
         sameAsInFOAF foaf:Person
     SubClassOf: LivingBeing
-    SubClassOf: hasFirstName exactly 1 and hasFirstName only NameString
+    SubClassOf:
+        hasFirstName exactly 1
+        and hasFirstName only NameString,
+        Abbbbbbbbbbbbbb,
+        Bbbbbbbbbbbbbb,
+        Cccccc
     SubClassOf: hasLastName exactly 1 and hasLastName only NameString
     SubClassOf: hasAge exactly 1 and hasAge only AgeRange
-    SubClassOf: hasGender exactly 1 and hasGender only {male, female, other}
+    SubClassOf: hasGender exactly 1 and hasGender only { male , female , other }
     SubClassOf: hasSSN max 1 and hasSSN only SSNFormat
     SubClassOf: hasEmail min 0 and hasEmail only EmailFormat
     SubClassOf: hasPhoneNumber max 3
     SubClassOf: livesIn max 1
-    SubClassOf: not (hasParent Self)
-    SubClassOf: not (hasChild Self)
-    SubClassOf: not (hasSpouse Self)
+    SubClassOf: not ( hasParent Self )
+    SubClassOf: not ( hasChild Self )
+    SubClassOf: not ( hasSpouse Self )
     EquivalentTo: ext:Human, foaf:Person
     DisjointWith: Animal, PhysicalObject, Place
     HasKey:
@@ -354,7 +358,7 @@ Class: Child
         rdfs:comment "Person under 18 years of age"@en
     SubClassOf: Person
     SubClassOf: hasAge some xsd:integer[< 18]
-    SubClassOf: not (hasSpouse some Person)
+    SubClassOf: not ( hasSpouse some Person )
     DisjointWith: Adult
 
 Class: Adult
@@ -487,7 +491,7 @@ Class: Grandparent
 
 Class: ChildlessPerson
     Annotations: rdfs:label "Childless Person"@en
-    EquivalentTo: Person and not (hasChild some Person)
+    EquivalentTo: Person and not ( hasChild some Person )
 
 Class: MarriedPerson
     Annotations: rdfs:label "Married Person"@en
@@ -495,7 +499,7 @@ Class: MarriedPerson
 
 Class: SinglePerson
     Annotations: rdfs:label "Single Person"@en
-    EquivalentTo: Person and not (hasSpouse some Person)
+    EquivalentTo: Person and not ( hasSpouse some Person )
 
 Class: Teenager
     Annotations: rdfs:label "Teenager"@en
@@ -641,24 +645,201 @@ Individual: Fluffy
     Types: Mammal, Animal
     Facts: hasAge 3, livesIn _:johnAddress, isOwnedBy John
 
-DisjointClasses: Annotations: rdfs:comment "Fundamental disjointness of top-level classes" LivingBeing, PhysicalObject, Place, AbstractEntity
+DisjointClasses:
+    Annotations: rdfs:comment "Fundamental disjointness of top-level classes"
+    LivingBeing,
+    PhysicalObject,
+    Place,
+    AbstractEntity
 
-EquivalentClasses: Annotations: rdfs:comment "Alternative names for the same concept" Parent, PersonWithChild
+EquivalentClasses:
+    Annotations: rdfs:comment "Alternative names for the same concept"
+    Parent,
+    PersonWithChild
 
 DisjointClasses: Annotations: rdfs:comment "Age-based disjointness" Child, Adult
 
-DisjointClasses: Annotations: rdfs:comment "Gender disjointness"   Man, Woman
+DisjointClasses: Annotations: rdfs:comment "Gender disjointness" Man, Woman
 
-EquivalentProperties: Annotations: rdfs:comment "Equivalent object properties" hasSpouse, marriedTo, ext:isMarriedTo
+EquivalentProperties:
+    Annotations: rdfs:comment "Equivalent object properties"
+    hasSpouse,
+    marriedTo,
+    ext:isMarriedTo
 
-DisjointProperties: Annotations: rdfs:comment "Disjoint family relationships" hasParent, hasChild, hasSibling, hasSpouse
+DisjointProperties:
+    Annotations: rdfs:comment "Disjoint family relationships"
+    hasParent,
+    hasChild,
+    hasSibling,
+    hasSpouse
 
-DisjointProperties: Annotations: rdfs:comment "Disjoint data properties" hasAge, hasSSN, hasFirstName, hasLastName
+DisjointProperties:
+    Annotations: rdfs:comment "Disjoint data properties"
+    hasAge,
+    hasSSN,
+    hasFirstName,
+    hasLastName
 
-EquivalentProperties: Annotations: rdfs:comment "Equivalent data properties" hasFirstName, givenName, firstName
+EquivalentProperties:
+    Annotations: rdfs:comment "Equivalent data properties"
+    hasFirstName,
+    givenName,
+    firstName
 
-SameIndividual: Annotations: rdfs:comment "Same individual under different names" John, JohnSmith, ext:JohnS
+SameIndividual:
+    Annotations: rdfs:comment "Same individual under different names"
+    John,
+    JohnSmith,
+    ext:JohnS
 
-DifferentIndividuals: Annotations: rdfs:comment "Explicitly different family members" John, Mary, Susan, Tommy
+DifferentIndividuals:
+    Annotations: rdfs:comment "Explicitly different family members"
+    John,
+    Mary,
+    Susan,
+    Tommy
 
-DifferentIndividuals: Annotations: rdfs:comment "More distinct individuals" Alice, Bob, Fluffy
+DifferentIndividuals:
+    Annotations: rdfs:comment "More distinct individuals"
+    Alice,
+    Bob,
+    Fluffy
+
+Class: :Entity
+
+
+Class: :Process
+
+
+Class: :Quality
+
+
+ObjectProperty: :hasRelation
+
+
+ObjectProperty: :participatesIn
+
+
+ObjectProperty: :follows
+
+
+ObjectProperty: :contains
+
+
+ObjectProperty: :inverseOf
+
+
+DataProperty: :hasValue
+
+
+DataProperty: :hasWeight
+
+
+DataProperty: :hasTimestamp
+
+
+DataProperty: :hasIdentifier
+
+
+Individual: :alpha
+
+
+Individual: :beta
+
+
+Individual: :gamma
+
+
+Class: :Entity
+    SubClassOf:
+        (
+            (
+                (
+                    :hasRelation some (
+                        :Process
+                        and (
+                            :hasValue some xsd:integer[>= 10 , <= 100]
+                            and :hasWeight only xsd:double[> 0.5]
+                            and :hasTimestamp exactly 1 xsd:dateTime
+                        )
+                        and (
+                            :participatesIn min 2 (
+                                :Quality
+                                and (
+                                    :hasIdentifier value "special"^^xsd:string
+                                )
+                            )
+                        )
+                    )
+                )
+                and (
+                    :follows some (
+                        { :alpha , :beta , :gamma }
+                        or (
+                            :hasRelation max 3 owl:Thing
+                            and :contains exactly 0 (
+                                :Process
+                                and (
+                                    (
+                                        :hasValue some xsd:boolean[>=0]
+                                    )
+                                    or (
+                                        :hasWeight some xsd:float[<= 99.99 , >= 0.01]
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+            or (
+                not (
+                    :inverseOf some (
+                        :Entity
+                        and (
+                            :hasRelation only (
+                                not :Quality
+                                or (
+                                    :hasTimestamp some xsd:dateTime[>= "2020-01-01T00:00:00"^^xsd:dateTime]
+                                    and :hasIdentifier only xsd:string[length 5]
+                                    and :hasValue exactly 2 xsd:decimal
+                                )
+                            )
+                        )
+                    )
+                )
+                and (
+                    :contains some (
+                        :Process
+                        and (
+                            :participatesIn some (
+                                :Quality
+                                and { :alpha }
+                            )
+                            or :follows only (
+                                :Entity
+                                and (
+                                    :hasWeight some xsd:double[> 1.0 , < 10.0]
+                                    and :hasValue min 1 xsd:integer[>= 0]
+                                )
+                            )
+                        )
+                    )
+                    or (
+                        :hasRelation exactly 5 (
+                            :Process
+                            or :Quality
+                            or { :beta , :gamma }
+                        )
+                        and :inverseOf max 1 (
+                            :Entity
+                            and (
+                                :hasTimestamp only xsd:dateTime[< "2025-12-31T23:59:59"^^xsd:dateTime]
+                                or :hasIdentifier some xsd:string[minLength 1 , maxLength 20]
+                            )
+                        )
+                    )
+                )
+            )
+        )
