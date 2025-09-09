@@ -1,4 +1,5 @@
 mod catalog;
+mod consts;
 pub mod debugging;
 mod position;
 mod queries;
@@ -17,7 +18,6 @@ use parking_lot::{MappedRwLockWriteGuard, RwLock, RwLockWriteGuard};
 use position::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
 use range::Range;
-use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -97,6 +97,7 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 position_encoding: Some(encoding),
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
@@ -178,6 +179,30 @@ impl LanguageServer for Backend {
         info!("Initialized languag server with workspaces: {workspace_paths:?}");
     }
 
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        info!("formatting {params:#?}");
+        let url = params.text_document.uri;
+
+        let tab_size = params.options.tab_size;
+
+        let workspace = self.find_workspace(&url);
+        if let Some(doc) = workspace.internal_documents.get(&url) {
+            let doc = doc.read();
+
+            // TODO just send the diff
+            let text = doc.formatted(if tab_size == 0 { 4 } else { tab_size }, 80);
+
+            let range: Range = doc.tree.root_node().range().into();
+
+            return Ok(Some(vec![TextEdit {
+                range: range.into(),
+                new_text: text,
+            }]));
+        }
+
+        Ok(Some(vec![]))
+    }
+
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let url = params.text_document.uri;
         info!("Opend file {url}",);
@@ -243,7 +268,7 @@ impl LanguageServer for Backend {
                 .uri
                 .path_segments()
                 .unwrap()
-                .last()
+                .next_back()
                 .unwrap(),
         );
         // We do not close yet :> because of refences
@@ -290,7 +315,7 @@ impl LanguageServer for Backend {
 
         debug!(
             "inlay_hint at {}:{range}",
-            url.path_segments().unwrap().last().unwrap()
+            url.path_segments().unwrap().next_back().unwrap()
         );
 
         let workspace = self.find_workspace(&url);
@@ -525,7 +550,7 @@ impl LanguageServer for Backend {
                         deprecated: None,
                         location: Location {
                             uri: url.clone(),
-                            range: info.definitions.first().unwrap().range.into(),
+                            range: info.definitions.first().unwrap().range.into(), //TODO remove unwrap
                         },
                         container_name: None,
                     })

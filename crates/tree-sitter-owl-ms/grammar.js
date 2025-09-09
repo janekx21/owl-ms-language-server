@@ -83,16 +83,25 @@ module.exports = grammar({
     _lexial_value: $ => $._quoted_string,
 
     // 2.2 Ontologies and Annotations
-    _ontology_document: $ => seq(repeat($.prefix_declaration), $.ontology),
+    _ontology_document: $ =>
+      seq(
+        field('prefix', repeat($.prefix_declaration)),
+        field('ontology', $.ontology),
+      ),
     prefix_declaration: $ => seq($.keyword_prefix, $.prefix_name, $.full_iri),
 
     ontology: $ =>
       seq(
         $.keyword_ontology,
-        optional(seq($.ontology_iri, optional($.version_iri))),
-        repeat($.import),
-        repeat($._annotations),
-        repeat($._frame),
+        optional(
+          seq(
+            field('iri', $.ontology_iri),
+            optional(field('version_iri', $.version_iri)),
+          ),
+        ),
+        field('import', repeat($.import)),
+        field('annotations', repeat($.annotations)),
+        field('frame', repeat($._frame)),
       ),
 
     import: $ => seq($.keyword_import, $._iri),
@@ -105,10 +114,10 @@ module.exports = grammar({
         $.data_property_frame,
         $.annotation_property_frame,
         $.individual_frame,
-        $.misc,
+        $._misc,
       ),
 
-    _annotations: $ => seq($.keyword_annotations, $._annotation_annotated_list),
+    annotations: $ => seq($.keyword_annotations, $._annotation_annotated_list),
 
     annotation: $ => seq($.annotation_property_iri, $._annotation_target),
     _annotation_target: $ => choice($._iri, $._literal, $.node_id),
@@ -155,9 +164,9 @@ module.exports = grammar({
     _restriction_value: $ => $._literal,
 
     // 2.4 Descriptions
-    description: $ => sep1($._conjunction, 'or'),
+    description: $ => sep1($.conjunction, 'or'),
 
-    _conjunction: $ =>
+    conjunction: $ =>
       choice(
         seq(
           $.class_iri,
@@ -166,23 +175,23 @@ module.exports = grammar({
           $._restriction,
           repeat(seq('and', optional('not'), $._restriction)),
         ),
-        sep1($._primary, 'and'),
+        sep1($.primary, 'and'),
       ),
 
-    _primary: $ => seq(optional('not'), choice($._restriction, $._atomic)),
+    primary: $ => seq(optional('not'), choice($._restriction, $._atomic)),
 
     _restriction: $ =>
       choice(
-        seq($._object_property_expression, $.keyword_some, $._primary),
+        seq($._object_property_expression, $.keyword_some, $.primary),
         seq($._data_property_expression, $.keyword_some, $._data_primary),
-        seq($._object_property_expression, $.keyword_only, $._primary),
+        seq($._object_property_expression, $.keyword_only, $.primary),
         seq($._data_property_expression, $.keyword_only, $._data_primary),
         seq($._object_property_expression, $.keyword_self),
         seq(
           $._object_property_expression,
           'min',
           $.non_negative_integer,
-          optional($._primary),
+          optional($.primary),
         ),
         seq(
           $._data_property_expression,
@@ -194,7 +203,7 @@ module.exports = grammar({
           $._object_property_expression,
           'max',
           $.non_negative_integer,
-          optional($._primary),
+          optional($.primary),
         ),
         seq(
           $._data_property_expression,
@@ -206,7 +215,7 @@ module.exports = grammar({
           $._object_property_expression,
           'exactly',
           $.non_negative_integer,
-          optional($._primary),
+          optional($.primary),
         ),
         seq(
           $._data_property_expression,
@@ -222,8 +231,10 @@ module.exports = grammar({
       choice(
         $.class_iri,
         seq('{', $._individual_list, '}'),
-        seq('(', $.description, ')'),
+        $.nested_description,
       ),
+
+    nested_description: $ => seq('(', $.description, ')'),
 
     // 2.5 Frames and Miscellaneous
 
@@ -231,13 +242,13 @@ module.exports = grammar({
       seq(
         $.keyword_datatype,
         field('iri', $._datatype),
-        repeat($._annotations),
+        repeat($.annotations),
         optional($.datatype_equavalent_to),
-        repeat($._annotations),
+        repeat($.annotations),
       ),
 
     datatype_equavalent_to: $ =>
-      seq($.keyword_equivalent_to, optional($._annotations), $.data_range),
+      seq($.keyword_equivalent_to, optional($.annotations), $.data_range),
 
     class_frame: $ =>
       seq(
@@ -245,7 +256,7 @@ module.exports = grammar({
         field('iri', $.class_iri),
         repeat(
           choice(
-            $._annotations,
+            $.annotations,
             $.sub_class_of,
             $.class_equivalent_to,
             $.class_disjoint_with,
@@ -267,14 +278,14 @@ module.exports = grammar({
     disjoint_union_of: $ =>
       seq(
         $.keyword_disjoint_union_of,
-        optional($._annotations),
+        optional($.annotations),
         $._description_2list,
       ),
 
     has_key: $ =>
       seq(
         $.keyword_has_key,
-        optional($._annotations),
+        optional($.annotations),
         repeat1(
           choice($._object_property_expression, $._data_property_expression),
         ),
@@ -286,7 +297,7 @@ module.exports = grammar({
         field('iri', $.object_property_iri),
         repeat(
           choice(
-            $._annotations,
+            $.annotations,
             $.domain,
             $.range,
             $.sub_property_of,
@@ -332,7 +343,7 @@ module.exports = grammar({
     sub_property_chain: $ =>
       seq(
         $.keyword_sub_property_chain,
-        optional($._annotations),
+        optional($.annotations),
         sep1($._object_property_expression, 'o'),
       ),
 
@@ -353,7 +364,7 @@ module.exports = grammar({
         field('iri', $.data_property_iri),
         repeat(
           choice(
-            $._annotations,
+            $.annotations,
             $.data_property_domain,
             $.data_property_range,
             $.data_property_characteristics,
@@ -374,7 +385,7 @@ module.exports = grammar({
     data_property_characteristics: $ =>
       seq(
         $.keyword_characteristics,
-        optional($._annotations),
+        optional($.annotations),
         $.keyword_functional,
       ),
     data_property_sub_property_of: $ =>
@@ -393,7 +404,7 @@ module.exports = grammar({
         field('iri', $.annotation_property_iri),
         repeat(
           choice(
-            $._annotations,
+            $.annotations,
             $.annotation_property_domin,
             $.annotation_property_range,
             $.annotation_property_sub_property_of,
@@ -413,7 +424,7 @@ module.exports = grammar({
         field('iri', $._individual),
         repeat(
           choice(
-            $._annotations,
+            $.annotations,
             $.individual_types,
             $.individual_facts,
             $.individual_same_as,
@@ -432,7 +443,7 @@ module.exports = grammar({
     individual_different_from: $ =>
       seq($.keyword_different_from, $._individual_annotated_list),
 
-    _fact: $ =>
+    fact: $ =>
       seq(
         optional('not'),
         choice($._object_property_fact, $._data_property_fact),
@@ -440,70 +451,86 @@ module.exports = grammar({
     _object_property_fact: $ => seq($.object_property_iri, $._individual),
     _data_property_fact: $ => seq($.data_property_iri, $._literal),
 
-    // TODO make misc hidden and add rules for choices
-    misc: $ =>
+    _misc: $ =>
       choice(
-        seq(
-          $.keyword_equivalent_classes,
-          optional($._annotations),
-          $._description_2list,
-        ), // optional annotations is not to spec. spec wrong?
-        seq(
-          $.keyword_disjoint_classes,
-          optional($._annotations),
-          $._description_2list,
-        ),
-        seq(
-          $.keyword_equivalent_properties,
-          optional($._annotations),
-          $._object_property_2list,
-        ),
-        seq(
-          $.keyword_disjoint_properties,
-          optional($._annotations),
-          $._object_property_2list,
-        ),
-        seq(
-          $.keyword_equivalent_properties,
-          optional($._annotations),
-          $._data_property_2list,
-        ),
-        seq(
-          $.keyword_disjoint_properties,
-          optional($._annotations),
-          $._data_property_2list,
-        ),
-        seq(
-          $.keyword_same_individual,
-          optional($._annotations),
-          $._individual_2list,
-        ),
-        seq(
-          $.keyword_different_individuals,
-          optional($._annotations),
-          $._individual_2list,
-        ),
+        $.equivalent_classes,
+        $.disjoint_classes,
+        $.equivalent_object_properties,
+        $.disjoint_object_properties,
+        $.equivalent_data_properties,
+        $.disjoint_data_properties,
+        $.same_individual,
+        $.different_individuals,
+      ),
+
+    equivalent_classes: $ =>
+      seq(
+        $.keyword_equivalent_classes,
+        optional($.annotations),
+        $._description_2list,
+      ),
+    disjoint_classes: $ =>
+      seq(
+        $.keyword_disjoint_classes,
+        optional($.annotations),
+        $._description_2list,
+      ),
+    equivalent_object_properties: $ =>
+      seq(
+        $.keyword_equivalent_properties,
+        optional($.annotations),
+        $._object_property_2list,
+      ),
+    disjoint_object_properties: $ =>
+      seq(
+        $.keyword_disjoint_properties,
+        optional($.annotations),
+        $._object_property_2list,
+      ),
+    equivalent_data_properties: $ =>
+      seq(
+        $.keyword_equivalent_properties,
+        optional($.annotations),
+        $._data_property_2list,
+      ),
+    disjoint_data_properties: $ =>
+      seq(
+        $.keyword_disjoint_properties,
+        optional($.annotations),
+        $._data_property_2list,
+      ),
+    same_individual: $ =>
+      seq(
+        $.keyword_same_individual,
+        optional($.annotations),
+        $._individual_2list,
+      ),
+    different_individuals: $ =>
+      seq(
+        $.keyword_different_individuals,
+        optional($.annotations),
+        $._individual_2list,
       ),
 
     // Annotated Lists
     _description_annotated_list: $ =>
-      annotated_list($._annotations, $.description),
+      annotated_list($.annotations, $.description),
     _annotation_annotated_list: $ =>
-      annotated_list($._annotations, $.annotation),
+      annotated_list($.annotations, $.annotation),
     _object_property_expression_annotated_list: $ =>
-      annotated_list($._annotations, $._object_property_expression),
+      annotated_list($.annotations, $._object_property_expression),
     _object_property_characteristic_annotated_list: $ =>
-      annotated_list($._annotations, $._object_property_characteristic),
+      annotated_list($.annotations, $._object_property_characteristic),
     _data_range_annotated_list: $ =>
-      annotated_list($._annotations, $.data_range),
+      annotated_list($.annotations, $.data_range),
     _data_property_expression_annotated_list: $ =>
-      annotated_list($._annotations, $._data_property_expression),
-    _iri_annotated_list: $ => annotated_list($._annotations, $._iri),
+      annotated_list($.annotations, $._data_property_expression),
+    _iri_annotated_list: $ => annotated_list($.annotations, $._iri),
     _annotation_property_iri_annotated_list: $ =>
-      annotated_list($._annotations, $.annotation_property_iri),
+      annotated_list($.annotations, $.annotation_property_iri),
     _individual_annotated_list: $ =>
-      annotated_list($._annotations, $._individual),
-    _fact_annotated_list: $ => annotated_list($._annotations, $._fact),
+      annotated_list($.annotations, $._individual),
+    _fact_annotated_list: $ => annotated_list($.annotations, $.fact),
 
     // List2
     _description_2list: $ => seq($.description, ',', sep1($.description, ',')),

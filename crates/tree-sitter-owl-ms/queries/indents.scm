@@ -6,7 +6,15 @@
 	(data_property_frame)
 	(annotation_property_frame)
 	(individual_frame)
-	(misc)
+
+  (equivalent_classes)
+  (disjoint_classes)
+  (equivalent_object_properties)
+  (disjoint_object_properties)
+  (equivalent_data_properties)
+  (disjoint_data_properties)
+  (same_individual)
+  (different_individuals)
 
 	; TODO indets for the other indentation stuff
 ] @indent @extend
