@@ -1,4 +1,4 @@
-use crate::{catalog::Catalog, range::range_overlaps, web::StaticClient, *};
+use crate::{catalog::Catalog, web::StaticClient, *};
 use anyhow::anyhow;
 use indoc::indoc;
 use pos::Position;
