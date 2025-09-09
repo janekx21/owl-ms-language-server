@@ -1,4 +1,33 @@
+use crate::workspace::{FrameInfo, FrameType, Iri};
 use indoc::indoc;
+
+pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
+    match &iri[..] {
+        "http://www.w3.org/2000/01/rdf-schema#label" => vec![FrameInfo {
+            iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+            annotations: vec![(
+                "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+                vec!["label".to_string()],
+            )]
+            .into_iter()
+            .collect(),
+            frame_type: FrameType::AnnotationProperty,
+            definitions: vec![],
+        }],
+        "http://www.w3.org/2000/01/rdf-schema#comment" => vec![FrameInfo {
+            iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
+            annotations: vec![(
+                "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+                vec!["comment".to_string()],
+            )]
+            .into_iter()
+            .collect(),
+            frame_type: FrameType::AnnotationProperty,
+            definitions: vec![],
+        }],
+        _ => vec![],
+    }
+}
 
 pub fn keyword_hover_info(kind: &str) -> String {
     match kind{
