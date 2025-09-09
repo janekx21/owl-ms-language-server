@@ -808,7 +808,7 @@ impl InternalDocument {
                 // Must come before the rope is changed!
                 let cursor_byte_index = cursor.byte_index(&rope_version);
 
-                rope_version.insert(cursor.byte_index(&rope_version), &change);
+                rope_version.insert(cursor.char_index(&rope_version), &change);
 
                 // Must come after rope changed!
                 let new_end_byte = cursor_byte_index + change.len();
@@ -838,8 +838,7 @@ impl InternalDocument {
                 // debug!(
                 // "A possible source code version for {kw} (change is {change}) with rope version {rope_version}\nNew tree {:?}", new_tree.root_node().to_sexp());
 
-                let mut cursor_one_left = cursor.to_owned();
-                cursor_one_left.sub_character(1);
+                let cursor_one_left = cursor.moved_left(1, &rope);
                 let cursor_node_version = new_tree
                     .root_node()
                     .named_descendant_for_point_range(
