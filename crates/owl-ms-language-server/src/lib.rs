@@ -1,4 +1,5 @@
 mod catalog;
+mod consts;
 pub mod debugging;
 mod position;
 mod queries;
