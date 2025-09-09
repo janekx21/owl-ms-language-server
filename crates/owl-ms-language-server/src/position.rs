@@ -47,12 +47,17 @@ impl Position {
         rope.byte_to_char(self.byte_index(rope))
     }
 
-    pub fn add_character(&mut self, offset: u32) {
-        self.character = self.character.saturating_add(offset);
+    pub fn moved_right(&self, char_offset: u32, rope: &Rope) -> Self {
+        let char_idx = self.char_index(rope);
+        let char_idx = char_idx.saturating_add(char_offset as usize);
+        let char_idx = char_idx.min(rope.len_chars() - 1); // clamp
+        Self::new_from_byte_index(rope, rope.char_to_byte(char_idx))
     }
 
-    pub fn sub_character(&mut self, offset: u32) {
-        self.character = self.character.saturating_sub(offset);
+    pub fn moved_left(&self, char_offset: u32, rope: &Rope) -> Self {
+        let char_idx = self.char_index(rope);
+        let char_idx = char_idx.saturating_sub(char_offset as usize);
+        Self::new_from_byte_index(rope, rope.char_to_byte(char_idx))
     }
 }
 

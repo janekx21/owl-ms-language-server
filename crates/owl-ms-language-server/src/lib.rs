@@ -440,8 +440,7 @@ impl LanguageServer for Backend {
 
             debug!("The resultingn kws are {kws:#?}");
 
-            let mut pos_one_left = pos.clone();
-            pos_one_left.sub_character(1);
+            let pos_one_left = pos.moved_left(1, &doc.rope);
 
             let keywords_completion_items = kws.into_iter().map(|keyword| CompletionItem {
                 label: keyword,
@@ -463,17 +462,21 @@ impl LanguageServer for Backend {
                 let iris: Vec<CompletionItem> = workspace
                     .search_frame(&partial_text)
                     .iter()
-                    .map(|(full_iri, frame)| {
+                    .filter_map(|(full_iri, frame)| {
                         let iri = doc
                             .full_iri_to_abbreviated_iri(full_iri.clone())
                             .unwrap_or(format!("<{full_iri}>"));
 
-                        CompletionItem {
-                            label: iri,
-                            kind: Some(CompletionItemKind::REFERENCE),
-                            detail: Some(frame.info_display(&workspace)),
-                            // TODO #29 add details from the frame
-                            ..Default::default()
+                        if iri == partial_text {
+                            None
+                        } else {
+                            Some(CompletionItem {
+                                label: iri,
+                                kind: Some(CompletionItemKind::REFERENCE),
+                                detail: Some(frame.info_display(&workspace)),
+                                // TODO #29 add details from the frame
+                                ..Default::default()
+                            })
                         }
                     })
                     // TODO #29 add items for simple iri, abbriviated iri and full iri
@@ -703,9 +706,11 @@ impl LanguageServer for Backend {
 
                 match node.kind() {
                     "full_iri" => {
-                        let mut range: Range = node.range().into();
-                        range.start.add_character(1);
-                        range.end.sub_character(1);
+                        let range: Range = node.range().into();
+                        let range = Range {
+                            start: range.start.moved_right(1, &doc.rope),
+                            end: range.end.moved_left(1, &doc.rope),
+                        };
                         Some(range)
                     }
                     "simple_iri" => {
@@ -713,10 +718,13 @@ impl LanguageServer for Backend {
                         Some(range)
                     }
                     "abbreviated_iri" => {
-                        let mut range: Range = node.range().into();
+                        let range: Range = node.range().into();
                         let text = node_text(&node, &doc.rope).to_string();
                         let col_offset = text.find(':').unwrap() + 1;
-                        range.start.add_character(col_offset as u32);
+                        let range = Range {
+                            start: range.start.moved_right(col_offset as u32, &doc.rope),
+                            ..range
+                        };
                         Some(range)
                     }
                     _ => None,
@@ -730,8 +738,7 @@ impl LanguageServer for Backend {
                     //                           ^
                     //                       Cursor
                     debug!("prepare rename try one position left");
-                    let mut position = position.clone();
-                    position.sub_character(1);
+                    let position = position.moved_left(1, &doc.rope);
                     node_range(position, &doc)
                 })
                 .map(|range| PrepareRenameResponse::Range(range.into()));
@@ -806,8 +813,7 @@ impl LanguageServer for Backend {
                 //                           ^
                 //                       Cursor
                 debug!("prepare rename try one position left");
-                let mut position = position.clone();
-                position.sub_character(1);
+                let position = position.moved_left(1, &doc.rope);
                 rename_helper(position, &doc, new_name)
             });
 
