@@ -1,5 +1,5 @@
 use crate::catalog::CatalogUri;
-use crate::consts::keyword_hover_info;
+use crate::consts::{get_fixed_infos, keyword_hover_info};
 use crate::position::Position;
 use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type_index};
 use crate::web::HttpClient;
@@ -325,34 +325,6 @@ impl Workspace {
             }
             ext => Err(anyhow!("The extention {ext} is not supported")),
         }
-    }
-}
-
-pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
-    match &iri[..] {
-        "http://www.w3.org/2000/01/rdf-schema#label" => vec![FrameInfo {
-            iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-            annotations: vec![(
-                "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                vec!["label".to_string()],
-            )]
-            .into_iter()
-            .collect(),
-            frame_type: FrameType::AnnotationProperty,
-            definitions: vec![],
-        }],
-        "http://www.w3.org/2000/01/rdf-schema#comment" => vec![FrameInfo {
-            iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
-            annotations: vec![(
-                "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                vec!["comment".to_string()],
-            )]
-            .into_iter()
-            .collect(),
-            frame_type: FrameType::AnnotationProperty,
-            definitions: vec![],
-        }],
-        _ => vec![],
     }
 }
 
@@ -1485,7 +1457,7 @@ fn trim_string_value(value: &str) -> String {
 }
 
 // TODO maybe use Arc<String>
-type Iri = String;
+pub type Iri = String;
 
 pub fn node_text<'a>(node: &Node, rope: &'a Rope) -> ropey::RopeSlice<'a> {
     rope.byte_slice(node.start_byte()..node.end_byte())
