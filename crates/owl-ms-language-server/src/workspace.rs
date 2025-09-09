@@ -1466,26 +1466,17 @@ impl InternalDocument {
         }
 
         // This range is relative to the *old* document not the new one
-        let change_ranges = params
+        params
             .content_changes
             .iter()
             // First I thougt the order must be changed but the LSP defines it as "S -> S' -> S''"
             //  https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#didChangeTextDocumentParams
-            .map(|change| {
-                if let Some(range) = change.range {
+            .for_each(|change| {
+                let range = change.range.expect("range to be defined"); 
                     // LSP ranges are in bytes when encoding is utf-8!!!
                     let old_range: Range = range.into();
-                    let start_byte = self
-                        .rope
-                        .try_line_to_char(old_range.start.line as usize)
-                        .expect("line_idx out of bounds")
-                        + (old_range.start.character as usize);
-
-                    let old_end_byte = self
-                        .rope
-                        .try_line_to_char(old_range.end.line as usize)
-                        .expect("line_idx out of bounds")
-                        + (old_range.end.character as usize); // exclusive
+                    let start_byte = old_range.start.byte_index(&self.rope);
+                    let old_end_byte = old_range.end.byte_index(&self.rope);
 
                     // must come before the rope is changed!
                     let start_char = self.rope.byte_to_char(start_byte);
@@ -1502,36 +1493,20 @@ impl InternalDocument {
 
                     // this must come after the rope was changed!
                     let new_end_byte = start_byte + change.text.len();
-                    let new_end_line = self.rope.byte_to_line(new_end_byte);
-                    let new_end_character =
-                        self.rope.byte_to_char(new_end_byte) - self.rope.line_to_char(new_end_line);
+                    let new_end_position = Position::new_from_byte_index(&self.rope, new_end_byte);
 
                     let edit = InputEdit {
                         start_byte,
                         old_end_byte,
-                        new_end_byte: start_byte + change.text.len(),
+                        new_end_byte,
                         start_position: old_range.start.into(),
                         old_end_position: old_range.end.into(),
-                        new_end_position: Point {
-                            row: new_end_line,
-                            column: new_end_character,
-                        },
+                        new_end_position: new_end_position.into(),
                     };
                     timeit("tree edit", || self.tree.edit(&edit));
 
                     self.version = params.text_document.version;
-
-                    let new_range = Range {
-                        start: edit.start_position.into(),
-                        end: edit.new_end_position.into(),
-                    };
-
-                    (old_range, edit, new_range)
-                } else {
-                    unreachable!("Change should have range {:#?}", change);
-                }
-            })
-            .collect::<Vec<(Range, InputEdit, Range)>>();
+            });
 
         // debug!("Change ranges {:#?}", change_ranges);
 
@@ -1713,10 +1688,8 @@ impl InternalDocument {
         let rope = self.rope.clone();
         let tree = self.tree.clone();
 
-        let cursor_char_index = rope.line_to_char(cursor.line as usize) + cursor.character as usize;
-
-        let line = rope.line(cursor.line as usize).to_string();
-        let partial = word_before_character(cursor.character as usize, &line);
+        let line = rope.line(cursor.line() as usize).to_string();
+        let partial = word_before_character(cursor.character_byte() as usize, &line);
 
         debug!("Cursor node text is {:?}", partial);
 
@@ -1737,28 +1710,23 @@ impl InternalDocument {
                 let mut tree = tree.clone(); // This is fast
 
                 // Must come before the rope is changed!
-                let cursor_byte_index = rope_version.char_to_byte(cursor_char_index);
+                let cursor_byte_index = cursor.byte_index(&rope_version);
 
-                rope_version.insert(cursor_char_index, &change);
+                rope_version.insert(cursor.byte_index(&rope_version), &change);
 
                 // Must come after rope changed!
                 let new_end_byte = cursor_byte_index + change.len();
-                let new_end_line = cursor.line as usize;
-                let new_end_character = rope_version.byte_to_char(new_end_byte)
-                    - rope_version.line_to_char(new_end_line);
+                let new_end_position = Position::new_from_byte_index(&rope_version, new_end_byte);
 
                 let edit = InputEdit {
                     // Old range is just a zero size range
-                    start_byte: cursor_char_index,
+                    start_byte: cursor_byte_index,
                     start_position: cursor.into(),
-                    old_end_byte: cursor_char_index,
+                    old_end_byte: cursor_byte_index,
                     old_end_position: cursor.into(),
 
                     new_end_byte,
-                    new_end_position: Point {
-                        row: new_end_line,
-                        column: new_end_character,
-                    },
+                    new_end_position: new_end_position.into(),
                 };
                 tree.edit(&edit);
 
@@ -1775,7 +1743,7 @@ impl InternalDocument {
                 // "A possible source code version for {kw} (change is {change}) with rope version {rope_version}\nNew tree {:?}", new_tree.root_node().to_sexp());
 
                 let mut cursor_one_left = cursor.to_owned();
-                cursor_one_left.character = cursor_one_left.character.saturating_sub(1);
+                cursor_one_left.sub_character(1);
                 let cursor_node_version = new_tree
                     .root_node()
                     .named_descendant_for_point_range(
@@ -1856,8 +1824,8 @@ impl InternalDocument {
 }
 
 /// Returns the word before the [`character`] position in the [`line`]
-pub fn word_before_character(character: usize, line: &str) -> String {
-    line[..character]
+pub fn word_before_character(byte_index: usize, line: &str) -> String {
+    line[..byte_index]
         .chars()
         .rev()
         .take_while(|c| c.is_alphabetic())
@@ -2712,14 +2680,8 @@ mod tests {
             vec![Location {
                 uri: "http://foo/14329076".parse().unwrap(),
                 range: Range {
-                    start: Position {
-                        line: 2,
-                        character: 20
-                    },
-                    end: Position {
-                        line: 5,
-                        character: 55
-                    },
+                    start: Position::new(2, 20),
+                    end: Position::new(5, 55),
                 }
             }]
         );
