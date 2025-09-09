@@ -115,14 +115,8 @@ async fn backend_did_change_should_update_internal_rope() {
                 TextDocumentContentChangeEvent {
                     range: Some(
                         Range {
-                            start: (Position {
-                                line: 0,
-                                character: 0,
-                            }),
-                            end: Position {
-                                line: 0,
-                                character: 0,
-                            },
+                            start: (Position::new(0, 0)),
+                            end: Position::new(0, 0),
                         }
                         .into(),
                     ),
@@ -132,16 +126,13 @@ async fn backend_did_change_should_update_internal_rope() {
                 TextDocumentContentChangeEvent {
                     range: Some(
                         Range {
-                            start: (Position {
-                                line: 0,
+                            start: (Position::new(
+                                0,
                                 // Changes depend on each other in order. By the time that the first
                                 // change is applied the line ends at charater 6 not 3.
-                                character: 14,
-                            }),
-                            end: Position {
-                                line: 0,
-                                character: 14,
-                            },
+                                14,
+                            )),
+                            end: Position::new(0, 14),
                         }
                         .into(),
                     ),
@@ -198,11 +189,7 @@ async fn backend_hover_on_class_should_show_class_info() {
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position {
-                    line: 3,
-                    character: 21,
-                }
-                .into(),
+                position: Position::new(3, 21).into(),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -219,14 +206,8 @@ async fn backend_hover_on_class_should_show_class_info() {
         range,
         // Range of the "Janek" in the ontology
         Range {
-            start: Position {
-                line: 3,
-                character: 19
-            },
-            end: Position {
-                line: 3,
-                character: 24
-            }
+            start: Position::new(3, 19),
+            end: Position::new(3, 24)
         }
         .into()
     );
@@ -351,11 +332,7 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position {
-                    line: 7,
-                    character: 31,
-                }
-                .into(),
+                position: Position::new(7, 31).into(),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -372,14 +349,8 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
         range,
         // Range of the "Janek" in the ontology
         Range {
-            start: Position {
-                line: 7,
-                character: 28
-            },
-            end: Position {
-                line: 7,
-                character: 35
-            }
+            start: Position::new(7, 28),
+            end: Position::new(7, 35)
         }
         .into()
     );
@@ -407,11 +378,7 @@ async fn backend_hover_in_multi_file_ontology_on_not_imported_iri_should_not_wor
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position {
-                    line: 7,
-                    character: 38,
-                }
-                .into(),
+                position: Position::new(7, 38).into(),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -517,11 +484,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position {
-                    line: 8,
-                    character: 32,
-                }
-                .into(),
+                position: Position::new(8, 32).into(),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -626,11 +589,7 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position {
-                    line: 7,
-                    character: 32,
-                }
-                .into(),
+                position: Position::new(7, 32).into(),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -728,11 +687,7 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position {
-                    line: 7,
-                    character: 32,
-                }
-                .into(),
+                position: Position::new(7, 32).into(),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -977,14 +932,8 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
             },
             text_document: TextDocumentIdentifier { uri: url.clone() },
             range: Range {
-                start: Position {
-                    line: 0,
-                    character: 0,
-                },
-                end: Position {
-                    line: 999,
-                    character: 0,
-                },
+                start: Position::new(0, 0),
+                end: Position::new(999, 0),
             }
             .into(),
         })
@@ -1105,14 +1054,8 @@ Class: class-in-first-file
                 text: "".into(),
                 range: Some(
                     Range {
-                        start: Position {
-                            line: 2,
-                            character: 0,
-                        },
-                        end: Position {
-                            line: 2,
-                            character: 61,
-                        },
+                        start: Position::new(2, 0),
+                        end: Position::new(2, 61),
                     }
                     .into(),
                 ),
@@ -1519,19 +1462,15 @@ async fn backend_completion_test_helper(partial: &str, full: &str, ontology: &st
         .lines()
         .enumerate()
         .find_map(|(li, line)| {
-            line.find("<PARTIAL>").map(|ci| Position {
-                line: li as u32,
-                character: ci as u32,
-            })
+            line.find("<PARTIAL>")
+                .map(|ci| Position::new(li as u32, ci as u32))
         })
         .expect("Should contain <PARTIAL> str");
 
     let ontology = ontology.replace("<PARTIAL>", partial);
 
-    let pos = Position {
-        character: pos.character + partial.len() as u32,
-        ..pos
-    };
+    let mut pos = pos.to_owned();
+    pos.add_character(partial.len() as u32);
 
     service
         .inner()
@@ -1628,11 +1567,7 @@ async fn backend_completion_should_work_for_keywords() {
         .completion(CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url },
-                position: Position {
-                    line: 2,
-                    character: 6,
-                }
-                .into(),
+                position: Position::new(2, 6).into(),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -1672,11 +1607,7 @@ async fn backend_references_in_multi_file_ontology_should_work() {
         .references(ReferenceParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position {
-                    line: 7,
-                    character: 31,
-                }
-                .into(),
+                position: Position::new(7, 31).into(),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -1714,11 +1645,7 @@ async fn backend_goto_definition_in_multi_file_ontology_should_work() {
         .goto_definition(GotoDefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position {
-                    line: 7,
-                    character: 31,
-                }
-                .into(),
+                position: Position::new(7, 31).into(),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -1797,16 +1724,7 @@ async fn backend_rename_simple_iri_should_work() {
             SubClassOf: beta, beta, beta
     "};
 
-    backend_rename_helper(
-        ontology,
-        new_ontology,
-        Position {
-            line: 4,
-            character: 7,
-        },
-        "beta",
-    )
-    .await;
+    backend_rename_helper(ontology, new_ontology, Position::new(4, 7), "beta").await;
 }
 
 #[test(tokio::test)]
@@ -1824,16 +1742,7 @@ async fn backend_rename_at_end_should_work() {
         Class: beta
     "};
 
-    backend_rename_helper(
-        ontology,
-        new_ontology,
-        Position {
-            line: 3,
-            character: 8,
-        },
-        "beta",
-    )
-    .await;
+    backend_rename_helper(ontology, new_ontology, Position::new(3, 8), "beta").await;
 }
 
 #[test(tokio::test)]
@@ -1849,16 +1758,7 @@ async fn backend_rename_prefixless_simple_iri_should_work() {
             SubClassOf: beta
     "};
 
-    backend_rename_helper(
-        ontology,
-        new_ontology,
-        Position {
-            line: 1,
-            character: 7,
-        },
-        "beta",
-    )
-    .await;
+    backend_rename_helper(ontology, new_ontology, Position::new(1, 7), "beta").await;
 }
 
 #[test(tokio::test)]
@@ -1874,16 +1774,7 @@ async fn backend_rename_unknown_abbriviated_iri_should_work() {
             SubClassOf: unknown:beta
     "};
 
-    backend_rename_helper(
-        ontology,
-        new_ontology,
-        Position {
-            line: 1,
-            character: 7,
-        },
-        "beta",
-    )
-    .await;
+    backend_rename_helper(ontology, new_ontology, Position::new(1, 7), "beta").await;
 }
 
 #[test(tokio::test)]
@@ -1908,10 +1799,7 @@ async fn backend_rename_full_iri_should_shorten() {
     backend_rename_helper(
         ontology,
         new_ontology,
-        Position {
-            line: 4,
-            character: 7,
-        },
+        Position::new(4, 7),
         "https://example.com/ontology#beta",
     )
     .await;
@@ -1934,16 +1822,7 @@ async fn backend_rename_abbriviated_iri_should_work_for_matching() {
             SubClassOf: o:beta, B, o:beta
     "};
 
-    backend_rename_helper(
-        ontology,
-        new_ontology,
-        Position {
-            line: 3,
-            character: 9,
-        },
-        "beta",
-    )
-    .await;
+    backend_rename_helper(ontology, new_ontology, Position::new(3, 9), "beta").await;
 }
 
 #[test(tokio::test)]
@@ -1962,10 +1841,7 @@ async fn backend_rename_full_iri_should_work_for_matching() {
     backend_rename_helper(
         ontology,
         new_ontology,
-        Position {
-            line: 1,
-            character: 9,
-        },
+        Position::new(1, 9),
         "https://example.com/ontology#beta",
     )
     .await;
@@ -1991,10 +1867,7 @@ async fn backend_rename_full_iri_should_not_shorten() {
     backend_rename_helper(
         ontology,
         new_ontology,
-        Position {
-            line: 3,
-            character: 9,
-        },
+        Position::new(3, 9),
         "https://example.com/things#beta",
     )
     .await;

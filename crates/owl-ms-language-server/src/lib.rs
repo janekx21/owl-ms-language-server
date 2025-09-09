@@ -369,7 +369,7 @@ impl LanguageServer for Backend {
                             if l.range == Range::ZERO {
                                 u32::MAX // No range? Then put this at the end
                             } else {
-                                l.range.start.line
+                                l.range.start.line()
                             }
                         })
                         .map(|l| l.clone().into())
@@ -440,10 +440,8 @@ impl LanguageServer for Backend {
 
             debug!("The resultingn kws are {kws:#?}");
 
-            let pos_one_left = Position {
-                line: pos.line,
-                character: pos.character.checked_sub(1).unwrap_or_default(),
-            };
+            let mut pos_one_left = pos.clone();
+            pos_one_left.sub_character(1);
 
             let keywords_completion_items = kws.into_iter().map(|keyword| CompletionItem {
                 label: keyword,
@@ -706,8 +704,8 @@ impl LanguageServer for Backend {
                 match node.kind() {
                     "full_iri" => {
                         let mut range: Range = node.range().into();
-                        range.start.character += 1;
-                        range.end.character -= 1;
+                        range.start.add_character(1);
+                        range.end.sub_character(1);
                         Some(range)
                     }
                     "simple_iri" => {
@@ -718,7 +716,7 @@ impl LanguageServer for Backend {
                         let mut range: Range = node.range().into();
                         let text = node_text(&node, &doc.rope).to_string();
                         let col_offset = text.find(':').unwrap() + 1;
-                        range.start.character += col_offset as u32;
+                        range.start.add_character(col_offset as u32);
                         Some(range)
                     }
                     _ => None,
@@ -732,10 +730,8 @@ impl LanguageServer for Backend {
                     //                           ^
                     //                       Cursor
                     debug!("prepare rename try one position left");
-                    let position = Position {
-                        line: position.line,
-                        character: position.character.saturating_sub(1),
-                    };
+                    let mut position = position.clone();
+                    position.sub_character(1);
                     node_range(position, &doc)
                 })
                 .map(|range| PrepareRenameResponse::Range(range.into()));
@@ -810,10 +806,8 @@ impl LanguageServer for Backend {
                 //                           ^
                 //                       Cursor
                 debug!("prepare rename try one position left");
-                let position = Position {
-                    line: position.line,
-                    character: position.character.saturating_sub(1),
-                };
+                let mut position = position.clone();
+                position.sub_character(1);
                 rename_helper(position, &doc, new_name)
             });
 
