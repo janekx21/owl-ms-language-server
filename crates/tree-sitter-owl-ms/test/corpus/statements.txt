@@ -12,6 +12,38 @@ Ontology: <http://www.semanticweb.org/janek/ontologies/2023/9/untitled-ontology-
 		(ontology_iri (full_iri))))
 
 ===================
+Simple IRI utf-8
+===================
+
+Ontology: Ⰰﷵ
+
+---
+
+(source_file
+	(ontology
+	    (keyword_ontology)
+		(ontology_iri (simple_iri))))
+
+===================
+Simple IRI utf-8 fail on [
+:error
+===================
+
+Ontology: [
+
+---
+
+===================
+Simple IRI utf-8 fail on <
+:error
+===================
+
+Ontology: <
+
+---
+
+
+===================
 Prefix Declaration
 ===================
 
