@@ -1,7 +1,7 @@
 use crate::{catalog::Catalog, web::StaticClient, *};
 use anyhow::anyhow;
 use indoc::indoc;
-use position::Position;
+use pos::Position;
 use pretty_assertions::assert_eq;
 use ropey::Rope;
 use std::{fs, path::Path};
@@ -114,29 +114,23 @@ async fn backend_did_change_should_update_internal_rope() {
             },
             content_changes: vec![
                 TextDocumentContentChangeEvent {
-                    range: Some(
-                        Range {
-                            start: (Position::new(0, 0)),
-                            end: Position::new(0, 0),
-                        }
-                        .into(),
-                    ),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(0, 0),
+                        end: lsp_types::Position::new(0, 0),
+                    }),
                     range_length: None,
                     text: "A😊BC".to_string(),
                 },
                 TextDocumentContentChangeEvent {
-                    range: Some(
-                        Range {
-                            start: (Position::new(
-                                0,
-                                // Changes depend on each other in order. By the time that the first
-                                // change is applied the line ends at charater 6 not 3.
-                                14,
-                            )),
-                            end: Position::new(0, 14),
-                        }
-                        .into(),
-                    ),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(
+                            0,
+                            // Changes depend on each other in order. By the time that the first
+                            // change is applied the line ends at charater 6 not 3.
+                            14,
+                        ),
+                        end: lsp_types::Position::new(0, 14),
+                    }),
                     range_length: None,
                     text: "GH😊I".to_string(),
                 },
@@ -190,7 +184,7 @@ async fn backend_hover_on_class_should_show_class_info() {
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position::new(3, 21).into(),
+                position: lsp_types::Position::new(3, 21),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -206,11 +200,10 @@ async fn backend_hover_on_class_should_show_class_info() {
     assert_eq!(
         range,
         // Range of the "Janek" in the ontology
-        Range {
-            start: Position::new(3, 19),
-            end: Position::new(3, 24)
+        lsp_types::Range {
+            start: lsp_types::Position::new(3, 19),
+            end: lsp_types::Position::new(3, 24)
         }
-        .into()
     );
 
     let contents = match hover_result.contents {
@@ -333,7 +326,7 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position::new(7, 31).into(),
+                position: lsp_types::Position::new(7, 31),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -349,11 +342,10 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
     assert_eq!(
         range,
         // Range of the "Janek" in the ontology
-        Range {
-            start: Position::new(7, 28),
-            end: Position::new(7, 35)
+        lsp_types::Range {
+            start: lsp_types::Position::new(7, 28),
+            end: lsp_types::Position::new(7, 35)
         }
-        .into()
     );
 
     let contents = match hover_result.contents {
@@ -379,7 +371,7 @@ async fn backend_hover_in_multi_file_ontology_on_not_imported_iri_should_not_wor
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position::new(7, 38).into(),
+                position: lsp_types::Position::new(7, 38),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -485,7 +477,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position::new(8, 32).into(),
+                position: lsp_types::Position::new(8, 32),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -590,7 +582,7 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position::new(7, 32).into(),
+                position: lsp_types::Position::new(7, 32),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -688,7 +680,7 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position::new(7, 32).into(),
+                position: lsp_types::Position::new(7, 32),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -933,11 +925,10 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
                 work_done_token: None,
             },
             text_document: TextDocumentIdentifier { uri: url.clone() },
-            range: Range {
-                start: Position::new(0, 0),
-                end: Position::new(999, 0),
-            }
-            .into(),
+            range: lsp_types::Range {
+                start: lsp_types::Position::new(0, 0),
+                end: lsp_types::Position::new(999, 0),
+            },
         })
         .await
         .unwrap();
@@ -1054,13 +1045,10 @@ Class: class-in-first-file
             },
             content_changes: vec![TextDocumentContentChangeEvent {
                 text: "".into(),
-                range: Some(
-                    Range {
-                        start: Position::new(2, 0),
-                        end: Position::new(2, 61),
-                    }
-                    .into(),
-                ),
+                range: Some(lsp_types::Range {
+                    start: lsp_types::Position::new(2, 0),
+                    end: lsp_types::Position::new(2, 61),
+                }),
                 range_length: None,
             }],
         })
@@ -1493,7 +1481,7 @@ async fn backend_completion_test_helper(partial: &str, full: &str, ontology: &st
         .completion(CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url },
-                position: pos.into(),
+                position: pos.into_lsp(&rope, &PositionEncodingKind::UTF16),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -1564,12 +1552,12 @@ async fn backend_completion_should_not_panic() {
 
     // Act
 
-    let result = service
+    let _ = service
         .inner()
         .completion(CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url },
-                position: Position::new(2, 6).into(),
+                position: lsp_types::Position::new(2, 6),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -1598,7 +1586,7 @@ async fn backend_references_in_multi_file_ontology_should_work() {
         .references(ReferenceParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position::new(7, 31).into(),
+                position: lsp_types::Position::new(7, 31),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -1636,7 +1624,7 @@ async fn backend_goto_definition_in_multi_file_ontology_should_work() {
         .goto_definition(GotoDefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: Position::new(7, 31).into(),
+                position: lsp_types::Position::new(7, 31),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -1888,13 +1876,17 @@ async fn backend_rename_helper(
         })
         .await;
 
+    let workspace = service.inner().find_workspace(&url);
+    let doc = workspace.internal_documents.get(&url).unwrap();
+    let doc = doc.read();
+
     // Act
     let result = service
         .inner()
         .rename(RenameParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: position.into(),
+                position: position.into_lsp(&doc.rope, &PositionEncodingKind::UTF16),
             },
             new_name: new_name.to_string(),
             work_done_progress_params: WorkDoneProgressParams {

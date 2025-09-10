@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
-use crate::position::Position;
+use ropey::Rope;
+
+use crate::pos::Position;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // Range like selection therefore endposition is exclusive
@@ -14,6 +16,28 @@ impl Range {
         start: Position::ZERO,
         end: Position::ZERO,
     };
+
+    pub fn from_lsp(
+        range: &tower_lsp::lsp_types::Range,
+        rope: &Rope,
+        encoding: &tower_lsp::lsp_types::PositionEncodingKind,
+    ) -> Self {
+        Range {
+            start: Position::from_lsp(&range.start, rope, encoding),
+            end: Position::from_lsp(&range.end, rope, encoding),
+        }
+    }
+
+    pub fn into_lsp(
+        &self,
+        rope: &Rope,
+        encoding: &tower_lsp::lsp_types::PositionEncodingKind,
+    ) -> tower_lsp::lsp_types::Range {
+        tower_lsp::lsp_types::Range {
+            start: self.start.into_lsp(rope, encoding),
+            end: self.end.into_lsp(rope, encoding),
+        }
+    }
 }
 
 impl Display for Range {
@@ -29,23 +53,23 @@ impl Display for Range {
     }
 }
 
-impl From<tower_lsp::lsp_types::Range> for Range {
-    fn from(value: tower_lsp::lsp_types::Range) -> Self {
-        Range {
-            start: value.start.into(),
-            end: value.end.into(),
-        }
-    }
-}
+// impl From<tower_lsp::lsp_types::Range> for Range {
+//     fn from(value: tower_lsp::lsp_types::Range) -> Self {
+//         Range {
+//             start: value.start.into(),
+//             end: value.end.into(),
+//         }
+//     }
+// }
 
-impl From<Range> for tower_lsp::lsp_types::Range {
-    fn from(value: Range) -> tower_lsp::lsp_types::Range {
-        tower_lsp::lsp_types::Range {
-            start: value.start.into(),
-            end: value.end.into(),
-        }
-    }
-}
+// impl From<Range> for tower_lsp::lsp_types::Range {
+//     fn from(value: Range) -> tower_lsp::lsp_types::Range {
+//         tower_lsp::lsp_types::Range {
+//             start: value.start.into(),
+//             end: value.end.into(),
+//         }
+//     }
+// }
 
 impl From<tree_sitter_c2rust::Range> for Range {
     fn from(value: tree_sitter_c2rust::Range) -> Self {

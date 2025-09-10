@@ -1,6 +1,6 @@
 use crate::catalog::CatalogUri;
 use crate::consts::{get_fixed_infos, keyword_hover_info};
-use crate::position::Position;
+use crate::pos::Position;
 use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type_index};
 use crate::web::HttpClient;
 use crate::{
@@ -36,8 +36,8 @@ use std::{
     sync::Arc,
 };
 use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
-    SemanticToken, SymbolKind, Url, WorkspaceFolder,
+    DidChangeTextDocumentParams, InlayHint, InlayHintLabel, PositionEncodingKind, SemanticToken,
+    SymbolKind, Url, WorkspaceFolder,
 };
 use tree_sitter_c2rust::{
     InputEdit, Node, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
@@ -352,7 +352,7 @@ pub struct InternalDocument {
     pub tree: Tree,
     pub rope: Rope,
     pub version: i32,
-    pub diagnostics: Vec<Diagnostic>,
+    pub diagnostics: Vec<(Range, String)>, // Not using the LSP type
 }
 
 impl core::hash::Hash for InternalDocument {
@@ -534,7 +534,7 @@ impl InternalDocument {
             .collect_vec()
     }
 
-    pub fn edit(&mut self, params: &DidChangeTextDocumentParams) {
+    pub fn edit(&mut self, params: &DidChangeTextDocumentParams, enconding: &PositionEncodingKind) {
         if self.version >= params.text_document.version {
             return; // no change needed
         }
@@ -559,7 +559,7 @@ impl InternalDocument {
             .for_each(|change| {
                 let range = change.range.expect("range to be defined"); 
                     // LSP ranges are in bytes when encoding is utf-8!!!
-                    let old_range: Range = range.into();
+                    let old_range: Range = Range::from_lsp(&range, &self.rope, enconding);
                     let start_byte = old_range.start.byte_index(&self.rope);
                     let old_end_byte = old_range.end.byte_index(&self.rope);
 
@@ -731,6 +731,7 @@ impl InternalDocument {
         range: Range,
         workspace: &Workspace,
         http_client: &dyn HttpClient,
+        enconding: &PositionEncodingKind,
     ) -> Vec<InlayHint> {
         self.query_range(&ALL_QUERIES.iri_query, range)
             .into_iter()
@@ -754,7 +755,7 @@ impl InternalDocument {
                     None
                 } else {
                     Some(InlayHint {
-                        position: capture.node.range.end.into(),
+                        position: capture.node.range.end.into_lsp(&self.rope, enconding),
                         label: InlayHintLabel::String(label),
                         kind: None,
                         text_edits: None,
@@ -862,7 +863,11 @@ impl InternalDocument {
             .collect_vec()
     }
 
-    pub fn sematic_tokens(&self, range: Option<Range>) -> Vec<SemanticToken> {
+    pub fn sematic_tokens(
+        &self,
+        range: Option<Range>,
+        encoding: &PositionEncodingKind,
+    ) -> Vec<SemanticToken> {
         let doc = self;
         let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
 
@@ -875,7 +880,6 @@ impl InternalDocument {
             query_cursor.matches(&query, doc.tree.root_node(), RopeProvider::new(&doc.rope));
 
         let mut tokens = vec![];
-        let mut last_start = Point { row: 0, column: 0 };
 
         let mut nodes = matches
             .map_deref(|m| m.captures)
@@ -893,15 +897,28 @@ impl InternalDocument {
         // node start poins need to be stricly in order, because the delta might otherwise negativly overflow
         // TODO is this needed? are query matches in order?
         nodes.sort_unstable_by_key(|(n, _)| n.start_byte());
+
+        let mut last_line = 0;
+        let mut last_character = 0; // the indexing is encoding dependent
         for (node, type_index) in nodes {
-            let start = node.range().start_point;
-            let delta_line = (start.row - last_start.row) as u32;
+            let range: Range = node.range().into();
+            let range = range.into_lsp(&self.rope, encoding);
+            let start = range.start;
+
+            let delta_line = start.line - last_line;
             let delta_start = if delta_line == 0 {
-                (start.column - last_start.column) as u32 // same line
+                start.character - last_character // same line
             } else {
-                start.column as u32 // some other line
+                start.character // some other line
             };
-            let length = node_text(&node, &doc.rope).len_chars() as u32;
+            // let length = node_text(&node, &doc.rope).len_bytes() as u32;
+            // let length = Position::new(0, length);
+            // let length = length.into_lsp(&doc.rope, encoding).character;
+
+            if range.start.line != range.end.line {
+                panic!("Highlights dont span multiple lines")
+            }
+            let length = range.end.character - range.start.character;
 
             let token = SemanticToken {
                 delta_line,
@@ -911,7 +928,9 @@ impl InternalDocument {
                 token_modifiers_bitset: 0,
             };
 
-            last_start = node.start_position();
+            // last_start =  node.start_position();
+            last_line = start.line;
+            last_character = start.character;
             tokens.push(token);
         }
         tokens
@@ -1310,24 +1329,36 @@ pub struct FrameInfo {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Location {
-    uri: Url,
+    pub uri: Url,
     pub range: Range,
 }
 
-impl From<Location> for tower_lsp::lsp_types::Location {
-    fn from(val: Location) -> Self {
-        tower_lsp::lsp_types::Location {
-            uri: val.uri,
-            range: val.range.into(),
-        }
-    }
-}
+// impl From<Location> for tower_lsp::lsp_types::Location {
+//     fn from(val: Location) -> Self {
+//         tower_lsp::lsp_types::Location {
+//             uri: val.uri,
+//             range: val.range.into(),
+//         }
+//     }
+// }
 
-impl From<tower_lsp::lsp_types::Location> for Location {
-    fn from(value: tower_lsp::lsp_types::Location) -> Self {
-        Location {
-            uri: value.uri,
-            range: value.range.into(),
+// impl From<tower_lsp::lsp_types::Location> for Location {
+//     fn from(value: tower_lsp::lsp_types::Location) -> Self {
+//         Location {
+//             uri: value.uri,
+//             range: value.range.into(),
+//         }
+//     }
+// }
+impl Location {
+    pub fn into_lsp(
+        &self,
+        rope: &Rope,
+        encoding: &PositionEncodingKind,
+    ) -> tower_lsp::lsp_types::Location {
+        tower_lsp::lsp_types::Location {
+            uri: self.uri.clone(),
+            range: self.range.into_lsp(rope, encoding),
         }
     }
 }
@@ -1434,9 +1465,9 @@ pub fn node_text<'a>(node: &Node, rope: &'a Rope) -> ropey::RopeSlice<'a> {
 }
 
 /// Generate the diagnostics for a single node, walking recusivly down to every child and every syntax error within
-pub fn gen_diagnostics(node: &Node) -> Vec<Diagnostic> {
+pub fn gen_diagnostics(node: &Node) -> Vec<(Range, String)> {
     let mut cursor = node.walk();
-    let mut diagnostics = Vec::<Diagnostic>::new();
+    let mut diagnostics = Vec::<(Range, String)>::new();
 
     loop {
         let node = cursor.node();
@@ -1462,17 +1493,19 @@ pub fn gen_diagnostics(node: &Node) -> Vec<Diagnostic> {
                 let parent = node_type_to_string(parent_kind);
                 let msg = format!("Syntax Error. expected {valid_children} inside {parent}");
 
-                diagnostics.push(Diagnostic {
-                    range: range.into(),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: None,
-                    code_description: None,
-                    source: Some("owl language server".to_string()),
-                    message: msg.to_string(),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                });
+                diagnostics.push(
+                    (range, msg.to_string()),
+                    // Diagnostic {
+                    // range: range.into_lsp(doc),
+                    // severity: Some(DiagnosticSeverity::ERROR),
+                    // code: None,
+                    // code_description: None,
+                    // source: Some("owl language server".to_string()),
+                    // message: msg.to_string(),
+                    // related_information: None,
+                    // tags: None,
+                    // data: None,
+                );
             }
             // move along
             while !cursor.goto_next_sibling() {
@@ -1866,7 +1899,7 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::position::Position;
+    use crate::pos::Position;
     use indoc::indoc;
     use pretty_assertions::assert_eq;
     use test_log::test;
