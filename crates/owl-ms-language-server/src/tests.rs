@@ -4,7 +4,7 @@ use indoc::indoc;
 use pos::Position;
 use pretty_assertions::assert_eq;
 use ropey::Rope;
-use std::{fs, path::Path};
+use std::{fs, path::Path, thread};
 use tempdir::{self, TempDir};
 use test_log::test;
 use tower_lsp::LspService;
@@ -1876,9 +1876,12 @@ async fn backend_rename_helper(
         })
         .await;
 
-    let workspace = service.inner().find_workspace(&url);
-    let doc = workspace.internal_documents.get(&url).unwrap();
-    let doc = doc.read();
+    let pos = {
+        let workspace = service.inner().find_workspace(&url);
+        let doc = workspace.internal_documents.get(&url).unwrap();
+        let doc = doc.read();
+        position.into_lsp(&doc.rope, &PositionEncodingKind::UTF16)
+    };
 
     // Act
     let result = service
@@ -1886,7 +1889,7 @@ async fn backend_rename_helper(
         .rename(RenameParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                position: position.into_lsp(&doc.rope, &PositionEncodingKind::UTF16),
+                position: pos,
             },
             new_name: new_name.to_string(),
             work_done_progress_params: WorkDoneProgressParams {
@@ -2019,6 +2022,13 @@ async fn arrange_init_backend(
         .inner()
         .initialize(InitializeParams {
             workspace_folders: workspacefolder.map(|w| vec![w]),
+            capabilities: ClientCapabilities {
+                general: Some(GeneralClientCapabilities {
+                    position_encodings: Some(vec![PositionEncodingKind::UTF8]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .await;

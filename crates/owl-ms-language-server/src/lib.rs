@@ -14,12 +14,13 @@ use debugging::timeit;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
-use parking_lot::{MappedRwLockWriteGuard, RwLock, RwLockWriteGuard};
+use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockUpgradableReadGuard};
 use pos::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
 use range::Range;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
@@ -255,10 +256,12 @@ impl LanguageServer for Backend {
         let url = &params.text_document.uri;
         let workspace = self.find_workspace(url);
 
+        debug!("!");
         if let Some(document) = workspace
             .internal_documents
             .get_mut(&params.text_document.uri)
         {
+            debug!("?");
             let mut document = document.write();
             document.edit(&params, &self.position_encoding.read());
 
@@ -839,16 +842,25 @@ impl LanguageServer for Backend {
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        debug!("rename {params:?}");
         let url = params.text_document_position.text_document.uri;
         let new_name = params.new_name;
 
         let workspace = self.find_workspace(&url);
         if let Some(doc) = workspace.internal_documents.get(&url) {
-            let doc = doc.read();
+            debug!("is doc locked {}", doc.is_locked());
+
+            let doc = doc
+                .try_read_recursive_for(Duration::from_secs(1))
+                .expect("a read lock to work");
+            debug!("read doc");
             let pos: Position = Position::from_lsp(
                 &params.text_document_position.position,
                 &doc.rope,
-                &self.position_encoding.read(),
+                &self
+                    .position_encoding
+                    .try_read_recursive_for(Duration::from_secs(1))
+                    .expect("a read lock to work"),
             );
             debug!("rename {url}:{pos:?} with {new_name}");
 
@@ -915,7 +927,10 @@ impl LanguageServer for Backend {
                     .internal_documents
                     .iter()
                     .map(|doc| {
-                        let doc = doc.value().read();
+                        let doc = doc
+                            .value()
+                            .try_read_recursive_for(Duration::from_secs(1))
+                            .expect("a read lock to work");
                         let edits = doc
                             .query(&ALL_QUERIES.iri_query)
                             .into_iter()
@@ -945,8 +960,10 @@ impl LanguageServer for Backend {
                                 };
                                 if iri == full_iri && iri_kind == parent_kind {
                                     Some(TextEdit {
-                                        range: range
-                                            .into_lsp(&doc.rope, &self.position_encoding.read()),
+                                        range: range.into_lsp(
+                                            &doc.rope,
+                                            &self.position_encoding.read_recursive(),
+                                        ),
                                         new_text: new_iri
                                             .clone()
                                             .map(|new_iri| {
@@ -982,9 +999,13 @@ impl LanguageServer for Backend {
 
 impl Backend {
     /// This will find a workspace or create one for a given url
-    fn find_workspace<'a>(&'a self, url: &Url) -> MappedRwLockWriteGuard<'a, Workspace> {
-        let mut workspaces = self.workspaces.write();
-
+    fn find_workspace<'a>(&'a self, url: &Url) -> MappedRwLockReadGuard<'a, Workspace> {
+        debug!("find workspace");
+        let mut workspaces = self
+            .workspaces
+            .try_upgradable_read_for(Duration::from_secs(5))
+            .expect("a read in 1sec");
+        debug!("read locked workspace");
         // TODO there are problems when the workspace is changing
         // - A document could be in its own workspace
         // - Then a catalog file is created or modified that would place a document in that workspace
@@ -1007,15 +1028,24 @@ impl Backend {
                     uri: Url::from_file_path(file_path).expect("Valid URL from filepath"),
                     name: "Single File".into(),
                 };
+                debug!("try workspaces write...");
+                // let mut workspaces = self.workspaces.write();
                 let workspace = Workspace::new(workspace_folder.clone());
-                workspaces.push(workspace);
+                workspaces.with_upgraded(|w| {
+                    debug!("locked workspace");
+                    w.push(workspace);
+                });
                 workspace_folder
             }
             Some(w) => w.workspace_folder.clone(),
         };
 
-        RwLockWriteGuard::map(workspaces, |ws| {
-            ws.iter_mut()
+        let workspaces = RwLockUpgradableReadGuard::downgrade(workspaces);
+        // drop(workspaces);
+        // let workspaces = self.workspaces.read_recursive();
+
+        RwLockReadGuard::map(workspaces, |ws| {
+            ws.iter()
                 .find(|w| w.workspace_folder == folder)
                 .expect("The file to be located in a workspace, but it was not.")
         })
