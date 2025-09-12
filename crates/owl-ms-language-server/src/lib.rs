@@ -256,10 +256,12 @@ impl LanguageServer for Backend {
         let url = &params.text_document.uri;
         let workspace = self.find_workspace(url);
 
+        debug!("!");
         if let Some(document) = workspace
             .internal_documents
             .get_mut(&params.text_document.uri)
         {
+            debug!("?");
             let mut document = document.write();
             document.edit(&params, &self.position_encoding.read());
 
