@@ -43,7 +43,9 @@ use tree_sitter_c2rust::{InputEdit, Node, Parser, Query, QueryCursor, StreamingI
 
 static GLOBAL_PARSER: Lazy<Mutex<Parser>> = Lazy::new(|| {
     let mut parser = Parser::new();
-    parser.set_language(&LANGUAGE).unwrap();
+    parser
+        .set_language(&LANGUAGE)
+        .expect("the language to be valid");
     parser.set_logger(Some(Box::new(|type_, str| match type_ {
         tree_sitter_c2rust::LogType::Parse => trace!(target: "tree-sitter-parse", "{}", str),
         tree_sitter_c2rust::LogType::Lex => trace!(target: "tree-sitter-lex", "{}", str),
@@ -544,9 +546,13 @@ impl InternalDocument {
             .collect_vec()
     }
 
-    pub fn edit(&mut self, params: &DidChangeTextDocumentParams, enconding: &PositionEncodingKind) {
+    pub fn edit(
+        &mut self,
+        params: &DidChangeTextDocumentParams,
+        enconding: &PositionEncodingKind,
+    ) -> Result<()> {
         if self.version >= params.text_document.version {
-            return; // no change needed
+            return Ok(()); // no change needed
         }
 
         if params
@@ -561,52 +567,48 @@ impl InternalDocument {
         debug!("content changes {:#?}", params.content_changes);
 
         // This range is relative to the *old* document not the new one
-        params
-            .content_changes
-            .iter()
-            // First I thougt the order must be changed but the LSP defines it as "S -> S' -> S''"
-            //  https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#didChangeTextDocumentParams
-            .for_each(|change| {
-                let range = change.range.expect("range to be defined"); 
-                    // LSP ranges are in bytes when encoding is utf-8!!!
-                    let old_range: Range = Range::from_lsp(&range, &self.rope, enconding);
-                    let start_byte = old_range.start.byte_index(&self.rope);
-                    let old_end_byte = old_range.end.byte_index(&self.rope);
+        for change in params.content_changes.iter() {
+            let range = change.range.expect("range to be defined");
+            // LSP ranges are in bytes when encoding is utf-8!!!
+            let old_range: Range = Range::from_lsp(&range, &self.rope, enconding)?;
+            let start_byte = old_range.start.byte_index(&self.rope);
+            let old_end_byte = old_range.end.byte_index(&self.rope);
 
-                    // must come before the rope is changed!
-                    let start_char = self.rope.byte_to_char(start_byte);
-                    let old_end_char = self.rope.byte_to_char(old_end_byte);
+            // must come before the rope is changed!
+            let start_char = self.rope.byte_to_char(start_byte);
+            let old_end_char = self.rope.byte_to_char(old_end_byte);
 
-                    debug!("change range in chars {start_byte}..{old_end_byte} og range {range:?} and text {}", change.text);
+            debug!(
+                "change range in chars {start_byte}..{old_end_byte} og range {range:?} and text {}",
+                change.text
+            );
 
-                    // rope replace
-                    timeit("rope operations", || {
-                        if old_end_char < start_char {
-                            error!(
-                                "Invalid rope remove operation range. {start_char}..{old_end_char}"
-                            );
-                        }
-                        // TODO this panics now while formatting oeo physical :<
-                        self.rope.remove(start_char..old_end_char);
-                        self.rope.insert(start_char, &change.text);
-                    });
-
-                    // this must come after the rope was changed!
-                    let new_end_byte = start_byte + change.text.len();
-                    let new_end_position = Position::new_from_byte_index(&self.rope, new_end_byte);
-
-                    let edit = InputEdit {
-                        start_byte,
-                        old_end_byte,
-                        new_end_byte,
-                        start_position: old_range.start.into(),
-                        old_end_position: old_range.end.into(),
-                        new_end_position: new_end_position.into(),
-                    };
-                    timeit("tree edit", || self.tree.edit(&edit));
-
-                    self.version = params.text_document.version;
+            // rope replace
+            timeit("rope operations", || {
+                if old_end_char < start_char {
+                    error!("Invalid rope remove operation range. {start_char}..{old_end_char}");
+                }
+                // TODO this panics now while formatting oeo physical :<
+                self.rope.remove(start_char..old_end_char);
+                self.rope.insert(start_char, &change.text);
             });
+
+            // this must come after the rope was changed!
+            let new_end_byte = start_byte + change.text.len();
+            let new_end_position = Position::new_from_byte_index(&self.rope, new_end_byte);
+
+            let edit = InputEdit {
+                start_byte,
+                old_end_byte,
+                new_end_byte,
+                start_position: old_range.start.into(),
+                old_end_position: old_range.end.into(),
+                new_end_position: new_end_position.into(),
+            };
+            timeit("tree edit", || self.tree.edit(&edit));
+
+            self.version = params.text_document.version;
+        }
 
         // debug!("Change ranges {:#?}", change_ranges);
 
@@ -680,6 +682,8 @@ impl InternalDocument {
         self.diagnostics = timeit("did_change > gen_diagnostics", || {
             gen_diagnostics(&self.tree.root_node())
         });
+
+        Ok(())
     }
 
     pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: String) -> Option<String> {
@@ -753,7 +757,7 @@ impl InternalDocument {
             .query_range(&ALL_QUERIES.iri_query, range)
             .into_iter()
             .flat_map(|match_| match_.captures)
-            .filter_map(|capture| {
+            .map(|capture| {
                 let iri = trim_full_iri(capture.node.text);
                 let iri = self.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
 
@@ -769,10 +773,10 @@ impl InternalDocument {
                 let same = iri.to_lowercase().contains(&label_normalized);
 
                 if label.is_empty() || same {
-                    None
+                    Ok(None)
                 } else {
-                    Some(InlayHint {
-                        position: capture.node.range.end.into_lsp(&self.rope, enconding),
+                    Ok(Some(InlayHint {
+                        position: capture.node.range.end.into_lsp(&self.rope, enconding)?,
                         label: InlayHintLabel::String(label),
                         kind: None,
                         text_edits: None,
@@ -780,9 +784,11 @@ impl InternalDocument {
                         padding_left: Some(true),
                         padding_right: None,
                         data: None,
-                    })
+                    }))
                 }
             })
+            .filter_map(|r| r.inspect_err(|e: &Error| error!("{e}")).ok())
+            .flatten()
             .collect())
     }
 
@@ -817,7 +823,7 @@ impl InternalDocument {
         debug!("Checking {} keywords", kws.len());
 
         kws.iter()
-            .filter_map(|kw| {
+            .map(|kw| {
                 let mut rope_version = rope.clone();
                 let change = kw[partial.len()..].to_string() + " a";
 
@@ -863,20 +869,25 @@ impl InternalDocument {
                         cursor_one_left.into(),
                         cursor_one_left.into(),
                     )
-                    .unwrap();
+                    .ok_or(Error::PositionOutOfBounds(cursor_one_left))?;
 
                 debug!("{cursor_node_version:#?} is {}", cursor_node_version.kind());
 
                 if cursor_node_version.kind().starts_with("keyword_")
-                    && !cursor_node_version.parent().unwrap().is_error()
+                    && !cursor_node_version
+                        .parent()
+                        .expect("keyword to have parent")
+                        .is_error()
                 {
                     debug!("Found possible keyword {kw}!");
-                    Some(kw.to_string())
+                    Ok(Some(kw.to_string()))
                 } else {
                     debug!("{kw} is not possible");
-                    None
+                    Ok(None)
                 }
             })
+            .filter_map_ok(|x| x)
+            .filter_map(|r: Result<String>| r.inspect_err(|e| error!("{e}")).ok())
             .collect_vec()
     }
 
@@ -884,7 +895,7 @@ impl InternalDocument {
         &self,
         range: Option<Range>,
         encoding: &PositionEncodingKind,
-    ) -> Vec<SemanticToken> {
+    ) -> Result<Vec<SemanticToken>> {
         let doc = self;
         let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
 
@@ -919,7 +930,7 @@ impl InternalDocument {
         let mut last_character = 0; // the indexing is encoding dependent
         for (node, type_index) in nodes {
             let range: Range = node.range().into();
-            let range = range.into_lsp(&self.rope, encoding);
+            let range = range.into_lsp(&self.rope, encoding)?;
             let start = range.start;
 
             let delta_line = start.line - last_line;
@@ -946,7 +957,7 @@ impl InternalDocument {
             last_character = start.character;
             tokens.push(token);
         }
-        tokens
+        Ok(tokens)
     }
 }
 
@@ -1350,11 +1361,11 @@ impl Location {
         &self,
         rope: &Rope,
         encoding: &PositionEncodingKind,
-    ) -> tower_lsp::lsp_types::Location {
-        tower_lsp::lsp_types::Location {
+    ) -> Result<tower_lsp::lsp_types::Location> {
+        Ok(tower_lsp::lsp_types::Location {
             uri: self.uri.clone(),
-            range: self.range.into_lsp(rope, encoding),
-        }
+            range: self.range.into_lsp(rope, encoding)?,
+        })
     }
 }
 
@@ -1852,7 +1863,7 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
         "nested_description"
          => {
             RcDoc::text("(").append(RcDoc::line()).append(
-                to_doc(&node.named_child(0).unwrap(), rope, tab_size)
+                to_doc(&node.named_child(0).expect("open parenthese to have sibling"), rope, tab_size)
             ).nest(nest_depth).append(RcDoc::line()).append(")")
         },
         "class_frame"

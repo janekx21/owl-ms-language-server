@@ -1,7 +1,7 @@
-use std::fmt::Display;
-
+use crate::error::{Error, Result};
 use log::debug;
 use ropey::Rope;
+use std::fmt::Display;
 
 /// Zero and utf-8 byte offst based 2D text position.
 /// Positions are always related to documents (rope or string).
@@ -26,18 +26,18 @@ impl Position {
         pos: &tower_lsp::lsp_types::Position,
         rope: &Rope,
         encoding: &tower_lsp::lsp_types::PositionEncodingKind,
-    ) -> Self {
+    ) -> Result<Self> {
         let character = match encoding.as_str() {
             "utf-8" => pos.character,
             "utf-16" => {
                 let i = utf16_offset_to_utf8_offset(
                     rope.get_line(pos.line as usize)
-                        .expect("line index to be inbounds")
-                        .as_str()
-                        .unwrap_or(""),
+                        .ok_or(Error::PositionOutOfBoundsTowerLsp(*pos))?
+                        .to_string()
+                        .as_str(),
                     pos.character as usize,
                 )
-                .unwrap() as u32;
+                .ok_or(Error::PositionOutOfBoundsTowerLsp(*pos))? as u32;
                 debug!(
                     "Converting utf-16 ({}) index into utf-8 ({})",
                     pos.character, i
@@ -46,33 +46,33 @@ impl Position {
             }
             _ => todo!(),
         };
-        Self {
+        Ok(Self {
             line: pos.line,
             character,
-        }
+        })
     }
 
     pub fn into_lsp(
         &self,
         rope: &Rope,
         encoding: &tower_lsp::lsp_types::PositionEncodingKind,
-    ) -> tower_lsp::lsp_types::Position {
+    ) -> Result<tower_lsp::lsp_types::Position> {
         let character = match encoding.as_str() {
             "utf-8" => self.character,
             "utf-16" => utf8_offset_to_utf16_offset(
                 rope.get_line(self.line as usize)
-                    .expect("line index to be inbounds")
-                    .as_str()
-                    .unwrap_or(""),
+                    .ok_or(Error::PositionOutOfBounds(*self))?
+                    .to_string()
+                    .as_str(),
                 self.character as usize,
             )
-            .unwrap() as u32,
+            .ok_or(Error::PositionOutOfBounds(*self))? as u32,
             _ => todo!(),
         };
-        tower_lsp::lsp_types::Position {
+        Ok(tower_lsp::lsp_types::Position {
             line: self.line,
             character,
-        }
+        })
     }
 
     pub fn new_from_byte_index(rope: &Rope, index: usize) -> Self {

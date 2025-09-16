@@ -198,7 +198,7 @@ impl LanguageServer for Backend {
         let range: Range = doc.tree.root_node().range().into();
 
         return Ok(Some(vec![TextEdit {
-            range: range.into_lsp(&doc.rope, &self.position_encoding.read()),
+            range: range.into_lsp(&doc.rope, &self.position_encoding.read())?,
             new_text: text,
         }]));
     }
@@ -217,17 +217,21 @@ impl LanguageServer for Backend {
             let diagnostics = internal_document
                 .diagnostics
                 .iter()
-                .map(|(range, msg)| Diagnostic {
-                    range: range.into_lsp(&internal_document.rope, &self.position_encoding.read()),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: None,
-                    code_description: None,
-                    source: Some("owl language server".to_string()),
-                    message: msg.clone(),
-                    related_information: None,
-                    tags: None,
-                    data: None,
+                .map(|(range, msg)| {
+                    Ok(Diagnostic {
+                        range: range
+                            .into_lsp(&internal_document.rope, &self.position_encoding.read())?,
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        code: None,
+                        code_description: None,
+                        source: Some("owl language server".to_string()),
+                        message: msg.clone(),
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    })
                 })
+                .filter_map(|r: Result<Diagnostic>| r.inspect_err(|e| error!("{e}")).ok())
                 .collect_vec();
 
             let client = self.client.clone();
@@ -272,23 +276,26 @@ impl LanguageServer for Backend {
             let document = self.get_internal_document(url)?;
 
             let mut document = document.write();
-            document.edit(&params, &self.position_encoding.read());
+            document.edit(&params, &self.position_encoding.read())?;
 
             let uri = params.text_document.uri.clone();
             let diagnostics = document
                 .diagnostics
                 .iter()
-                .map(|(range, msg)| Diagnostic {
-                    range: range.into_lsp(&document.rope, &self.position_encoding.read()),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: None,
-                    code_description: None,
-                    source: Some("owl language server".to_string()),
-                    message: msg.clone(),
-                    related_information: None,
-                    tags: None,
-                    data: None,
+                .map(|(range, msg)| {
+                    Ok(Diagnostic {
+                        range: range.into_lsp(&document.rope, &self.position_encoding.read())?,
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        code: None,
+                        code_description: None,
+                        source: Some("owl language server".to_string()),
+                        message: msg.clone(),
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    })
                 })
+                .filter_map(|r: Result<Diagnostic>| r.inspect_err(|e| error!("{e}")).ok())
                 .collect_vec();
             let client = self.client.clone();
             let version = Some(document.version);
@@ -335,7 +342,7 @@ impl LanguageServer for Backend {
             &params.text_document_position_params.position,
             &doc.rope,
             &self.position_encoding.read(),
-        );
+        )?;
         let node = doc
             .tree
             .root_node()
@@ -351,7 +358,7 @@ impl LanguageServer for Backend {
             let range: Range = node.range().into();
             Some(Hover {
                 contents: HoverContents::Scalar(MarkedString::String(info)),
-                range: Some(range.into_lsp(&doc.rope, &self.position_encoding.read())),
+                range: Some(range.into_lsp(&doc.rope, &self.position_encoding.read())?),
             })
         })
     }
@@ -366,7 +373,7 @@ impl LanguageServer for Backend {
             &params.range,
             &document.rope,
             &self.position_encoding.read(),
-        );
+        )?;
         debug!(
             "inlay_hint at {}:{range}",
             url.path_segments()
@@ -394,7 +401,7 @@ impl LanguageServer for Backend {
             &params.text_document_position_params.position,
             &doc.rope,
             &self.position_encoding.read(),
-        );
+        )?;
 
         let leaf_node = doc
             .tree
@@ -430,6 +437,7 @@ impl LanguageServer for Backend {
                         l.clone()
                             .into_lsp(&doc.rope, &__self.position_encoding.read())
                     })
+                    .filter_map(|r| r.inspect_err(|e| error!("{e}")).ok())
                     .collect_vec();
 
                 return Ok(Some(GotoDefinitionResponse::Array(locations)));
@@ -454,8 +462,8 @@ impl LanguageServer for Backend {
                     url,
                     vec![TextEdit {
                         range: lsp_types::Range {
-                            start: end.into_lsp(&doc.rope, &self.position_encoding.read()),
-                            end: end.into_lsp(&doc.rope, &self.position_encoding.read()),
+                            start: end.into_lsp(&doc.rope, &self.position_encoding.read())?,
+                            end: end.into_lsp(&doc.rope, &self.position_encoding.read())?,
                         },
                         new_text:
                             "\nClass: new_class\n    Annotations:\n        rdfs:label \"new class\""
@@ -483,7 +491,7 @@ impl LanguageServer for Backend {
             &params.text_document_position.position,
             &doc.rope,
             &self.position_encoding.read(),
-        );
+        )?;
 
         let kws = timeit("try_keywords_at_position", || {
             doc.try_keywords_at_position(pos)
@@ -553,7 +561,7 @@ impl LanguageServer for Backend {
         let doc = self.get_internal_document(&url)?;
         let doc = doc.read();
 
-        let tokens = doc.sematic_tokens(None, &self.position_encoding.read());
+        let tokens = doc.sematic_tokens(None, &self.position_encoding.read())?;
 
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
@@ -569,8 +577,8 @@ impl LanguageServer for Backend {
         let url = params.text_document.uri;
         let doc = self.get_internal_document(&url)?;
         let doc = doc.read();
-        let range = Range::from_lsp(&params.range, &doc.rope, &self.position_encoding.read());
-        let tokens = doc.sematic_tokens(Some(range), &self.position_encoding.read());
+        let range = Range::from_lsp(&params.range, &doc.rope, &self.position_encoding.read())?;
+        let tokens = doc.sematic_tokens(Some(range), &self.position_encoding.read())?;
 
         return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
             result_id: None,
@@ -590,20 +598,23 @@ impl LanguageServer for Backend {
             infos
                 .iter()
                 .flat_map(|info| {
-                    info.definitions.iter().map(|def| SymbolInformation {
-                        name: info.iri.clone(),
-                        kind: info.frame_type.into(),
-                        tags: None,
-                        deprecated: None,
-                        location: Location {
-                            uri: url.clone(),
-                            range: def
-                                .range
-                                .into_lsp(&doc.read().rope, &self.position_encoding.read()),
-                        },
-                        container_name: None,
+                    info.definitions.iter().map(|def| {
+                        Ok(SymbolInformation {
+                            name: info.iri.clone(),
+                            kind: info.frame_type.into(),
+                            tags: None,
+                            deprecated: None,
+                            location: Location {
+                                uri: url.clone(),
+                                range: def
+                                    .range
+                                    .into_lsp(&doc.read().rope, &self.position_encoding.read())?,
+                            },
+                            container_name: None,
+                        })
                     })
                 })
+                .filter_map(|r: MyResult<SymbolInformation>| r.inspect_err(|e| error!("{e}")).ok())
                 .collect_vec(),
         )));
     }
@@ -648,6 +659,7 @@ impl LanguageServer for Backend {
                                 .clone()
                                 .into_lsp(&doc.rope, &self.position_encoding.read())
                         })
+                        .and_then(|r| r.inspect_err(|e| error!("{e}")))
                         .unwrap_or(Location {
                             uri: url.clone(),
                             range: lsp_types::Range::default(),
@@ -678,7 +690,7 @@ impl LanguageServer for Backend {
                 &params.text_document_position.position,
                 &doc.rope,
                 &self.position_encoding.read(),
-            );
+            )?;
 
             let node = doc
                 .tree
@@ -710,7 +722,7 @@ impl LanguageServer for Backend {
                     let doc = doc.value().read();
                     doc.query(&ALL_QUERIES.iri_query)
                         .into_iter()
-                        .filter_map(|m| {
+                        .map(|m| {
                             let (iri, range) = match &m.captures[..] {
                                 [iri_capture] => (
                                     match iri_capture.node.kind.as_str() {
@@ -728,15 +740,17 @@ impl LanguageServer for Backend {
                                 _ => unreachable!(),
                             };
                             if iri == full_iri {
-                                Some(Location {
+                                Ok(Some(Location {
                                     uri: doc.uri.clone(),
                                     range: range
-                                        .into_lsp(&doc.rope, &self.position_encoding.read()),
-                                })
+                                        .into_lsp(&doc.rope, &self.position_encoding.read())?,
+                                }))
                             } else {
-                                None
+                                Ok(None)
                             }
                         })
+                        .filter_map(|r| r.inspect_err(|e: &Error| error!("{e}")).ok())
+                        .flatten()
                         .collect_vec()
                 })
                 .collect_vec();
@@ -755,7 +769,7 @@ impl LanguageServer for Backend {
         let doc = self.get_internal_document(&url)?;
         let doc = doc.read();
         let pos: Position =
-            Position::from_lsp(&params.position, &doc.rope, &self.position_encoding.read());
+            Position::from_lsp(&params.position, &doc.rope, &self.position_encoding.read())?;
 
         fn node_range(position: Position, doc: &InternalDocument) -> Option<Range> {
             debug!("prepare_rename try {position:?}");
@@ -819,10 +833,11 @@ impl LanguageServer for Backend {
                 node_range(position, &doc)
             })
             .map(|range| {
-                PrepareRenameResponse::Range(
-                    range.into_lsp(&doc.rope, &self.position_encoding.read()),
-                )
-            });
+                Ok(PrepareRenameResponse::Range(
+                    range.into_lsp(&doc.rope, &self.position_encoding.read())?,
+                ))
+            })
+            .and_then(|r| r.inspect_err(|e: &Error| error!("{e}")).ok());
         debug!("prepare rename found range {range:?}");
 
         Ok(range)
@@ -841,7 +856,7 @@ impl LanguageServer for Backend {
             &params.text_document_position.position,
             &doc.rope,
             &self.position_encoding.read_recursive(),
-        );
+        )?;
 
         fn rename_helper(
             position: Position,
@@ -937,7 +952,7 @@ impl LanguageServer for Backend {
                     let edits = doc
                         .query(&ALL_QUERIES.iri_query)
                         .into_iter()
-                        .filter_map(|m| {
+                        .map(|m| {
                             let (iri, range, parent_kind) = match &m.captures[..] {
                                 [iri_capture] => (
                                     match iri_capture.node.kind.as_str() {
@@ -962,11 +977,11 @@ impl LanguageServer for Backend {
                                 _ => unreachable!(),
                             };
                             if iri == full_iri && iri_kind == parent_kind {
-                                Some(TextEdit {
+                                Ok(Some(TextEdit {
                                     range: range.into_lsp(
                                         &doc.rope,
                                         &self.position_encoding.read_recursive(),
-                                    ),
+                                    )?,
                                     new_text: new_iri
                                         .clone()
                                         .map(|new_iri| {
@@ -974,11 +989,13 @@ impl LanguageServer for Backend {
                                                 .unwrap_or(format!("<{}>", new_iri))
                                         })
                                         .unwrap_or(original.clone()),
-                                })
+                                }))
                             } else {
-                                None
+                                Ok(None)
                             }
                         })
+                        .filter_map(|r| r.inspect_err(|e: &Error| error!("{e}")).ok())
+                        .flatten()
                         .collect_vec();
                     (doc.uri.clone(), edits)
                 })

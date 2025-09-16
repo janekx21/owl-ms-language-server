@@ -3,7 +3,7 @@ use indoc::indoc;
 use pos::Position;
 use pretty_assertions::assert_eq;
 use ropey::Rope;
-use std::{fs, path::Path, thread};
+use std::{fs, path::Path};
 use tempdir::{self, TempDir};
 use test_log::test;
 use tower_lsp::LspService;
@@ -1479,6 +1479,8 @@ async fn backend_completion_test_helper(partial: &str, full: &str, ontology: &st
         })
         .await;
 
+    let pos = pos.into_lsp(&rope, &PositionEncodingKind::UTF16).unwrap();
+
     // Act
 
     let result = service
@@ -1486,7 +1488,7 @@ async fn backend_completion_test_helper(partial: &str, full: &str, ontology: &st
         .completion(CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url },
-                position: pos.into_lsp(&rope, &PositionEncodingKind::UTF16),
+                position: pos,
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -1881,15 +1883,17 @@ async fn backend_rename_helper(
         })
         .await;
 
-    let pos = position.into_lsp(
-        &service
-            .inner()
-            .get_internal_document(&url)
-            .unwrap()
-            .read()
-            .rope,
-        &PositionEncodingKind::UTF16,
-    );
+    let pos = position
+        .into_lsp(
+            &service
+                .inner()
+                .get_internal_document(&url)
+                .unwrap()
+                .read()
+                .rope,
+            &PositionEncodingKind::UTF16,
+        )
+        .unwrap();
 
     // Act
     let result = service

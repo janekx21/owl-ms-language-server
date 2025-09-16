@@ -24,6 +24,8 @@ pub enum Error {
     InvalidUrl(Url),
     #[error("The position is not inside the bounds {0}")]
     PositionOutOfBounds(Position),
+    #[error("The tower lsp position is not inside the bounds {0:?}")]
+    PositionOutOfBoundsTowerLsp(tower_lsp::lsp_types::Position),
     // From other error types
     #[error("Ureq Error: {0}")]
     Ureq(#[from] ureq::Error),
@@ -32,7 +34,7 @@ pub enum Error {
     #[error("IO Error: {0}")]
     Io(#[from] io::Error),
     #[error("Tokio Join Error: {0}")]
-    TokoJoinError(#[from] tokio::task::JoinError),
+    TokioJoin(#[from] tokio::task::JoinError),
 }
 
 impl From<Error> for tower_lsp::jsonrpc::Error {
