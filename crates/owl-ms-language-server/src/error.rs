@@ -31,6 +31,8 @@ pub enum Error {
     HornedOwl(#[from] horned_owl::error::HornedError),
     #[error("IO Error: {0}")]
     Io(#[from] io::Error),
+    #[error("Tokio Join Error: {0}")]
+    TokoJoinError(#[from] tokio::task::JoinError),
 }
 
 impl From<Error> for tower_lsp::jsonrpc::Error {
@@ -50,11 +52,11 @@ impl From<Error> for tower_lsp::jsonrpc::Error {
 
 pub trait ResultExt<T> {
     /// Consumes and logs the result if it contains error
-    fn log_result(self);
+    fn log_if_error(self);
 }
 
 impl<T> ResultExt<T> for Result<T> {
-    fn log_result(self) {
+    fn log_if_error(self) {
         match self {
             Ok(_) => {}
             Err(e) => error!("{e}"),

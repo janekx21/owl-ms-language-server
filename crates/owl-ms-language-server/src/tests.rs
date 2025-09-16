@@ -3,7 +3,7 @@ use indoc::indoc;
 use pos::Position;
 use pretty_assertions::assert_eq;
 use ropey::Rope;
-use std::{fs, path::Path};
+use std::{fs, path::Path, thread};
 use tempdir::{self, TempDir};
 use test_log::test;
 use tower_lsp::LspService;
@@ -84,7 +84,7 @@ async fn backend_did_open_should_create_document() {
 
 /// This tests if the "did_change" feature works on the lsp. It takes the document DEF and adds two changes resolving in ABCDEFGHI.
 #[test(tokio::test)]
-async fn backend_did_change_should_update_internal_rope() {
+async fn backend_did_change_should_update_internal_rope() -> error::Result<()> {
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
@@ -138,7 +138,7 @@ async fn backend_did_change_should_update_internal_rope() {
         .await;
 
     // Assert
-    let workspace = service.inner().find_workspace(&ontology_url);
+    let workspace = service.inner().find_workspace(&ontology_url)?;
     let workspace = workspace.read();
 
     let doc = workspace
@@ -149,6 +149,7 @@ async fn backend_did_change_should_update_internal_rope() {
     let doc_content = doc.rope.to_string();
 
     assert_eq!(doc_content, "A😊BCDE😊FGH😊I");
+    Ok(())
 }
 
 #[test(tokio::test)]
@@ -704,7 +705,7 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
 }
 
 #[test(tokio::test)]
-async fn backend_formatting_on_file_should_correctly_format() {
+async fn backend_formatting_on_file_should_correctly_format() -> error::Result<()> {
     // Arrange
 
     let source = indoc! {"
@@ -831,13 +832,13 @@ async fn backend_formatting_on_file_should_correctly_format() {
         })
         .await;
 
-    let workspace = service.inner().find_workspace(&url);
+    let workspace = service.inner().find_workspace(&url)?;
     let workspace = workspace.read();
-    // let ws = workspaces.iter().exactly_one().unwrap();
     let doc = workspace.internal_documents.get(&url).unwrap();
     let doc = doc.read();
     assert_eq!(doc.diagnostics, vec![], "doc:\n{}", doc.rope.to_string());
     assert_eq!(doc.rope.to_string(), target);
+    Ok(())
 }
 
 #[test(tokio::test)]
@@ -1342,7 +1343,6 @@ async fn backend_did_open_should_load_external_documents_via_file() {
         .await;
 
     // Assert
-
     assert_empty_diagnostics(&service);
     let workspaces = service.inner().workspaces.read();
     let workspace = workspaces

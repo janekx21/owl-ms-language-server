@@ -204,7 +204,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        (|| {
+        async {
             let url = params.text_document.uri;
             info!("Opend file {url}",);
             let workspace = self.find_workspace(&url)?;
@@ -231,7 +231,7 @@ impl LanguageServer for Backend {
                 .collect_vec();
 
             let client = self.client.clone();
-            tokio::spawn(async move {
+            let a = tokio::spawn(async move {
                 client
                     .publish_diagnostics(url.clone(), diagnostics, Some(internal_document.version))
                     .await;
@@ -240,12 +240,18 @@ impl LanguageServer for Backend {
             let document = Workspace::insert_internal_document(workspace, internal_document);
 
             let http_client = self.http_client.clone();
-            tokio::spawn(async move {
-                resolve_imports(document, &*http_client).await.log_result();
+            let b = tokio::spawn(async move {
+                resolve_imports(document, &*http_client)
+                    .await
+                    .log_if_error();
             });
+
+            tokio::try_join!(a, b)?;
+
             Ok(())
-        })()
-        .log_result();
+        }
+        .await
+        .log_if_error();
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -291,7 +297,7 @@ impl LanguageServer for Backend {
             });
             Ok(())
         })()
-        .log_result();
+        .log_if_error();
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -309,7 +315,7 @@ impl LanguageServer for Backend {
 
             Ok(())
         })()
-        .log_result();
+        .log_if_error();
 
         // We do not close yet :> because of refences
         // TODO should data be deleted if a file is closed?
