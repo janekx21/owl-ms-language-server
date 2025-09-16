@@ -1,5 +1,6 @@
 use crate::catalog::CatalogUri;
 use crate::consts::{get_fixed_infos, keyword_hover_info};
+use crate::error::{Error, Result, RwLockExt};
 use crate::pos::Position;
 use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type_index};
 use crate::web::HttpClient;
@@ -7,8 +8,6 @@ use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
     rope_provider::RopeProvider, LANGUAGE, NODE_TYPES,
 };
-use anyhow::Result;
-use anyhow::{anyhow, Context};
 use cached::proc_macro::cached;
 use cached::SizedCache;
 use core::fmt;
@@ -28,6 +27,7 @@ use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter::once;
 use std::ops::Deref;
+use std::sync::Weak;
 use std::{
     collections::{HashMap, HashSet},
     fmt::Display,
@@ -39,9 +39,7 @@ use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, InlayHint, InlayHintLabel, PositionEncodingKind, SemanticToken,
     SymbolKind, Url, WorkspaceFolder,
 };
-use tree_sitter_c2rust::{
-    InputEdit, Node, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
-};
+use tree_sitter_c2rust::{InputEdit, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
 static GLOBAL_PARSER: Lazy<Mutex<Parser>> = Lazy::new(|| {
     let mut parser = Parser::new();
@@ -92,7 +90,7 @@ impl Workspace {
     }
 
     pub fn insert_internal_document(
-        &self,
+        workspace: Arc<RwLock<Workspace>>,
         document: InternalDocument,
     ) -> Arc<RwLock<InternalDocument>> {
         debug!(
@@ -102,9 +100,20 @@ impl Workspace {
         );
         let uri = document.uri.clone();
         let arc = Arc::new(RwLock::new(document));
-        self.internal_documents.insert(uri, arc.clone());
-        arc
+        let mut doc = arc.write();
+        doc.workspace = Arc::downgrade(&workspace);
+        let workspace = workspace.read();
+        workspace.internal_documents.insert(uri, arc.clone());
+        arc.clone()
     }
+
+    pub fn get_internal_document(&self, url: &Url) -> Result<Arc<RwLock<InternalDocument>>> {
+        self.internal_documents
+            .get(url)
+            .map(|d| d.clone())
+            .ok_or(Error::DocumentNotFound(url.clone()))
+    }
+
     pub fn insert_external_document(
         &self,
         document: ExternalDocument,
@@ -157,37 +166,35 @@ impl Workspace {
     }
 
     pub fn get_frame_info_recursive(
-        &self,
+        workspace: Arc<RwLock<Workspace>>,
         iri: &Iri,
         doc: &InternalDocument,
         http_client: &dyn HttpClient,
     ) -> Option<FrameInfo> {
-        timeit("rechable docs", || {
-            doc.reachable_docs_recusive(self, http_client)
-        })
-        .iter()
-        .filter_map(|url| {
-            if let Ok(doc) = timeit("\tresolve document", || {
-                self.resolve_url_to_document(url, http_client)
-            }) {
-                match &doc {
-                    DocumentReference::Internal(rw_lock) => {
-                        timeit("\t|-> get frame info internal", || {
-                            rw_lock.read().get_frame_info(iri)
-                        })
+        timeit("rechable docs", || doc.reachable_docs_recusive(http_client))
+            .iter()
+            .filter_map(|url| {
+                if let Ok(doc) = timeit("\tresolve document", || {
+                    Workspace::resolve_url_to_document(workspace.clone(), url, http_client)
+                }) {
+                    match &doc {
+                        DocumentReference::Internal(rw_lock) => {
+                            timeit("\t|-> get frame info internal", || {
+                                rw_lock.read().get_frame_info(iri)
+                            })
+                        }
+                        DocumentReference::External(rw_lock) => {
+                            timeit("\t|-> get frame info external", || {
+                                rw_lock.write().get_frame_info(iri)
+                            })
+                        }
                     }
-                    DocumentReference::External(rw_lock) => {
-                        timeit("\t|-> get frame info external", || {
-                            rw_lock.write().get_frame_info(iri)
-                        })
-                    }
+                } else {
+                    None
                 }
-            } else {
-                None
-            }
-        })
-        .chain(get_fixed_infos(iri))
-        .tree_reduce(FrameInfo::merge)
+            })
+            .chain(get_fixed_infos(iri))
+            .tree_reduce(FrameInfo::merge)
     }
 
     pub fn node_info(&self, node: &Node, doc: &InternalDocument) -> String {
@@ -221,7 +228,7 @@ impl Workspace {
         }
     }
 
-    fn find_catalog_uri(&self, url: &Url) -> Option<(&Catalog, &CatalogUri)> {
+    pub fn find_catalog_uri(&self, url: &Url) -> Option<(&Catalog, &CatalogUri)> {
         let url_string = url.to_string();
 
         for catalog in &self.catalogs {
@@ -248,22 +255,23 @@ impl Workspace {
 
     /// Resolves a URL (file or http/https protocol) to a document that is inserted into this workspace
     pub fn resolve_url_to_document(
-        &self,
+        workspace: Arc<RwLock<Workspace>>,
         url: &Url,
         client: &dyn HttpClient,
     ) -> Result<DocumentReference> {
-        if let Some(doc) = self.get_document_by_url(url) {
+        let w = workspace.read();
+        if let Some(doc) = w.get_document_by_url(url) {
             return Ok(doc);
         }
 
-        let (catalog, catalog_uri) = if let Some(a) = self.find_catalog_uri(url) {
+        let ws = workspace.read();
+        let (catalog, catalog_uri) = if let Some(a) = ws.find_catalog_uri(url) {
             a
         } else {
             warn!("Url {url} could not be found in any catalog");
-            let document_text = client.get(url.as_str()).context("Http client request")?;
-            let document = ExternalDocument::new(document_text, url.clone())
-                .context("External document creation")?;
-            let doc = self.insert_external_document(document);
+            let document_text = client.get(url.as_str())?;
+            let document = ExternalDocument::new(document_text, url.clone())?;
+            let doc = workspace.read().insert_external_document(document);
             return Ok(DocumentReference::External(doc));
         };
 
@@ -271,22 +279,20 @@ impl Workspace {
 
         match url_from_catalog {
             Ok(url) => {
-                if let Some(doc) = self.get_document_by_url(&url) {
+                if let Some(doc) = workspace.read().get_document_by_url(&url) {
                     return Ok(doc);
                 }
 
                 match url.to_file_path() {
                     Ok(path) => {
                         // This is an abolute file path url
-                        self.resolve_path_to_document(path)
+                        Workspace::resolve_path_to_document(workspace.clone(), path)
                     }
                     Err(_) => {
                         // This is an external url
-                        let document_text =
-                            client.get(url.as_str()).context("Http client request")?;
-                        let document = ExternalDocument::new(document_text, url)
-                            .context("External document creation")?;
-                        let doc = self.insert_external_document(document);
+                        let document_text = client.get(url.as_str())?;
+                        let document = ExternalDocument::new(document_text, url)?;
+                        let doc = workspace.read().insert_external_document(document);
                         Ok(DocumentReference::External(doc))
                     }
                 }
@@ -295,17 +301,20 @@ impl Workspace {
                 // This is a relative file path
                 let path = catalog.parent_folder().join(&catalog_uri.uri);
                 let url =
-                    Url::from_file_path(&path).map_err(|_| anyhow!("Url is not a file path"))?;
-                if let Some(doc) = self.get_document_by_url(&url) {
+                    Url::from_file_path(&path).map_err(|_| Error::InvalidFilePath(path.clone()))?;
+                if let Some(doc) = workspace.read().get_document_by_url(&url) {
                     return Ok(doc);
                 }
 
-                self.resolve_path_to_document(path)
+                Workspace::resolve_path_to_document(workspace.clone(), path)
             }
         }
     }
 
-    fn resolve_path_to_document(&self, path: PathBuf) -> Result<DocumentReference> {
+    fn resolve_path_to_document(
+        workspace: Arc<RwLock<Workspace>>,
+        path: PathBuf,
+    ) -> Result<DocumentReference> {
         let (document_text, document_url) = load_file_from_disk(path.clone())?;
 
         match path
@@ -315,15 +324,16 @@ impl Workspace {
         {
             "omn" => {
                 let document = InternalDocument::new(document_url, -1, document_text);
-                let doc = self.insert_internal_document(document);
+                let doc = Workspace::insert_internal_document(workspace, document);
                 Ok(DocumentReference::Internal(doc))
             }
             "owl" | "owx" => {
                 let document = ExternalDocument::new(document_text, document_url)?;
-                let doc = self.insert_external_document(document);
+                let workspace = workspace.read_timeout()?;
+                let doc = workspace.insert_external_document(document);
                 Ok(DocumentReference::External(doc))
             }
-            ext => Err(anyhow!("The extention {ext} is not supported")),
+            ext => Err(Error::DocumentNotSupported(ext.to_string())),
         }
     }
 }
@@ -333,7 +343,7 @@ fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
 
     Ok((
         fs::read_to_string(&path)?,
-        Url::from_file_path(&path).map_err(|_| anyhow!("Url is not a file path"))?,
+        Url::from_file_path(&path).map_err(|_| Error::InvalidFilePath(path))?,
     ))
 }
 
@@ -353,6 +363,7 @@ pub struct InternalDocument {
     pub rope: Rope,
     pub version: i32,
     pub diagnostics: Vec<(Range, String)>, // Not using the LSP type
+    pub workspace: Weak<RwLock<Workspace>>,
 }
 
 impl core::hash::Hash for InternalDocument {
@@ -387,6 +398,7 @@ impl InternalDocument {
             tree,
             rope,
             diagnostics,
+            workspace: Weak::new(),
         }
     }
 
@@ -408,17 +420,16 @@ impl InternalDocument {
     pub fn query_with_imports(
         &self,
         query: &Query,
-        workspace: &Workspace,
+        workspace: Arc<RwLock<Workspace>>,
         http_client: &dyn HttpClient,
     ) -> Vec<UnwrappedQueryMatch> {
         // Resolve the documents that are imported here
         // This also contains itself!
         let docs = self
-            .reachable_docs_recusive(workspace, http_client)
+            .reachable_docs_recusive(http_client)
             .iter()
             .filter_map(|url| {
-                workspace
-                    .resolve_url_to_document(url, http_client)
+                Workspace::resolve_url_to_document(workspace.clone(), url, http_client)
                     .inspect_err(|e| error!("{e:?}"))
                     .ok()
             })
@@ -453,25 +464,22 @@ impl InternalDocument {
         }
     }
 
-    fn reachable_docs_recusive(
-        &self,
-        workspace: &Workspace,
-        http_client: &dyn HttpClient,
-    ) -> Vec<Url> {
+    fn reachable_docs_recusive(&self, http_client: &dyn HttpClient) -> Vec<Url> {
         let mut set: HashSet<Url> = HashSet::new();
-        self.reachable_docs_recursive_helper(workspace, &mut set, http_client);
+        let _ = self
+            .reachable_docs_recursive_helper(&mut set, http_client)
+            .inspect_err(|e| error!("{e}"));
         set.into_iter().collect_vec()
     }
 
     fn reachable_docs_recursive_helper(
         &self,
-        workspace: &Workspace,
         result: &mut HashSet<Url>,
         http_client: &dyn HttpClient,
-    ) {
+    ) -> Result<()> {
         if result.contains(&self.uri) {
             // Do nothing
-            return;
+            return Ok(());
         }
 
         result.insert(self.uri.clone());
@@ -480,7 +488,7 @@ impl InternalDocument {
             .iter()
             .filter_map(|url| {
                 timeit("\t resolve url to doc", || {
-                    workspace.resolve_url_to_document(url, http_client)
+                    Workspace::resolve_url_to_document(self.try_get_workspace()?, url, http_client)
                 })
                 .inspect_err(|e| error!("{e:?}"))
                 .ok()
@@ -491,13 +499,15 @@ impl InternalDocument {
             match doc {
                 DocumentReference::Internal(internal_document) => internal_document
                     .read()
-                    .reachable_docs_recursive_helper(workspace, result, http_client),
-                DocumentReference::External(e) => {
-                    e.read()
-                        .reachable_docs_recursive_helper(workspace, result, http_client)
-                }
+                    .reachable_docs_recursive_helper(result, http_client)?,
+                DocumentReference::External(e) => e.read().reachable_docs_recursive_helper(
+                    self.try_get_workspace()?,
+                    result,
+                    http_client,
+                )?,
             };
         }
+        Ok(())
     }
 
     fn imports(&self) -> Vec<Url> {
@@ -726,14 +736,21 @@ impl InternalDocument {
         prefixes_helper(self)
     }
 
+    pub fn try_get_workspace(&self) -> Result<Arc<RwLock<Workspace>>> {
+        self.workspace
+            .upgrade()
+            .ok_or(Error::WorkspaceNotFound(self.uri.clone()))
+    }
+
     pub fn inlay_hint(
         &self,
         range: Range,
-        workspace: &Workspace,
         http_client: &dyn HttpClient,
         enconding: &PositionEncodingKind,
-    ) -> Vec<InlayHint> {
-        self.query_range(&ALL_QUERIES.iri_query, range)
+    ) -> Result<Vec<InlayHint>> {
+        let workspace = self.try_get_workspace()?;
+        Ok(self
+            .query_range(&ALL_QUERIES.iri_query, range)
             .into_iter()
             .flat_map(|match_| match_.captures)
             .filter_map(|capture| {
@@ -741,7 +758,7 @@ impl InternalDocument {
                 let iri = self.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
 
                 let label = timeit("get frame info recursive", || {
-                    workspace.get_frame_info_recursive(&iri, self, http_client)
+                    Workspace::get_frame_info_recursive(workspace.clone(), &iri, self, http_client)
                 })
                 .and_then(|frame_info| frame_info.label())
                 .unwrap_or_default();
@@ -766,7 +783,7 @@ impl InternalDocument {
                     })
                 }
             })
-            .collect_vec()
+            .collect())
     }
 
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
@@ -1125,8 +1142,7 @@ impl ExternalDocument {
         match url.path().rsplit_once(".") {
             // TODO parse both
             Some((_, "owx")) => {
-                let (ontology, _) = horned_owl::io::owx::reader::read_with_build(&mut buffer, &b)
-                    .map_err(horned_to_anyhow)?;
+                let (ontology, _) = horned_owl::io::owx::reader::read_with_build(&mut buffer, &b)?;
 
                 Ok(ExternalDocument {
                     uri: url,
@@ -1140,8 +1156,7 @@ impl ExternalDocument {
                     &mut buffer,
                     &b,
                     ParserConfiguration::default(),
-                )
-                .map_err(horned_to_anyhow)?;
+                )?;
 
                 let ontology = SetOntology::from_index(ontology.i().clone());
 
@@ -1169,13 +1184,13 @@ impl ExternalDocument {
 
     fn reachable_docs_recursive_helper(
         &self,
-        workspace: &Workspace,
+        workspace: Arc<RwLock<Workspace>>,
         result: &mut HashSet<Url>,
         http_client: &dyn HttpClient,
-    ) {
+    ) -> Result<()> {
         if result.contains(&self.uri) {
             // Do nothing
-            return;
+            return Ok(());
         }
 
         result.insert(self.uri.clone());
@@ -1184,8 +1199,7 @@ impl ExternalDocument {
             .imports()
             .iter()
             .filter_map(|url| {
-                workspace
-                    .resolve_url_to_document(url, http_client)
+                Workspace::resolve_url_to_document(workspace.clone(), url, http_client)
                     .inspect_err(|e| error!("{e:?}"))
                     .ok()
             })
@@ -1195,13 +1209,15 @@ impl ExternalDocument {
             match doc {
                 DocumentReference::Internal(internal_document) => internal_document
                     .read()
-                    .reachable_docs_recursive_helper(workspace, result, http_client),
-                DocumentReference::External(e) => {
-                    e.read()
-                        .reachable_docs_recursive_helper(workspace, result, http_client)
-                }
+                    .reachable_docs_recursive_helper(result, http_client)?,
+                DocumentReference::External(e) => e.read().reachable_docs_recursive_helper(
+                    workspace.clone(),
+                    result,
+                    http_client,
+                )?,
             };
         }
+        Ok(())
     }
 
     pub fn get_frame_info(&mut self, iri: &Iri) -> Option<FrameInfo> {
@@ -1254,23 +1270,6 @@ fn get_frame_info_helper_ex(doc: &mut ExternalDocument, iri: &Iri) -> Option<Fra
             _ => None,
         })
         .tree_reduce(FrameInfo::merge)
-}
-
-fn horned_to_anyhow(e: horned_owl::error::HornedError) -> anyhow::Error {
-    match e {
-        horned_owl::error::HornedError::IOError(error) => {
-            anyhow!("IO Error: {error}")
-        }
-        horned_owl::error::HornedError::ParserError(error, location) => {
-            anyhow!("Parsing Error: {error} {location}")
-        }
-        horned_owl::error::HornedError::ValidityError(msg, location) => {
-            anyhow!("Validity Error: {msg} at {location}")
-        }
-        horned_owl::error::HornedError::CommandError(msg) => {
-            anyhow!("Command Error: {msg}")
-        }
-    }
 }
 
 /// This is a version of a query match that has no reference to the tree or cursor
@@ -1796,8 +1795,7 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
             for(is_seperator, chunk) in &node.children(&mut cursor).skip(1).chunk_by(|x| x.kind()==","||x.kind()=="o") {
                 if is_seperator {
                     let n = &chunk.exactly_one()
-                            .map_err(|_|anyhow!("not one"))
-                        .expect("chunk should contain exacly one seperator node");
+                            .unwrap_or_else(|_| unreachable!("chunk should contain exacly one seperator node"));
 
                 if n.kind()=="o" {
                         docs.push(RcDoc::text(" o").append(RcDoc::line()));
@@ -1817,7 +1815,7 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
                  if is_or {
                      RcDoc::line().append(RcDoc::text("or").append(RcDoc::space()))
                  } else {
-                     let conjunction_node = chunks.exactly_one().map_err(|_|anyhow!("not one")).unwrap();
+                     let conjunction_node = chunks.exactly_one().unwrap_or_else(|_| unreachable!("chunk should contain exacly one seperator node"));
                      to_doc(&conjunction_node, rope, tab_size)
                  }
              }).collect_vec();

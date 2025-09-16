@@ -1,6 +1,7 @@
 mod catalog;
 mod consts;
 pub mod debugging;
+mod error;
 mod pos;
 mod queries;
 mod range;
@@ -11,10 +12,11 @@ mod web;
 mod workspace;
 
 use debugging::timeit;
+use error::{Result as MyResult, ResultExt, RwLockExt};
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
-use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockUpgradableReadGuard};
+use parking_lot::RwLock;
 use pos::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
 use range::Range;
@@ -38,7 +40,7 @@ pub static LANGUAGE: Lazy<Language> = Lazy::new(|| tree_sitter_owl_ms::LANGUAGE.
 pub struct Backend {
     pub client: Client,
     position_encoding: RwLock<PositionEncodingKind>,
-    workspaces: RwLock<Vec<Workspace>>,
+    workspaces: RwLock<Vec<Arc<RwLock<Workspace>>>>,
     pub http_client: Arc<dyn HttpClient>,
 }
 
@@ -85,7 +87,7 @@ impl LanguageServer for Backend {
             .workspace_folders
             .unwrap_or_default()
             .iter()
-            .map(|wf| Workspace::new(wf.clone()))
+            .map(|wf| Arc::new(RwLock::new(Workspace::new(wf.clone()))))
             .collect();
 
         Ok(InitializeResult {
@@ -168,6 +170,7 @@ impl LanguageServer for Backend {
             .read()
             .iter()
             .map(|w| {
+                let w = w.read();
                 w.workspace_folder
                     .uri
                     .to_file_path()
@@ -186,22 +189,18 @@ impl LanguageServer for Backend {
 
         let tab_size = params.options.tab_size;
 
-        let workspace = self.find_workspace(&url);
-        if let Some(doc) = workspace.internal_documents.get(&url) {
-            let doc = doc.read();
+        let doc = self.get_internal_document(&url)?;
+        let doc = doc.read();
 
-            // TODO just send the diff
-            let text = doc.formatted(if tab_size == 0 { 4 } else { tab_size }, 80);
+        // TODO just send the diff
+        let text = doc.formatted(if tab_size == 0 { 4 } else { tab_size }, 80);
 
-            let range: Range = doc.tree.root_node().range().into();
+        let range: Range = doc.tree.root_node().range().into();
 
-            return Ok(Some(vec![TextEdit {
-                range: range.into_lsp(&doc.rope, &self.position_encoding.read()),
-                new_text: text,
-            }]));
-        }
-
-        Ok(Some(vec![]))
+        return Ok(Some(vec![TextEdit {
+            range: range.into_lsp(&doc.rope, &self.position_encoding.read()),
+            new_text: text,
+        }]));
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
@@ -235,9 +234,9 @@ impl LanguageServer for Backend {
             .publish_diagnostics(url.clone(), diagnostics, Some(internal_document.version))
             .await;
 
-        let document = workspace.insert_internal_document(internal_document);
+        let document = Workspace::insert_internal_document(workspace, internal_document);
 
-        self.resolve_imports(document, &workspace).await;
+        self.resolve_imports(document).await.log_result();
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -253,15 +252,10 @@ impl LanguageServer for Backend {
             params.text_document.version
         );
 
-        let url = &params.text_document.uri;
-        let workspace = self.find_workspace(url);
+        let result: MyResult<()> = async {
+            let url = &params.text_document.uri;
+            let document = self.get_internal_document(url)?;
 
-        debug!("!");
-        if let Some(document) = workspace
-            .internal_documents
-            .get_mut(&params.text_document.uri)
-        {
-            debug!("?");
             let mut document = document.write();
             document.edit(&params, &self.position_encoding.read());
 
@@ -286,7 +280,12 @@ impl LanguageServer for Backend {
             task::spawn(async move {
                 client.publish_diagnostics(uri, diagnostics, version).await;
             });
-        };
+            Ok(())
+        }
+        .await;
+
+        // The endpoint does not return a result so lets handle it here
+        result.log_result();
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -313,46 +312,38 @@ impl LanguageServer for Backend {
             params.text_document_position_params.position
         );
 
-        let workspace = self.find_workspace(&url);
+        let document = self.get_internal_document(&url)?;
 
-        Ok(workspace.internal_documents.get(&url).and_then(|document| {
-            let doc = document.read();
-            let pos: Position = Position::from_lsp(
-                &params.text_document_position_params.position,
-                &doc.rope,
-                &self.position_encoding.read(),
-            );
-            let node = doc
-                .tree
-                .root_node()
-                .named_descendant_for_point_range(pos.into(), pos.into())
-                .unwrap();
-            let info = workspace.node_info(&node, &doc);
+        let doc = document.read();
+        let pos: Position = Position::from_lsp(
+            &params.text_document_position_params.position,
+            &doc.rope,
+            &self.position_encoding.read(),
+        );
+        let node = doc
+            .tree
+            .root_node()
+            .named_descendant_for_point_range(pos.into(), pos.into())
+            .unwrap();
 
-            if info.is_empty() {
-                None
-            } else {
-                // Transitive into
-                let range: Range = node.range().into();
-                Some(Hover {
-                    contents: HoverContents::Scalar(MarkedString::String(info)),
-                    range: Some(range.into_lsp(&doc.rope, &self.position_encoding.read())),
-                })
-            }
-        }))
+        let info = doc.try_get_workspace()?.read().node_info(&node, &doc);
+
+        Ok(if info.is_empty() {
+            None
+        } else {
+            // Transitive into
+            let range: Range = node.range().into();
+            Some(Hover {
+                contents: HoverContents::Scalar(MarkedString::String(info)),
+                range: Some(range.into_lsp(&doc.rope, &self.position_encoding.read())),
+            })
+        })
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         let url = params.text_document.uri;
 
-        let workspace = self.find_workspace(&url);
-        let document = if let Some(doc) = workspace.internal_documents.get(&url) {
-            doc
-        } else {
-            return Err(tower_lsp::jsonrpc::Error::invalid_params(
-                "Document with that URL not found",
-            ));
-        };
+        let document = self.get_internal_document(&url)?;
 
         let document = document.read();
         let range = Range::from_lsp(
@@ -365,12 +356,8 @@ impl LanguageServer for Backend {
             url.path_segments().unwrap().next_back().unwrap()
         );
 
-        let hints = document.inlay_hint(
-            range,
-            &workspace,
-            &*self.http_client,
-            &self.position_encoding.read(),
-        );
+        let hints =
+            document.inlay_hint(range, &*self.http_client, &self.position_encoding.read())?;
 
         Ok(Some(hints))
     }
@@ -379,71 +366,66 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        let uri = params.text_document_position_params.text_document.uri;
-        debug!("goto_definition at {}", uri);
-        let workspace = self.find_workspace(&uri);
-        let maybe_doc = workspace.internal_documents.get(&uri);
-        if let Some(doc) = maybe_doc {
-            let doc = doc.read();
-            let pos: Position = Position::from_lsp(
-                &params.text_document_position_params.position,
-                &doc.rope,
-                &self.position_encoding.read(),
+        let url = params.text_document_position_params.text_document.uri;
+        debug!("goto_definition at {url}");
+        let workspace = self.find_workspace(&url);
+        let doc = self.get_internal_document(&url)?;
+        let doc = doc.read();
+        let pos: Position = Position::from_lsp(
+            &params.text_document_position_params.position,
+            &doc.rope,
+            &self.position_encoding.read(),
+        );
+
+        let leaf_node = doc
+            .tree
+            .root_node()
+            .named_descendant_for_point_range(pos.into(), pos.into())
+            .unwrap();
+
+        if ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind()) {
+            let iri = trim_full_iri(node_text(&leaf_node, &doc.rope));
+            let iri = doc.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
+
+            debug!("Try goto definition of {}", iri);
+
+            // TODO #16 is this now correct?
+            let frame_info = Workspace::get_frame_info_recursive(
+                workspace.clone(),
+                &iri,
+                &doc,
+                &*self.http_client,
             );
 
-            let leaf_node = doc
-                .tree
-                .root_node()
-                .named_descendant_for_point_range(pos.into(), pos.into())
-                .unwrap();
+            if let Some(frame_info) = frame_info {
+                let locations = frame_info
+                    .definitions
+                    .iter()
+                    .sorted_by_key(|l| {
+                        if l.range == Range::ZERO {
+                            u32::MAX // No range? Then put this at the end
+                        } else {
+                            l.range.start.line()
+                        }
+                    })
+                    .map(|l| {
+                        l.clone()
+                            .into_lsp(&doc.rope, &__self.position_encoding.read())
+                    })
+                    .collect_vec();
 
-            if ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind()) {
-                let iri = trim_full_iri(node_text(&leaf_node, &doc.rope));
-                let iri = doc.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
-
-                debug!("Try goto definition of {}", iri);
-
-                // TODO #16 is this now correct?
-                let frame_info = workspace.get_frame_info_recursive(&iri, &doc, &*self.http_client);
-
-                if let Some(frame_info) = frame_info {
-                    let locations = frame_info
-                        .definitions
-                        .iter()
-                        .sorted_by_key(|l| {
-                            if l.range == Range::ZERO {
-                                u32::MAX // No range? Then put this at the end
-                            } else {
-                                l.range.start.line()
-                            }
-                        })
-                        .map(|l| {
-                            l.clone()
-                                .into_lsp(&doc.rope, &__self.position_encoding.read())
-                        })
-                        .collect_vec();
-
-                    return Ok(Some(GotoDefinitionResponse::Array(locations)));
-                }
-                return Ok(None);
-            } else {
-                Ok(None)
+                return Ok(Some(GotoDefinitionResponse::Array(locations)));
             }
+            return Ok(None);
         } else {
-            Err(tower_lsp::jsonrpc::Error::new(
-                tower_lsp::jsonrpc::ErrorCode::InvalidParams,
-            ))
+            Ok(None)
         }
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         debug!("code_action at {}", params.text_document.uri);
         let url = params.text_document.uri;
-        let workspace = self.find_workspace(&url);
-        let doc = workspace
-            .internal_documents
-            .get(&url)
-            .ok_or(tower_lsp::jsonrpc::Error::invalid_request())?;
+        let doc = self.get_internal_document(&url)?;
         let doc = doc.read();
         let end: Position = doc.tree.root_node().range().end_point.into();
 
@@ -477,72 +459,73 @@ impl LanguageServer for Backend {
             self.position_encoding.read()
         );
         let url = params.text_document_position.text_document.uri;
-        let workspace = self.find_workspace(&url);
-        let doc = workspace.internal_documents.get(&url);
+        // let workspace = self.find_workspace(&url);
+        // let doc = workspace.internal_documents.get(&url);
+        let doc = self.get_internal_document(&url)?;
+        let doc = doc.read();
+        let pos: Position = Position::from_lsp(
+            &params.text_document_position.position,
+            &doc.rope,
+            &self.position_encoding.read(),
+        );
 
-        Ok(doc.map(|doc| {
-            let doc = doc.read();
-            let pos: Position = Position::from_lsp(
-                &params.text_document_position.position,
-                &doc.rope,
-                &self.position_encoding.read(),
-            );
+        let kws = timeit("try_keywords_at_position", || {
+            doc.try_keywords_at_position(pos)
+        });
 
-            let kws = timeit("try_keywords_at_position", || {
-                doc.try_keywords_at_position(pos)
-            });
+        debug!("The resultingn kws are {kws:#?}");
 
-            debug!("The resultingn kws are {kws:#?}");
+        let pos_one_left = pos.moved_left(1, &doc.rope);
 
-            let pos_one_left = pos.moved_left(1, &doc.rope);
+        let keywords_completion_items = kws.into_iter().map(|keyword| CompletionItem {
+            label: keyword,
+            kind: Some(CompletionItemKind::KEYWORD),
+            ..Default::default()
+        });
 
-            let keywords_completion_items = kws.into_iter().map(|keyword| CompletionItem {
-                label: keyword,
-                kind: Some(CompletionItemKind::KEYWORD),
-                ..Default::default()
-            });
+        let mut items = vec![];
 
-            let mut items = vec![];
+        let node = doc
+            .tree
+            .root_node()
+            .named_descendant_for_point_range(pos_one_left.into(), pos_one_left.into())
+            .expect("The pos to be in at least one node");
+        // Generate the list of iris that can be inserted.
+        let partial_text = node_text(&node, &doc.rope).to_string();
 
-            let node = doc
-                .tree
-                .root_node()
-                .named_descendant_for_point_range(pos_one_left.into(), pos_one_left.into())
-                .expect("The pos to be in at least one node");
-            // Generate the list of iris that can be inserted.
-            let partial_text = node_text(&node, &doc.rope).to_string();
+        if node.kind() == "simple_iri" {
+            let workspace = doc.try_get_workspace()?;
+            let workspace = workspace.read();
+            let iris: Vec<CompletionItem> = workspace
+                .search_frame(&partial_text)
+                .iter()
+                .filter_map(|(full_iri, frame)| {
+                    let iri = doc
+                        .full_iri_to_abbreviated_iri(full_iri.clone())
+                        .unwrap_or(format!("<{full_iri}>"));
 
-            if node.kind() == "simple_iri" {
-                let iris: Vec<CompletionItem> = workspace
-                    .search_frame(&partial_text)
-                    .iter()
-                    .filter_map(|(full_iri, frame)| {
-                        let iri = doc
-                            .full_iri_to_abbreviated_iri(full_iri.clone())
-                            .unwrap_or(format!("<{full_iri}>"));
+                    if iri == partial_text {
+                        None
+                    } else {
+                        Some(CompletionItem {
+                            label: iri,
+                            kind: Some(CompletionItemKind::REFERENCE),
+                            detail: Some(frame.info_display(&workspace)),
+                            // TODO #29 add details from the frame
+                            ..Default::default()
+                        })
+                    }
+                })
+                // TODO #29 add items for simple iri, abbriviated iri and full iri
+                // Take the shortest one maybe
+                .collect();
+            items.extend(iris);
+        }
 
-                        if iri == partial_text {
-                            None
-                        } else {
-                            Some(CompletionItem {
-                                label: iri,
-                                kind: Some(CompletionItemKind::REFERENCE),
-                                detail: Some(frame.info_display(&workspace)),
-                                // TODO #29 add details from the frame
-                                ..Default::default()
-                            })
-                        }
-                    })
-                    // TODO #29 add items for simple iri, abbriviated iri and full iri
-                    // Take the shortest one maybe
-                    .collect();
-                items.extend(iris);
-            }
+        items.extend(keywords_completion_items);
 
-            items.extend(keywords_completion_items);
-
-            CompletionResponse::Array(items)
-        }))
+        Ok(Some(CompletionResponse::Array(items)))
+        // }))
     }
 
     async fn semantic_tokens_full(
@@ -550,19 +533,19 @@ impl LanguageServer for Backend {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         debug!("semantic_tokens_full at {}", params.text_document.uri);
-        let uri = params.text_document.uri;
-        let workspace = self.find_workspace(&uri);
-        if let Some(doc) = workspace.internal_documents.get(&uri) {
-            let doc = doc.read();
+        let url = params.text_document.uri;
+        // let workspace = self.find_workspace(&url);
+        let doc = self.get_internal_document(&url)?;
+        let doc = doc.read();
+        // if let Some(doc) = workspace.internal_documents.get(&uri) {
+        // let doc = doc.read();
 
-            let tokens = doc.sematic_tokens(None, &self.position_encoding.read());
+        let tokens = doc.sematic_tokens(None, &self.position_encoding.read());
 
-            return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
-                result_id: None,
-                data: tokens,
-            })));
-        }
-        Ok(None)
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data: tokens,
+        })))
     }
 
     async fn semantic_tokens_range(
@@ -570,19 +553,21 @@ impl LanguageServer for Backend {
         params: SemanticTokensRangeParams,
     ) -> Result<Option<SemanticTokensRangeResult>> {
         debug!("semantic_tokens_range at {}", params.text_document.uri);
-        let uri = params.text_document.uri;
-        let workspace = self.find_workspace(&uri);
-        if let Some(doc) = workspace.internal_documents.get(&uri) {
-            let doc = doc.read();
-            let range = Range::from_lsp(&params.range, &doc.rope, &self.position_encoding.read());
-            let tokens = doc.sematic_tokens(Some(range), &self.position_encoding.read());
+        let url = params.text_document.uri;
+        // let workspace = self.find_workspace(&url);
+        let doc = self.get_internal_document(&url)?;
+        // if let Some(doc) = workspace.internal_documents.get(&uri) {
+        let doc = doc.read();
+        // let range: Range = params.range.into();
+        let range = Range::from_lsp(&params.range, &doc.rope, &self.position_encoding.read());
+        let tokens = doc.sematic_tokens(Some(range), &self.position_encoding.read());
 
-            return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
-                result_id: None,
-                data: tokens,
-            })));
-        }
-        Ok(None)
+        return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
+            result_id: None,
+            data: tokens,
+        })));
+        // }
+        // Ok(None)
     }
 
     async fn document_symbol(
@@ -590,32 +575,34 @@ impl LanguageServer for Backend {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
         let url = params.text_document.uri;
-        let workspace = self.find_workspace(&url);
-        if let Some(doc) = workspace.internal_documents.get(&url) {
-            let infos = doc.read().get_all_frame_infos();
-            return Ok(Some(DocumentSymbolResponse::Flat(
-                #[allow(deprecated)] // All fields need to be specified
-                infos
-                    .iter()
-                    .flat_map(|info| {
-                        info.definitions.iter().map(|def| SymbolInformation {
-                            name: info.iri.clone(),
-                            kind: info.frame_type.into(),
-                            tags: None,
-                            deprecated: None,
-                            location: Location {
-                                uri: url.clone(),
-                                range: def
-                                    .range
-                                    .into_lsp(&doc.read().rope, &self.position_encoding.read()),
-                            },
-                            container_name: None,
-                        })
+        // let workspace = self.find_workspace(&url);
+        let doc = self.get_internal_document(&url)?;
+        // if let Some(doc) = workspace.internal_documents.get(&url) {
+        let infos = doc.read().get_all_frame_infos();
+        // drop(doc);
+        return Ok(Some(DocumentSymbolResponse::Flat(
+            #[allow(deprecated)] // All fields need to be specified
+            infos
+                .iter()
+                .flat_map(|info| {
+                    info.definitions.iter().map(|def| SymbolInformation {
+                        name: info.iri.clone(),
+                        kind: info.frame_type.into(),
+                        tags: None,
+                        deprecated: None,
+                        location: Location {
+                            uri: url.clone(),
+                            range: def
+                                .range
+                                .into_lsp(&doc.read().rope, &self.position_encoding.read()),
+                        },
+                        container_name: None,
                     })
-                    .collect_vec(),
-            )));
-        }
-        Ok(None)
+                })
+                .collect_vec(),
+        )));
+        // }
+        // Ok(None)
     }
 
     async fn symbol(
@@ -627,8 +614,13 @@ impl LanguageServer for Backend {
         let workspaces = self.workspaces.read();
         let all_frame_infos = workspaces
             .iter()
-            .flat_map(|workspace| workspace.internal_documents.iter())
-            .flat_map(|doc| doc.read().get_all_frame_infos())
+            .flat_map(|workspace| {
+                let ws = workspace.read();
+                ws.internal_documents
+                    .iter()
+                    .flat_map(|doc| doc.read().get_all_frame_infos())
+                    .collect_vec()
+            })
             .collect_vec();
 
         let symbols = all_frame_infos
@@ -645,9 +637,7 @@ impl LanguageServer for Backend {
                 fi.definitions.iter().map(|definition| {
                     let url = &definition.uri;
                     let location = self
-                        .find_workspace(url)
-                        .internal_documents
-                        .get(url)
+                        .get_internal_document(url)
                         .map(|doc| {
                             let doc = doc.read();
                             definition
@@ -675,10 +665,10 @@ impl LanguageServer for Backend {
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
-        let url = params.text_document_position.text_document.uri;
+        let (full_iri_option, workspace) = {
+            let url = params.text_document_position.text_document.uri;
 
-        let workspace = self.find_workspace(&url);
-        if let Some(doc) = workspace.internal_documents.get(&url) {
+            let doc = self.get_internal_document(&url)?;
             let doc = doc.read();
             let pos: Position = Position::from_lsp(
                 &params.text_document_position.position,
@@ -703,54 +693,53 @@ impl LanguageServer for Backend {
                 }
                 _ => None,
             };
+            let workspace = doc.try_get_workspace()?;
+            (full_iri_option, workspace)
+        };
 
-            drop(doc);
-            drop(url);
+        Ok(if let Some(full_iri) = full_iri_option {
+            let workspace = workspace.read();
+            let locations = workspace
+                .internal_documents
+                .iter()
+                .flat_map(|doc| {
+                    let doc = doc.value().read();
+                    doc.query(&ALL_QUERIES.iri_query)
+                        .into_iter()
+                        .filter_map(|m| {
+                            let (iri, range) = match &m.captures[..] {
+                                [iri_capture] => (
+                                    match iri_capture.node.kind.as_str() {
+                                        "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
+                                        "simple_iri" | "abbreviated_iri" => doc
+                                            .abbreviated_iri_to_full_iri(
+                                                iri_capture.node.text.clone(),
+                                            )
+                                            .unwrap_or(iri_capture.node.text.clone()),
 
-            if let Some(full_iri) = full_iri_option {
-                let locations = workspace
-                    .internal_documents
-                    .iter()
-                    .flat_map(|doc| {
-                        let doc = doc.value().read();
-                        doc.query(&ALL_QUERIES.iri_query)
-                            .into_iter()
-                            .filter_map(|m| {
-                                let (iri, range) = match &m.captures[..] {
-                                    [iri_capture] => (
-                                        match iri_capture.node.kind.as_str() {
-                                            "full_iri" => {
-                                                trim_full_iri(iri_capture.node.text.clone())
-                                            }
-                                            "simple_iri" | "abbreviated_iri" => doc
-                                                .abbreviated_iri_to_full_iri(
-                                                    iri_capture.node.text.clone(),
-                                                )
-                                                .unwrap_or(iri_capture.node.text.clone()),
-
-                                            _ => unreachable!(),
-                                        },
-                                        iri_capture.node.range,
-                                    ),
-                                    _ => unreachable!(),
-                                };
-                                if iri == full_iri {
-                                    Some(Location {
-                                        uri: doc.uri.clone(),
-                                        range: range
-                                            .into_lsp(&doc.rope, &self.position_encoding.read()),
-                                    })
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect_vec()
-                    })
-                    .collect_vec();
-                return Ok(Some(locations));
-            }
-        }
-        Ok(None)
+                                        _ => unreachable!(),
+                                    },
+                                    iri_capture.node.range,
+                                ),
+                                _ => unreachable!(),
+                            };
+                            if iri == full_iri {
+                                Some(Location {
+                                    uri: doc.uri.clone(),
+                                    range: range
+                                        .into_lsp(&doc.rope, &self.position_encoding.read()),
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect_vec()
+                })
+                .collect_vec();
+            Some(locations)
+        } else {
+            None
+        })
     }
 
     async fn prepare_rename(
@@ -759,83 +748,77 @@ impl LanguageServer for Backend {
     ) -> Result<Option<PrepareRenameResponse>> {
         let url = params.text_document.uri;
 
-        let workspace = self.find_workspace(&url);
-        let x = if let Some(doc) = workspace.internal_documents.get(&url) {
-            let doc = doc.read();
-            let pos: Position =
-                Position::from_lsp(&params.position, &doc.rope, &self.position_encoding.read());
+        let doc = self.get_internal_document(&url)?;
+        let doc = doc.read();
+        let pos: Position =
+            Position::from_lsp(&params.position, &doc.rope, &self.position_encoding.read());
 
-            fn node_range(position: Position, doc: &InternalDocument) -> Option<Range> {
-                debug!("prepare_rename try {position:?}");
-                let node = doc
-                    .tree
-                    .root_node()
-                    .named_descendant_for_point_range(position.into(), position.into())?;
+        fn node_range(position: Position, doc: &InternalDocument) -> Option<Range> {
+            debug!("prepare_rename try {position:?}");
+            let node = doc
+                .tree
+                .root_node()
+                .named_descendant_for_point_range(position.into(), position.into())?;
 
-                // This excludes prefix declaration, import and annotation target IRIs
-                match node.parent()?.kind() {
-                    "datatype_iri"
-                    | "class_iri"
-                    | "annotation_property_iri"
-                    | "ontology_iri"
-                    | "data_property_iri"
-                    | "version_iri"
-                    | "object_property_iri"
-                    | "annotation_property_iri_annotated_list"
-                    | "individual_iri" => {}
-                    _ => return None,
-                }
-
-                match node.kind() {
-                    "full_iri" => {
-                        let range: Range = node.range().into();
-                        let range = Range {
-                            start: range.start.moved_right(1, &doc.rope),
-                            end: range.end.moved_left(1, &doc.rope),
-                        };
-                        Some(range)
-                    }
-                    "simple_iri" => {
-                        let range: Range = node.range().into();
-                        Some(range)
-                    }
-                    "abbreviated_iri" => {
-                        let range: Range = node.range().into();
-                        let text = node_text(&node, &doc.rope).to_string();
-                        let col_offset = text.find(':').unwrap() + 1;
-                        let range = Range {
-                            start: range.start.moved_right(col_offset as u32, &doc.rope),
-                            ..range
-                        };
-                        Some(range)
-                    }
-                    _ => None,
-                }
+            // This excludes prefix declaration, import and annotation target IRIs
+            match node.parent()?.kind() {
+                "datatype_iri"
+                | "class_iri"
+                | "annotation_property_iri"
+                | "ontology_iri"
+                | "data_property_iri"
+                | "version_iri"
+                | "object_property_iri"
+                | "annotation_property_iri_annotated_list"
+                | "individual_iri" => {}
+                _ => return None,
             }
 
-            let range = node_range(pos, &doc)
-                .or_else(|| {
-                    // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
-                    // For example: ThisIsSomeIri| other text
-                    //                           ^
-                    //                       Cursor
-                    debug!("prepare rename try one position left");
-                    let position = pos.moved_left(1, &doc.rope);
-                    node_range(position, &doc)
-                })
-                .map(|range| {
-                    PrepareRenameResponse::Range(
-                        range.into_lsp(&doc.rope, &self.position_encoding.read()),
-                    )
-                });
-            debug!("prepare rename found range {range:?}");
+            match node.kind() {
+                "full_iri" => {
+                    let range: Range = node.range().into();
+                    let range = Range {
+                        start: range.start.moved_right(1, &doc.rope),
+                        end: range.end.moved_left(1, &doc.rope),
+                    };
+                    Some(range)
+                }
+                "simple_iri" => {
+                    let range: Range = node.range().into();
+                    Some(range)
+                }
+                "abbreviated_iri" => {
+                    let range: Range = node.range().into();
+                    let text = node_text(&node, &doc.rope).to_string();
+                    let col_offset = text.find(':').unwrap() + 1;
+                    let range = Range {
+                        start: range.start.moved_right(col_offset as u32, &doc.rope),
+                        ..range
+                    };
+                    Some(range)
+                }
+                _ => None,
+            }
+        }
 
-            Ok(range)
-        } else {
-            // TODO #24 this should be some document not found error
-            Ok(None)
-        };
-        x
+        let range = node_range(pos, &doc)
+            .or_else(|| {
+                // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
+                // For example: ThisIsSomeIri| other text
+                //                           ^
+                //                       Cursor
+                debug!("prepare rename try one position left");
+                let position = pos.moved_left(1, &doc.rope);
+                node_range(position, &doc)
+            })
+            .map(|range| {
+                PrepareRenameResponse::Range(
+                    range.into_lsp(&doc.rope, &self.position_encoding.read()),
+                )
+            });
+        debug!("prepare rename found range {range:?}");
+
+        Ok(range)
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
@@ -843,148 +826,145 @@ impl LanguageServer for Backend {
         let url = params.text_document_position.text_document.uri;
         let new_name = params.new_name;
 
-        let workspace = self.find_workspace(&url);
-        if let Some(doc) = workspace.internal_documents.get(&url) {
-            debug!("is doc locked {}", doc.is_locked());
+        // let workspace = self.find_workspace(&url);
+        let doc = self.get_internal_document(&url)?;
+        // if let Some(doc) = workspace.internal_documents.get(&url) {
+        debug!("is doc locked {}", doc.is_locked());
 
-            let doc = doc
-                .try_read_recursive_for(Duration::from_secs(1))
-                .expect("a read lock to work");
-            debug!("read doc");
-            let pos: Position = Position::from_lsp(
-                &params.text_document_position.position,
-                &doc.rope,
-                &self
-                    .position_encoding
-                    .try_read_recursive_for(Duration::from_secs(1))
-                    .expect("a read lock to work"),
-            );
-            debug!("rename {url}:{pos:?} with {new_name}");
+        let doc = doc.read_timeout()?;
 
-            fn rename_helper(
-                position: Position,
-                doc: &InternalDocument,
-                new_name: String,
-            ) -> Option<(String, Option<String>, String, String)> {
-                let node = doc
-                    .tree
-                    .root_node()
-                    .named_descendant_for_point_range(position.into(), position.into())
-                    .unwrap();
+        debug!("read doc");
+        let pos: Position = Position::from_lsp(
+            &params.text_document_position.position,
+            &doc.rope,
+            &self.position_encoding.read_recursive(),
+        );
+        debug!("rename {url}:{pos:?} with {new_name}");
 
-                match node.kind() {
-                    "full_iri" => {
-                        let iri_kind = node.parent().unwrap().kind().to_string();
-                        let iri = trim_full_iri(node_text(&node, &doc.rope));
-                        Some((iri.clone(), Some(new_name.clone()), iri_kind, new_name))
-                    }
-                    "simple_iri" => {
-                        let iri = node_text(&node, &doc.rope);
-                        let iri_kind = node.parent().unwrap().kind().to_string();
-                        Some((
-                            doc.abbreviated_iri_to_full_iri(iri.to_string())
-                                .unwrap_or(iri.to_string()),
-                            doc.abbreviated_iri_to_full_iri(new_name.clone()),
-                            iri_kind,
-                            new_name,
-                        ))
-                    }
-                    "abbreviated_iri" => {
-                        let iri_kind = node.parent().unwrap().kind().to_string();
-                        let iri = node_text(&node, &doc.rope).to_string();
-                        let (prefix, _) = iri.split_once(':').unwrap();
-                        Some((
-                            doc.abbreviated_iri_to_full_iri(iri.clone())
-                                .unwrap_or(iri.clone()),
-                            doc.abbreviated_iri_to_full_iri(format!("{prefix}:{new_name}")),
-                            iri_kind,
-                            format!("{prefix}:{new_name}"),
-                        ))
-                    }
-                    _ => None,
+        fn rename_helper(
+            position: Position,
+            doc: &InternalDocument,
+            new_name: String,
+        ) -> Option<(String, Option<String>, String, String)> {
+            let node = doc
+                .tree
+                .root_node()
+                .named_descendant_for_point_range(position.into(), position.into())
+                .unwrap();
+
+            match node.kind() {
+                "full_iri" => {
+                    let iri_kind = node.parent().unwrap().kind().to_string();
+                    let iri = trim_full_iri(node_text(&node, &doc.rope));
+                    Some((iri.clone(), Some(new_name.clone()), iri_kind, new_name))
                 }
-            }
-
-            let old_and_new_iri = rename_helper(pos, &doc, new_name.clone()).or_else(|| {
-                // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
-                // For example: ThisIsSomeIri| other text
-                //                           ^
-                //                       Cursor
-                debug!("prepare rename try one position left");
-                let position = pos.moved_left(1, &doc.rope);
-                rename_helper(position, &doc, new_name)
-            });
-
-            drop(doc);
-            drop(url);
-
-            if let Some((full_iri, new_iri, iri_kind, original)) = old_and_new_iri {
-                debug!("renaming resolved iris from {full_iri:?} to {new_iri:?}");
-                let changes = workspace
-                    .internal_documents
-                    .iter()
-                    .map(|doc| {
-                        let doc = doc
-                            .value()
-                            .try_read_recursive_for(Duration::from_secs(1))
-                            .expect("a read lock to work");
-                        let edits = doc
-                            .query(&ALL_QUERIES.iri_query)
-                            .into_iter()
-                            .filter_map(|m| {
-                                let (iri, range, parent_kind) = match &m.captures[..] {
-                                    [iri_capture] => (
-                                        match iri_capture.node.kind.as_str() {
-                                            "full_iri" => {
-                                                trim_full_iri(iri_capture.node.text.clone())
-                                            }
-                                            "simple_iri" | "abbreviated_iri" => doc
-                                                .abbreviated_iri_to_full_iri(
-                                                    iri_capture.node.text.clone(),
-                                                )
-                                                .unwrap_or(iri_capture.node.text.clone()),
-
-                                            _ => unreachable!(),
-                                        },
-                                        iri_capture.node.range,
-                                        doc.node_by_id(iri_capture.node.id)
-                                            .unwrap()
-                                            .parent()
-                                            .unwrap()
-                                            .kind(),
-                                    ),
-                                    _ => unreachable!(),
-                                };
-                                if iri == full_iri && iri_kind == parent_kind {
-                                    Some(TextEdit {
-                                        range: range.into_lsp(
-                                            &doc.rope,
-                                            &self.position_encoding.read_recursive(),
-                                        ),
-                                        new_text: new_iri
-                                            .clone()
-                                            .map(|new_iri| {
-                                                doc.full_iri_to_abbreviated_iri(new_iri.clone())
-                                                    .unwrap_or(format!("<{}>", new_iri))
-                                            })
-                                            .unwrap_or(original.clone()),
-                                    })
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect_vec();
-                        (doc.uri.clone(), edits)
-                    })
-                    .collect();
-
-                return Ok(Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                }));
+                "simple_iri" => {
+                    let iri = node_text(&node, &doc.rope);
+                    let iri_kind = node.parent().unwrap().kind().to_string();
+                    Some((
+                        doc.abbreviated_iri_to_full_iri(iri.to_string())
+                            .unwrap_or(iri.to_string()),
+                        doc.abbreviated_iri_to_full_iri(new_name.clone()),
+                        iri_kind,
+                        new_name,
+                    ))
+                }
+                "abbreviated_iri" => {
+                    let iri_kind = node.parent().unwrap().kind().to_string();
+                    let iri = node_text(&node, &doc.rope).to_string();
+                    let (prefix, _) = iri.split_once(':').unwrap();
+                    Some((
+                        doc.abbreviated_iri_to_full_iri(iri.clone())
+                            .unwrap_or(iri.clone()),
+                        doc.abbreviated_iri_to_full_iri(format!("{prefix}:{new_name}")),
+                        iri_kind,
+                        format!("{prefix}:{new_name}"),
+                    ))
+                }
+                _ => None,
             }
         }
+
+        let old_and_new_iri = rename_helper(pos, &doc, new_name.clone()).or_else(|| {
+            // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
+            // For example: ThisIsSomeIri| other text
+            //                           ^
+            //                       Cursor
+            debug!("prepare rename try one position left");
+            let position = pos.moved_left(1, &doc.rope);
+            rename_helper(position, &doc, new_name)
+        });
+
+        let workspace = doc.try_get_workspace()?;
+        let workspace = workspace.read_timeout()?;
+        drop(doc);
+        drop(url);
+
+        if let Some((full_iri, new_iri, iri_kind, original)) = old_and_new_iri {
+            debug!("renaming resolved iris from {full_iri:?} to {new_iri:?}");
+            let changes = workspace
+                .internal_documents
+                .iter()
+                .map(|doc| {
+                    let doc = doc
+                        .value()
+                        .try_read_recursive_for(Duration::from_secs(1))
+                        .expect("a read lock to work");
+                    let edits = doc
+                        .query(&ALL_QUERIES.iri_query)
+                        .into_iter()
+                        .filter_map(|m| {
+                            let (iri, range, parent_kind) = match &m.captures[..] {
+                                [iri_capture] => (
+                                    match iri_capture.node.kind.as_str() {
+                                        "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
+                                        "simple_iri" | "abbreviated_iri" => doc
+                                            .abbreviated_iri_to_full_iri(
+                                                iri_capture.node.text.clone(),
+                                            )
+                                            .unwrap_or(iri_capture.node.text.clone()),
+
+                                        _ => unreachable!(),
+                                    },
+                                    iri_capture.node.range,
+                                    doc.node_by_id(iri_capture.node.id)
+                                        .unwrap()
+                                        .parent()
+                                        .unwrap()
+                                        .kind(),
+                                ),
+                                _ => unreachable!(),
+                            };
+                            if iri == full_iri && iri_kind == parent_kind {
+                                Some(TextEdit {
+                                    range: range.into_lsp(
+                                        &doc.rope,
+                                        &self.position_encoding.read_recursive(),
+                                    ),
+                                    new_text: new_iri
+                                        .clone()
+                                        .map(|new_iri| {
+                                            doc.full_iri_to_abbreviated_iri(new_iri.clone())
+                                                .unwrap_or(format!("<{}>", new_iri))
+                                        })
+                                        .unwrap_or(original.clone()),
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect_vec();
+                    (doc.uri.clone(), edits)
+                })
+                .collect();
+
+            return Ok(Some(WorkspaceEdit {
+                changes: Some(changes),
+                document_changes: None,
+                change_annotations: None,
+            }));
+        }
+        // }
         Ok(None)
     }
 
@@ -996,7 +976,7 @@ impl LanguageServer for Backend {
 
 impl Backend {
     /// This will find a workspace or create one for a given url
-    fn find_workspace<'a>(&'a self, url: &Url) -> MappedRwLockReadGuard<'a, Workspace> {
+    fn find_workspace(&self, url: &Url) -> Arc<RwLock<Workspace>> {
         debug!("find workspace");
         let mut workspaces = self
             .workspaces
@@ -1008,6 +988,7 @@ impl Backend {
         // - Then a catalog file is created or modified that would place a document in that workspace
         // - Because of the early return the document can never move to the new workspace
         let maybe_workspace = workspaces.iter().find(|workspace| {
+            let workspace = workspace.read();
             workspace.internal_documents.contains_key(url)
                 || workspace
                     .catalogs
@@ -1015,7 +996,7 @@ impl Backend {
                     .any(|catalog| catalog.contains(&url.to_file_path().unwrap()))
         });
 
-        let folder = match maybe_workspace {
+        match maybe_workspace {
             None => {
                 let mut file_path = url.to_file_path().expect("URL should be a filepath");
                 file_path.pop();
@@ -1028,31 +1009,42 @@ impl Backend {
                 debug!("try workspaces write...");
                 // let mut workspaces = self.workspaces.write();
                 let workspace = Workspace::new(workspace_folder.clone());
+
+                // workspace_folder
                 workspaces.with_upgraded(|w| {
                     debug!("locked workspace");
-                    w.push(workspace);
-                });
-                workspace_folder
+
+                    let ws = Arc::new(RwLock::new(workspace));
+                    w.push(ws.clone());
+                    ws
+                })
             }
-            Some(w) => w.workspace_folder.clone(),
-        };
+            Some(w) => w.clone(),
+        }
 
-        let workspaces = RwLockUpgradableReadGuard::downgrade(workspaces);
+        // let workspaces = RwLockUpgradableReadGuard::downgrade(workspaces);
+        // // drop(workspaces);
+        // // let workspaces = self.workspaces.read_recursive();
 
-        RwLockReadGuard::map(workspaces, |ws| {
-            ws.iter()
-                .find(|w| w.workspace_folder == folder)
-                .expect("The file to be located in a workspace, but it was not.")
-        })
+        // RwLockReadGuard::map(workspaces, |ws| {
+        //     ws.iter()
+        //         .find(|w| w.workspace_folder == folder)
+        //         .expect("The file to be located in a workspace, but it was not.")
+        // })
+    }
+
+    /// Convinience function to fetch internal document
+    fn get_internal_document(&self, url: &Url) -> MyResult<Arc<RwLock<InternalDocument>>> {
+        let workspace = self.find_workspace(url);
+        let workspace = workspace.read_timeout()?;
+        // .try_read_recursive_for(Duration::from_secs(5))
+        // .ok_or(Error::LockTimeout(5))?;
+        workspace.get_internal_document(url)
     }
 
     // TODO maybe move this into document or workspace
     /// This will try to fetch the imports of a document
-    async fn resolve_imports(
-        &self,
-        document: Arc<RwLock<InternalDocument>>,
-        workspace: &Workspace,
-    ) {
+    async fn resolve_imports(&self, document: Arc<RwLock<InternalDocument>>) -> MyResult<()> {
         let document = document.read();
         debug!("Resolve imports for {}", document.uri);
         let urls = document
@@ -1065,10 +1057,14 @@ impl Backend {
             .collect_vec();
 
         for url in urls {
-            workspace
-                .resolve_url_to_document(&url, &*self.http_client)
-                .inspect_err(|e| error!("Resolve imports error: {e:?}"))
-                .ok();
+            Workspace::resolve_url_to_document(
+                document.try_get_workspace()?,
+                &url,
+                &*self.http_client,
+            )
+            .inspect_err(|e| error!("Resolve imports error: {e:?}"))
+            .ok();
         }
+        Ok(())
     }
 }

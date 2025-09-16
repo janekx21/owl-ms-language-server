@@ -1,10 +1,9 @@
 use crate::{catalog::Catalog, web::StaticClient, *};
-use anyhow::anyhow;
 use indoc::indoc;
 use pos::Position;
 use pretty_assertions::assert_eq;
 use ropey::Rope;
-use std::{fs, path::Path, thread};
+use std::{fs, path::Path};
 use tempdir::{self, TempDir};
 use test_log::test;
 use tower_lsp::LspService;
@@ -66,14 +65,14 @@ async fn backend_did_open_should_create_document() {
     // Assert
     let workspaces = service.inner().workspaces.read();
     let workspace = workspaces.iter().exactly_one().unwrap();
+    let workspace = workspace.read();
 
     let docs = workspace.internal_documents.iter().collect_vec();
 
     let doc = docs
         .iter()
         .exactly_one()
-        .map_err(|_| anyhow!("Should be exactly one"))
-        .unwrap()
+        .unwrap_or_else(|_| panic!("Should be exactly one"))
         .value()
         .read();
 
@@ -140,6 +139,7 @@ async fn backend_did_change_should_update_internal_rope() {
 
     // Assert
     let workspace = service.inner().find_workspace(&ontology_url);
+    let workspace = workspace.read();
 
     let doc = workspace
         .internal_documents
@@ -831,9 +831,10 @@ async fn backend_formatting_on_file_should_correctly_format() {
         })
         .await;
 
-    let ws = service.inner().find_workspace(&url);
+    let workspace = service.inner().find_workspace(&url);
+    let workspace = workspace.read();
     // let ws = workspaces.iter().exactly_one().unwrap();
-    let doc = ws.internal_documents.get(&url).unwrap();
+    let doc = workspace.internal_documents.get(&url).unwrap();
     let doc = doc.read();
     assert_eq!(doc.diagnostics, vec![], "doc:\n{}", doc.rope.to_string());
     assert_eq!(doc.rope.to_string(), target);
@@ -1004,6 +1005,7 @@ async fn backend_import_resolve_should_load_documents() {
     let workspaces = service.inner().workspaces.read();
     assert_eq!(workspaces.len(), 1, "all files should be in one workspace");
     let workspace = workspaces.first().unwrap();
+    let workspace = workspace.read();
     info!(" Workspace documents {:#?}", workspace.internal_documents);
     let document_count = workspace.internal_documents.iter().count();
     assert_eq!(document_count, 2);
@@ -1058,6 +1060,7 @@ Class: class-in-first-file
 
     let workspaces = service.inner().workspaces.read();
     let workspace = workspaces.iter().exactly_one().unwrap();
+    let workspace = workspace.read();
     let document = workspace
         .internal_documents
         .iter()
@@ -1251,6 +1254,7 @@ async fn backend_did_open_should_load_external_documents_via_http() {
         .iter()
         .exactly_one()
         .expect("Only one workspace should be crated");
+    let workspace = workspace.read();
 
     assert_eq!(
         workspace.internal_documents.len(),
@@ -1345,6 +1349,7 @@ async fn backend_did_open_should_load_external_documents_via_file() {
         .iter()
         .exactly_one()
         .expect("Only one workspace should be crated");
+    let workspace = workspace.read();
 
     assert_eq!(
         workspace.internal_documents.len(),
@@ -1878,6 +1883,7 @@ async fn backend_rename_helper(
 
     let pos = {
         let workspace = service.inner().find_workspace(&url);
+        let workspace = workspace.read();
         let doc = workspace.internal_documents.get(&url).unwrap();
         let doc = doc.read();
         position.into_lsp(&doc.rope, &PositionEncodingKind::UTF16)
@@ -1928,6 +1934,7 @@ async fn backend_rename_helper(
 
     let workspaces = service.inner().workspaces.read();
     let workspace = workspaces.iter().exactly_one().unwrap();
+    let workspace = workspace.read();
     let doc = workspace.internal_documents.get(&url).unwrap();
     let doc = doc.read();
     let doc_content = doc.rope.to_string();
@@ -2058,6 +2065,7 @@ async fn arrange_backend(
 fn assert_empty_diagnostics(service: &LspService<Backend>) {
     let workspaces = service.inner().workspaces.read();
     for workspace in workspaces.iter() {
+        let workspace = workspace.read();
         for doc in workspace.internal_documents.iter() {
             let doc = doc.value().read();
             assert_eq!(doc.diagnostics, vec![], "rope:\n{}", doc.rope.to_string());

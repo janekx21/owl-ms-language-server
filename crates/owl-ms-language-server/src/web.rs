@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::error::Result;
 use dashmap::DashMap;
 use log::info;
 
@@ -26,7 +26,7 @@ impl HttpClient for StaticClient {
         Ok(self
             .data
             .get(url)
-            .unwrap_or_else(|| panic!("The url {url} to be defined"))
+            .unwrap_or_else(|| panic!("the url {url} should be defined"))
             .to_string())
     }
 }
