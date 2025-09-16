@@ -1881,13 +1881,15 @@ async fn backend_rename_helper(
         })
         .await;
 
-    let pos = {
-        let workspace = service.inner().find_workspace(&url);
-        let workspace = workspace.read();
-        let doc = workspace.internal_documents.get(&url).unwrap();
-        let doc = doc.read();
-        position.into_lsp(&doc.rope, &PositionEncodingKind::UTF16)
-    };
+    let pos = position.into_lsp(
+        &service
+            .inner()
+            .get_internal_document(&url)
+            .unwrap()
+            .read()
+            .rope,
+        &PositionEncodingKind::UTF16,
+    );
 
     // Act
     let result = service

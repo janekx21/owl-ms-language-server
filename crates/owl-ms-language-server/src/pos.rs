@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use log::debug;
 use ropey::Rope;
 
@@ -115,6 +117,12 @@ impl Position {
         let char_idx = self.char_index(rope);
         let char_idx = char_idx.saturating_sub(char_offset as usize);
         Self::new_from_byte_index(rope, rope.char_to_byte(char_idx))
+    }
+}
+
+impl Display for Position {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{} (utf-8)", self.line, self.character)
     }
 }
 

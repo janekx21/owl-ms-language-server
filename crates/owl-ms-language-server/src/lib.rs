@@ -12,7 +12,7 @@ mod web;
 mod workspace;
 
 use debugging::timeit;
-use error::{Result as MyResult, ResultExt, RwLockExt};
+use error::{Error, Result as MyResult, ResultExt, RwLockExt};
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
@@ -204,55 +204,64 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let url = params.text_document.uri;
-        info!("Opend file {url}",);
+        (|| {
+            let url = params.text_document.uri;
+            info!("Opend file {url}",);
+            let workspace = self.find_workspace(&url)?;
+            let internal_document = InternalDocument::new(
+                url.clone(),
+                params.text_document.version,
+                params.text_document.text,
+            );
 
-        let workspace = self.find_workspace(&url);
-        let internal_document = InternalDocument::new(
-            url.clone(),
-            params.text_document.version,
-            params.text_document.text,
-        );
+            let diagnostics = internal_document
+                .diagnostics
+                .iter()
+                .map(|(range, msg)| Diagnostic {
+                    range: range.into_lsp(&internal_document.rope, &self.position_encoding.read()),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("owl language server".to_string()),
+                    message: msg.clone(),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                })
+                .collect_vec();
 
-        let diagnostics = internal_document
-            .diagnostics
-            .iter()
-            .map(|(range, msg)| Diagnostic {
-                range: range.into_lsp(&internal_document.rope, &self.position_encoding.read()),
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: None,
-                code_description: None,
-                source: Some("owl language server".to_string()),
-                message: msg.clone(),
-                related_information: None,
-                tags: None,
-                data: None,
-            })
-            .collect_vec();
+            let client = self.client.clone();
+            tokio::spawn(async move {
+                client
+                    .publish_diagnostics(url.clone(), diagnostics, Some(internal_document.version))
+                    .await;
+            });
 
-        self.client
-            .publish_diagnostics(url.clone(), diagnostics, Some(internal_document.version))
-            .await;
+            let document = Workspace::insert_internal_document(workspace, internal_document);
 
-        let document = Workspace::insert_internal_document(workspace, internal_document);
-
-        self.resolve_imports(document).await.log_result();
+            let http_client = self.http_client.clone();
+            tokio::spawn(async move {
+                resolve_imports(document, &*http_client).await.log_result();
+            });
+            Ok(())
+        })()
+        .log_result();
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        debug!(
-            "did_change at {} with version {}",
-            params
-                .text_document
-                .uri
-                .path_segments()
-                .unwrap()
-                .next_back()
-                .unwrap(),
-            params.text_document.version
-        );
+        (|| {
+            debug!(
+                "did_change at {} with version {}",
+                params
+                    .text_document
+                    .uri
+                    .path_segments()
+                    .ok_or(Error::InvalidUrl(params.text_document.uri.clone()))?
+                    .next_back()
+                    .ok_or(Error::InvalidUrl(params.text_document.uri.clone()))?,
+                params.text_document.version
+            );
 
-        let result: MyResult<()> = async {
             let url = &params.text_document.uri;
             let document = self.get_internal_document(url)?;
 
@@ -281,28 +290,29 @@ impl LanguageServer for Backend {
                 client.publish_diagnostics(uri, diagnostics, version).await;
             });
             Ok(())
-        }
-        .await;
-
-        // The endpoint does not return a result so lets handle it here
-        result.log_result();
+        })()
+        .log_result();
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        debug!(
-            "did_close at {}",
-            params
-                .text_document
-                .uri
-                .path_segments()
-                .unwrap()
-                .next_back()
-                .unwrap(),
-        );
+        (|| {
+            debug!(
+                "did_close at {}",
+                params
+                    .text_document
+                    .uri
+                    .path_segments()
+                    .ok_or(Error::InvalidUrl(params.text_document.uri.clone()))?
+                    .next_back()
+                    .ok_or(Error::InvalidUrl(params.text_document.uri.clone()))?
+            );
+
+            Ok(())
+        })()
+        .log_result();
+
         // We do not close yet :> because of refences
         // TODO should data be deleted if a file is closed?
-        // let workspace = self.find_workspace(&params.text_document.uri).await;
-        // workspace.document_map.remove(&params.text_document.uri);
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -324,7 +334,7 @@ impl LanguageServer for Backend {
             .tree
             .root_node()
             .named_descendant_for_point_range(pos.into(), pos.into())
-            .unwrap();
+            .ok_or(Error::PositionOutOfBounds(pos))?;
 
         let info = doc.try_get_workspace()?.read().node_info(&node, &doc);
 
@@ -353,7 +363,10 @@ impl LanguageServer for Backend {
         );
         debug!(
             "inlay_hint at {}:{range}",
-            url.path_segments().unwrap().next_back().unwrap()
+            url.path_segments()
+                .ok_or(Error::InvalidUrl(url.clone()))?
+                .next_back()
+                .ok_or(Error::InvalidUrl(url.clone()))?
         );
 
         let hints =
@@ -368,7 +381,7 @@ impl LanguageServer for Backend {
     ) -> Result<Option<GotoDefinitionResponse>> {
         let url = params.text_document_position_params.text_document.uri;
         debug!("goto_definition at {url}");
-        let workspace = self.find_workspace(&url);
+
         let doc = self.get_internal_document(&url)?;
         let doc = doc.read();
         let pos: Position = Position::from_lsp(
@@ -381,7 +394,7 @@ impl LanguageServer for Backend {
             .tree
             .root_node()
             .named_descendant_for_point_range(pos.into(), pos.into())
-            .unwrap();
+            .ok_or(Error::PositionOutOfBounds(pos))?;
 
         if ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind()) {
             let iri = trim_full_iri(node_text(&leaf_node, &doc.rope));
@@ -389,9 +402,8 @@ impl LanguageServer for Backend {
 
             debug!("Try goto definition of {}", iri);
 
-            // TODO #16 is this now correct?
             let frame_info = Workspace::get_frame_info_recursive(
-                workspace.clone(),
+                doc.try_get_workspace()?,
                 &iri,
                 &doc,
                 &*self.http_client,
@@ -459,8 +471,6 @@ impl LanguageServer for Backend {
             self.position_encoding.read()
         );
         let url = params.text_document_position.text_document.uri;
-        // let workspace = self.find_workspace(&url);
-        // let doc = workspace.internal_documents.get(&url);
         let doc = self.get_internal_document(&url)?;
         let doc = doc.read();
         let pos: Position = Position::from_lsp(
@@ -490,6 +500,7 @@ impl LanguageServer for Backend {
             .root_node()
             .named_descendant_for_point_range(pos_one_left.into(), pos_one_left.into())
             .expect("The pos to be in at least one node");
+
         // Generate the list of iris that can be inserted.
         let partial_text = node_text(&node, &doc.rope).to_string();
 
@@ -525,7 +536,6 @@ impl LanguageServer for Backend {
         items.extend(keywords_completion_items);
 
         Ok(Some(CompletionResponse::Array(items)))
-        // }))
     }
 
     async fn semantic_tokens_full(
@@ -534,11 +544,8 @@ impl LanguageServer for Backend {
     ) -> Result<Option<SemanticTokensResult>> {
         debug!("semantic_tokens_full at {}", params.text_document.uri);
         let url = params.text_document.uri;
-        // let workspace = self.find_workspace(&url);
         let doc = self.get_internal_document(&url)?;
         let doc = doc.read();
-        // if let Some(doc) = workspace.internal_documents.get(&uri) {
-        // let doc = doc.read();
 
         let tokens = doc.sematic_tokens(None, &self.position_encoding.read());
 
@@ -554,11 +561,8 @@ impl LanguageServer for Backend {
     ) -> Result<Option<SemanticTokensRangeResult>> {
         debug!("semantic_tokens_range at {}", params.text_document.uri);
         let url = params.text_document.uri;
-        // let workspace = self.find_workspace(&url);
         let doc = self.get_internal_document(&url)?;
-        // if let Some(doc) = workspace.internal_documents.get(&uri) {
         let doc = doc.read();
-        // let range: Range = params.range.into();
         let range = Range::from_lsp(&params.range, &doc.rope, &self.position_encoding.read());
         let tokens = doc.sematic_tokens(Some(range), &self.position_encoding.read());
 
@@ -566,8 +570,6 @@ impl LanguageServer for Backend {
             result_id: None,
             data: tokens,
         })));
-        // }
-        // Ok(None)
     }
 
     async fn document_symbol(
@@ -575,11 +577,8 @@ impl LanguageServer for Backend {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
         let url = params.text_document.uri;
-        // let workspace = self.find_workspace(&url);
         let doc = self.get_internal_document(&url)?;
-        // if let Some(doc) = workspace.internal_documents.get(&url) {
         let infos = doc.read().get_all_frame_infos();
-        // drop(doc);
         return Ok(Some(DocumentSymbolResponse::Flat(
             #[allow(deprecated)] // All fields need to be specified
             infos
@@ -601,8 +600,6 @@ impl LanguageServer for Backend {
                 })
                 .collect_vec(),
         )));
-        // }
-        // Ok(None)
     }
 
     async fn symbol(
@@ -610,7 +607,8 @@ impl LanguageServer for Backend {
         params: WorkspaceSymbolParams,
     ) -> Result<Option<Vec<SymbolInformation>>> {
         let query = params.query;
-        info!("symbol with query:{query}");
+        info!("symbol with query: {query}");
+
         let workspaces = self.workspaces.read();
         let all_frame_infos = workspaces
             .iter()
@@ -680,7 +678,7 @@ impl LanguageServer for Backend {
                 .tree
                 .root_node()
                 .named_descendant_for_point_range(pos.into(), pos.into())
-                .unwrap();
+                .ok_or(Error::PositionOutOfBounds(pos))?;
 
             let full_iri_option = match node.kind() {
                 "full_iri" => Some(trim_full_iri(node_text(&node, &doc.rope))),
@@ -790,7 +788,10 @@ impl LanguageServer for Backend {
                 "abbreviated_iri" => {
                     let range: Range = node.range().into();
                     let text = node_text(&node, &doc.rope).to_string();
-                    let col_offset = text.find(':').unwrap() + 1;
+                    let col_offset = text
+                        .find(':')
+                        .expect("abbreviated_iri to contain at least one :")
+                        + 1;
                     let range = Range {
                         start: range.start.moved_right(col_offset as u32, &doc.rope),
                         ..range
@@ -826,74 +827,91 @@ impl LanguageServer for Backend {
         let url = params.text_document_position.text_document.uri;
         let new_name = params.new_name;
 
-        // let workspace = self.find_workspace(&url);
         let doc = self.get_internal_document(&url)?;
-        // if let Some(doc) = workspace.internal_documents.get(&url) {
-        debug!("is doc locked {}", doc.is_locked());
 
         let doc = doc.read_timeout()?;
 
-        debug!("read doc");
         let pos: Position = Position::from_lsp(
             &params.text_document_position.position,
             &doc.rope,
             &self.position_encoding.read_recursive(),
         );
-        debug!("rename {url}:{pos:?} with {new_name}");
 
         fn rename_helper(
             position: Position,
             doc: &InternalDocument,
             new_name: String,
-        ) -> Option<(String, Option<String>, String, String)> {
+        ) -> Result<Option<(String, Option<String>, String, String)>> {
             let node = doc
                 .tree
                 .root_node()
                 .named_descendant_for_point_range(position.into(), position.into())
-                .unwrap();
+                .ok_or(Error::PositionOutOfBounds(position))?;
 
             match node.kind() {
                 "full_iri" => {
-                    let iri_kind = node.parent().unwrap().kind().to_string();
+                    let iri_kind = node
+                        .parent()
+                        .expect("full_iri to have a parent")
+                        .kind()
+                        .to_string();
                     let iri = trim_full_iri(node_text(&node, &doc.rope));
-                    Some((iri.clone(), Some(new_name.clone()), iri_kind, new_name))
+                    Ok(Some((
+                        iri.clone(),
+                        Some(new_name.clone()),
+                        iri_kind,
+                        new_name,
+                    )))
                 }
                 "simple_iri" => {
                     let iri = node_text(&node, &doc.rope);
-                    let iri_kind = node.parent().unwrap().kind().to_string();
-                    Some((
+                    let iri_kind = node
+                        .parent()
+                        .expect("simple_iri to have a parent")
+                        .kind()
+                        .to_string();
+                    Ok(Some((
                         doc.abbreviated_iri_to_full_iri(iri.to_string())
                             .unwrap_or(iri.to_string()),
                         doc.abbreviated_iri_to_full_iri(new_name.clone()),
                         iri_kind,
                         new_name,
-                    ))
+                    )))
                 }
                 "abbreviated_iri" => {
-                    let iri_kind = node.parent().unwrap().kind().to_string();
+                    let iri_kind = node
+                        .parent()
+                        .expect("abbreviated_iri to have a parent")
+                        .kind()
+                        .to_string();
                     let iri = node_text(&node, &doc.rope).to_string();
-                    let (prefix, _) = iri.split_once(':').unwrap();
-                    Some((
+                    let (prefix, _) = iri
+                        .split_once(':')
+                        .expect("abbreviated_iri to contain at least one :");
+                    Ok(Some((
                         doc.abbreviated_iri_to_full_iri(iri.clone())
                             .unwrap_or(iri.clone()),
                         doc.abbreviated_iri_to_full_iri(format!("{prefix}:{new_name}")),
                         iri_kind,
                         format!("{prefix}:{new_name}"),
-                    ))
+                    )))
                 }
-                _ => None,
+                _ => Ok(None),
             }
         }
 
-        let old_and_new_iri = rename_helper(pos, &doc, new_name.clone()).or_else(|| {
-            // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
-            // For example: ThisIsSomeIri| other text
-            //                           ^
-            //                       Cursor
-            debug!("prepare rename try one position left");
-            let position = pos.moved_left(1, &doc.rope);
-            rename_helper(position, &doc, new_name)
-        });
+        let old_and_new_iri = match rename_helper(pos, &doc, new_name.clone())? {
+            Some(x) => Some(x),
+            None => {
+                // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
+                // For example: ThisIsSomeIri| other text
+                //                           ^
+                //                       Cursor
+                debug!("prepare rename try one position left");
+                let position = pos.moved_left(1, &doc.rope);
+                rename_helper(position, &doc, new_name)?
+            }
+        };
 
         let workspace = doc.try_get_workspace()?;
         let workspace = workspace.read_timeout()?;
@@ -928,9 +946,11 @@ impl LanguageServer for Backend {
                                     },
                                     iri_capture.node.range,
                                     doc.node_by_id(iri_capture.node.id)
-                                        .unwrap()
+                                        .expect("the node id to be valid")
                                         .parent()
-                                        .unwrap()
+                                        .expect(
+                                            "the iri node to have a parent of a specific iri kind",
+                                        )
                                         .kind(),
                                 ),
                                 _ => unreachable!(),
@@ -964,7 +984,6 @@ impl LanguageServer for Backend {
                 change_annotations: None,
             }));
         }
-        // }
         Ok(None)
     }
 
@@ -976,13 +995,13 @@ impl LanguageServer for Backend {
 
 impl Backend {
     /// This will find a workspace or create one for a given url
-    fn find_workspace(&self, url: &Url) -> Arc<RwLock<Workspace>> {
+    fn find_workspace(&self, url: &Url) -> MyResult<Arc<RwLock<Workspace>>> {
         debug!("find workspace");
         let mut workspaces = self
             .workspaces
             .try_upgradable_read_for(Duration::from_secs(5))
-            .expect("a read in 5sec");
-        debug!("read locked workspace");
+            .ok_or(Error::LockTimeout(5))?;
+
         // TODO there are problems when the workspace is changing
         // - A document could be in its own workspace
         // - Then a catalog file is created or modified that would place a document in that workspace
@@ -990,13 +1009,18 @@ impl Backend {
         let maybe_workspace = workspaces.iter().find(|workspace| {
             let workspace = workspace.read();
             workspace.internal_documents.contains_key(url)
-                || workspace
-                    .catalogs
-                    .iter()
-                    .any(|catalog| catalog.contains(&url.to_file_path().unwrap()))
+                || workspace.catalogs.iter().any(|catalog| {
+                    match &url
+                        .to_file_path()
+                        .inspect_err(|_| error!("Url is not a filepath {url}"))
+                    {
+                        Ok(path) => catalog.contains(path),
+                        Err(_) => false,
+                    }
+                })
         });
 
-        match maybe_workspace {
+        Ok(match maybe_workspace {
             None => {
                 let mut file_path = url.to_file_path().expect("URL should be a filepath");
                 file_path.pop();
@@ -1007,7 +1031,6 @@ impl Backend {
                     name: "Single File".into(),
                 };
                 debug!("try workspaces write...");
-                // let mut workspaces = self.workspaces.write();
                 let workspace = Workspace::new(workspace_folder.clone());
 
                 // workspace_folder
@@ -1020,51 +1043,38 @@ impl Backend {
                 })
             }
             Some(w) => w.clone(),
-        }
-
-        // let workspaces = RwLockUpgradableReadGuard::downgrade(workspaces);
-        // // drop(workspaces);
-        // // let workspaces = self.workspaces.read_recursive();
-
-        // RwLockReadGuard::map(workspaces, |ws| {
-        //     ws.iter()
-        //         .find(|w| w.workspace_folder == folder)
-        //         .expect("The file to be located in a workspace, but it was not.")
-        // })
+        })
     }
 
     /// Convinience function to fetch internal document
     fn get_internal_document(&self, url: &Url) -> MyResult<Arc<RwLock<InternalDocument>>> {
-        let workspace = self.find_workspace(url);
+        let workspace = self.find_workspace(url)?;
         let workspace = workspace.read_timeout()?;
-        // .try_read_recursive_for(Duration::from_secs(5))
-        // .ok_or(Error::LockTimeout(5))?;
         workspace.get_internal_document(url)
     }
+}
 
-    // TODO maybe move this into document or workspace
-    /// This will try to fetch the imports of a document
-    async fn resolve_imports(&self, document: Arc<RwLock<InternalDocument>>) -> MyResult<()> {
-        let document = document.read();
-        debug!("Resolve imports for {}", document.uri);
-        let urls = document
-            .query(&ALL_QUERIES.import_query)
-            .iter()
-            .filter_map(|match_| match &match_.captures[..] {
-                [iri] => Url::parse(&trim_full_iri(&iri.node.text)[..]).ok(),
-                _ => unimplemented!(),
-            })
-            .collect_vec();
+// TODO maybe move this into document or workspace
+/// This will try to fetch the imports of a document
+async fn resolve_imports(
+    document: Arc<RwLock<InternalDocument>>,
+    http_client: &dyn HttpClient,
+) -> MyResult<()> {
+    let document = document.read();
+    debug!("Resolve imports for {}", document.uri);
+    let urls = document
+        .query(&ALL_QUERIES.import_query)
+        .iter()
+        .filter_map(|match_| match &match_.captures[..] {
+            [iri] => Url::parse(&trim_full_iri(&iri.node.text)[..]).ok(),
+            _ => unimplemented!(),
+        })
+        .collect_vec();
 
-        for url in urls {
-            Workspace::resolve_url_to_document(
-                document.try_get_workspace()?,
-                &url,
-                &*self.http_client,
-            )
+    for url in urls {
+        Workspace::resolve_url_to_document(document.try_get_workspace()?, &url, http_client)
             .inspect_err(|e| error!("Resolve imports error: {e:?}"))
             .ok();
-        }
-        Ok(())
     }
+    Ok(())
 }

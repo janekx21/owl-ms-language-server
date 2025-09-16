@@ -4,6 +4,8 @@ use std::{borrow::Cow, io, path::PathBuf, time::Duration};
 use thiserror::Error;
 use tower_lsp::lsp_types::Url;
 
+use crate::pos::Position;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Error, Debug)]
@@ -18,6 +20,10 @@ pub enum Error {
     WorkspaceNotFound(Url),
     #[error("The lock could not be aquired for {0} sec")]
     LockTimeout(u64),
+    #[error("The provided URL is not valid for this LSP {0}")]
+    InvalidUrl(Url),
+    #[error("The position is not inside the bounds {0}")]
+    PositionOutOfBounds(Position),
     // From other error types
     #[error("Ureq Error: {0}")]
     Ureq(#[from] ureq::Error),
