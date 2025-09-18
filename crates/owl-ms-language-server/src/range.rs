@@ -28,7 +28,7 @@ impl Range {
     }
 
     pub fn into_lsp(
-        &self,
+        self,
         rope: &Rope,
         encoding: &tower_lsp::lsp_types::PositionEncodingKind,
     ) -> Result<tower_lsp::lsp_types::Range> {

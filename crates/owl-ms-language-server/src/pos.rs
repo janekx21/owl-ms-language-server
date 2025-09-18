@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use log::debug;
+use log::{debug, error};
 use ropey::Rope;
 use std::fmt::Display;
 
@@ -53,7 +53,7 @@ impl Position {
     }
 
     pub fn into_lsp(
-        &self,
+        self,
         rope: &Rope,
         encoding: &tower_lsp::lsp_types::PositionEncodingKind,
     ) -> Result<tower_lsp::lsp_types::Position> {
@@ -61,12 +61,12 @@ impl Position {
             "utf-8" => self.character,
             "utf-16" => utf8_offset_to_utf16_offset(
                 rope.get_line(self.line as usize)
-                    .ok_or(Error::PositionOutOfBounds(*self))?
+                    .ok_or(Error::PositionOutOfBounds(self))?
                     .to_string()
                     .as_str(),
                 self.character as usize,
             )
-            .ok_or(Error::PositionOutOfBounds(*self))? as u32,
+            .ok_or(Error::PositionOutOfBounds(self))? as u32,
             _ => todo!(),
         };
         Ok(tower_lsp::lsp_types::Position {
@@ -76,7 +76,8 @@ impl Position {
     }
 
     pub fn new_from_byte_index(rope: &Rope, index: usize) -> Self {
-        let line = rope.byte_to_line(index);
+        let line = rope.try_byte_to_line(index).unwrap_or(rope.len_lines() - 1);
+        // TODO this could be out of bounds
         let character = index - rope.line_to_byte(line);
         Self {
             line: line as u32,
@@ -92,18 +93,19 @@ impl Position {
         self.character
     }
 
-    // TODO
-    // fn character_char(&self, rope: &Rope) -> u32 {
-    //     // let byte_idx
-    //     // rope.byte_to_char(byte_idx)
-    // }
-
     pub fn byte_index(&self, rope: &Rope) -> usize {
-        rope.line_to_byte(self.line as usize) + self.character as usize
+        rope.try_line_to_byte(self.line as usize)
+            .map_err(|e| e.into())
+            .inspect_err(|e: &Error| error!("{e}"))
+            .unwrap_or(rope.line_to_byte(rope.len_lines() - 1))
+            + self.character as usize
     }
 
     pub fn char_index(&self, rope: &Rope) -> usize {
-        rope.byte_to_char(self.byte_index(rope))
+        rope.try_byte_to_char(self.byte_index(rope))
+            .map_err(|e| e.into())
+            .inspect_err(|e: &Error| error!("{e}"))
+            .unwrap_or(rope.len_chars() - 1)
     }
 
     pub fn moved_right(&self, char_offset: u32, rope: &Rope) -> Self {
@@ -175,26 +177,6 @@ fn utf8_offset_to_utf16_offset(s: &str, utf8_offset: usize) -> Option<usize> {
         None // UTF-8 offset is beyond the string
     }
 }
-
-// impl From<tower_lsp::lsp_types::Position> for Position {
-//     fn from(value: tower_lsp::lsp_types::Position) -> Self {
-//         // The assumption is that this is also byte based!
-//         Position {
-//             line: value.line,
-//             character: value.character,
-//         }
-//     }
-// }
-
-// impl From<Position> for tower_lsp::lsp_types::Position {
-//     fn from(value: Position) -> Self {
-//         // The assumption is that this is also byte based!
-//         tower_lsp::lsp_types::Position {
-//             line: value.line,
-//             character: value.character,
-//         }
-//     }
-// }
 
 impl From<tree_sitter_c2rust::Point> for Position {
     fn from(value: tree_sitter_c2rust::Point) -> Self {

@@ -419,35 +419,6 @@ impl InternalDocument {
         self.query_helper(query, Some(range))
     }
 
-    pub fn query_with_imports(
-        &self,
-        query: &Query,
-        workspace: Arc<RwLock<Workspace>>,
-        http_client: &dyn HttpClient,
-    ) -> Vec<UnwrappedQueryMatch> {
-        // Resolve the documents that are imported here
-        // This also contains itself!
-        let docs = self
-            .reachable_docs_recusive(http_client)
-            .iter()
-            .filter_map(|url| {
-                Workspace::resolve_url_to_document(workspace.clone(), url, http_client)
-                    .inspect_err(|e| error!("{e:?}"))
-                    .ok()
-            })
-            .collect_vec();
-
-        docs.iter()
-            .flat_map(|doc| match doc {
-                DocumentReference::Internal(doc) => doc.read().query(query),
-                DocumentReference::External(_) => {
-                    warn!("Query in external document not supported");
-                    vec![]
-                }
-            })
-            .collect_vec()
-    }
-
     pub fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
         let mut w = self.tree.walk();
         loop {
@@ -575,8 +546,8 @@ impl InternalDocument {
             let old_end_byte = old_range.end.byte_index(&self.rope);
 
             // must come before the rope is changed!
-            let start_char = self.rope.byte_to_char(start_byte);
-            let old_end_char = self.rope.byte_to_char(old_end_byte);
+            let start_char = self.rope.try_byte_to_char(start_byte)?;
+            let old_end_char = self.rope.try_byte_to_char(old_end_byte)?;
 
             debug!(
                 "change range in chars {start_byte}..{old_end_byte} og range {range:?} and text {}",
@@ -584,14 +555,8 @@ impl InternalDocument {
             );
 
             // rope replace
-            timeit("rope operations", || {
-                if old_end_char < start_char {
-                    error!("Invalid rope remove operation range. {start_char}..{old_end_char}");
-                }
-                // TODO this panics now while formatting oeo physical :<
-                self.rope.remove(start_char..old_end_char);
-                self.rope.insert(start_char, &change.text);
-            });
+            self.rope.try_remove(start_char..old_end_char)?;
+            self.rope.try_insert(start_char, &change.text)?;
 
             // this must come after the rope was changed!
             let new_end_byte = start_byte + change.text.len();
@@ -610,8 +575,6 @@ impl InternalDocument {
             self.version = params.text_document.version;
         }
 
-        // debug!("Change ranges {:#?}", change_ranges);
-
         let rope_provider = RopeProvider::new(&self.rope);
 
         let tree = {
@@ -626,59 +589,12 @@ impl InternalDocument {
                     .expect("language to be set, no timeout to be used, no cancelation flag")
             })
         };
-        // debug!("New tree {}", tree.root_node().to_sexp());
         self.tree = tree;
 
-        // TODO #30 prune
+        // TODO #30 prune diagnostics with
         // Remove all old diagnostics with an overlapping range. They will need to be recreated
-        // for (_, _, old_range) in change_ranges.iter() {
-        //     document
-        //         .diagnostics
-        //         .retain(|d| !lines_overlap(&d.range.into(), old_range));
-        // }
         // Move all other diagnostics
-        // for diagnostic in &mut document.diagnostics {
-        //     for (new_range, edit, old_range) in change_ranges.iter() {
-        //         let mut range_to_end = *old_range;
-        //         range_to_end.end = Position {
-        //             line: u32::MAX,
-        //             character: u32::MAX,
-        //         };
-        //         if lines_overlap(&diagnostic.range.into(), &range_to_end) {
-        //             debug!("old {} -> new {}", old_range, new_range);
-        //             let delta = new_range.end.line as i32 - old_range.end.line as i32;
-        //             diagnostic.range.start.line =
-        //                 (diagnostic.range.start.line as i32 + delta) as u32;
-        //             diagnostic.range.start.line =
-        //                 (diagnostic.range.end.line as i32 + delta) as u32;
-        //         }
-        //     }
-        // }
-        // for (_, _, _) in change_ranges.iter() {
-        //     let cursor = document.tree.walk();
-        //     // TODO #30
-        //     // while range_exclusive_inside(new_range, &cursor.node().range().into()) {
-        //     //     if cursor
-        //     //         .goto_first_child_for_point(new_range.start.into())
-        //     //         .is_none()
-        //     //     {
-        //     //         break;
-        //     //     }
-        //     // }
-        //     // cursor.goto_parent();
-        //     let node_that_has_change = cursor.node();
-        //     drop(cursor);
-        //     // while range_overlaps(&ts_range_to_lsp_range(cursor.node().range()), &range) {}
-        //     // document.diagnostics =
-        //     let additional_diagnostics = timeit("did_change > gen_diagnostics", || {
-        //         gen_diagnostics(&node_that_has_change)
-        //     })
-        //     .into_iter();
-        //     // .filter(|d| lines_overlap(&d.range.into(), new_range)); // should be exclusive to other diagnostics
-        //     document.diagnostics.extend(additional_diagnostics);
-        // }
 
-        // TODO #30 replace with above
         self.diagnostics = timeit("did_change > gen_diagnostics", || {
             gen_diagnostics(&self.tree.root_node())
         });
@@ -712,18 +628,6 @@ impl InternalDocument {
             })
             .sorted_by_key(|s| s.len()) // short IRI's are preferred
             .next()
-    }
-
-    pub fn ontology_id(&self) -> Option<Iri> {
-        let result = self.query(&ALL_QUERIES.ontology_id);
-        result
-            .iter()
-            .exactly_one()
-            .ok()
-            .map(|m| match &m.captures[..] {
-                [iri] => trim_full_iri(&iri.node.text),
-                _ => unreachable!(),
-            })
     }
 
     /// Returns the prefixes of a document (without colon :)
@@ -808,7 +712,10 @@ impl InternalDocument {
         let rope = self.rope.clone();
         let tree = self.tree.clone();
 
-        let line = rope.line(cursor.line() as usize).to_string();
+        let line = rope
+            .get_line(cursor.line() as usize)
+            .map(|s| s.to_string())
+            .unwrap_or("".into());
         let partial = word_before_character(cursor.character_byte() as usize, &line);
 
         debug!("Cursor node text is {:?}", partial);
@@ -858,9 +765,6 @@ impl InternalDocument {
                         None,
                     )
                     .expect("language to be set, no timeout to be used, no cancelation flag");
-
-                // debug!(
-                // "A possible source code version for {kw} (change is {change}) with rope version {rope_version}\nNew tree {:?}", new_tree.root_node().to_sexp());
 
                 let cursor_one_left = cursor.moved_left(1, &rope);
                 let cursor_node_version = new_tree
@@ -963,14 +867,17 @@ impl InternalDocument {
 
 /// Returns the word before the [`character`] position in the [`line`]
 pub fn word_before_character(byte_index: usize, line: &str) -> String {
-    line[..byte_index]
-        .chars()
-        .rev()
-        .take_while(|c| c.is_alphabetic())
-        .collect_vec()
-        .iter()
-        .rev()
-        .collect::<String>()
+    line.get(..byte_index)
+        .map(|s| {
+            s.chars()
+                .rev()
+                .take_while(|c| c.is_alphabetic())
+                .collect_vec()
+                .iter()
+                .rev()
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[cached(
@@ -1056,37 +963,6 @@ fn document_all_frame_infos(doc: &InternalDocument) -> HashMap<Iri, FrameInfo> {
 )]
 fn get_frame_info_helper(doc: &InternalDocument, iri: &Iri) -> Option<FrameInfo> {
     document_all_frame_infos(doc).get(iri).cloned()
-    // let annotation_infos = timeit("Annotation infos", || {
-    //     let a = document_annotations(doc);
-    //     info!("Annotations {a:#?}");
-    //     a.get_key_value(iri)
-    //         .map(|(frame_iri, (annoation_iri, literal))| FrameInfo {
-    //             iri: frame_iri.clone(),
-    //             annotations: HashMap::from([(annoation_iri.clone(), vec![literal.clone()])]),
-    //             frame_type: FrameType::Unknown,
-    //             definitions: Vec::new(),
-    //         })
-    // });
-
-    // let definition_infos = timeit("Definition infos", || {
-    //     let a = document_definitions(doc);
-    //     info!("Definitions {a:#?}");
-    //     a.get_key_value(iri)
-    //         .map(|(frame_iri, (range, kind))| FrameInfo {
-    //             iri: frame_iri.clone(),
-    //             annotations: HashMap::new(),
-    //             frame_type: FrameType::parse(&kind),
-    //             definitions: vec![Location {
-    //                 uri: doc.uri.clone(),
-    //                 range: range.clone(),
-    //             }],
-    //         })
-    // });
-
-    // annotation_infos
-    //     .into_iter()
-    //     .chain(definition_infos)
-    //     .tree_reduce(FrameInfo::merge)
 }
 
 fn document_annotations(doc: &InternalDocument) -> Vec<(String, String, String)> {
@@ -1291,14 +1167,6 @@ pub struct UnwrappedQueryMatch {
     _id: u32,
 }
 
-impl UnwrappedQueryMatch {
-    pub fn capture_by_name(&self, query: &Query, name: &str) -> Option<&UnwrappedQueryCapture> {
-        query
-            .capture_index_for_name(name)
-            .map(|i| &self.captures[i as usize])
-    }
-}
-
 /// This is a version of a query capture that has no reference to the tree or cursor
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnwrappedQueryCapture {
@@ -1339,26 +1207,9 @@ pub struct Location {
     pub range: Range,
 }
 
-// impl From<Location> for tower_lsp::lsp_types::Location {
-//     fn from(val: Location) -> Self {
-//         tower_lsp::lsp_types::Location {
-//             uri: val.uri,
-//             range: val.range.into(),
-//         }
-//     }
-// }
-
-// impl From<tower_lsp::lsp_types::Location> for Location {
-//     fn from(value: tower_lsp::lsp_types::Location) -> Self {
-//         Location {
-//             uri: value.uri,
-//             range: value.range.into(),
-//         }
-//     }
-// }
 impl Location {
     pub fn into_lsp(
-        &self,
+        self,
         rope: &Rope,
         encoding: &PositionEncodingKind,
     ) -> Result<tower_lsp::lsp_types::Location> {
@@ -1466,8 +1317,10 @@ fn trim_string_value(value: &str) -> String {
 // TODO maybe use Arc<String>
 pub type Iri = String;
 
-pub fn node_text<'a>(node: &Node, rope: &'a Rope) -> ropey::RopeSlice<'a> {
-    rope.byte_slice(node.start_byte()..node.end_byte())
+pub fn node_text(node: &Node, rope: &Rope) -> String {
+    rope.get_byte_slice(node.start_byte()..node.end_byte())
+        .map(|rs| rs.to_string())
+        .unwrap_or("".into())
 }
 
 /// Generate the diagnostics for a single node, walking recusivly down to every child and every syntax error within
@@ -1561,8 +1414,11 @@ pub enum FrameType {
     AnnotationProperty,
     Individual,
     Ontology,
-    Invalid, // The frame type of an IRI that has no valid frame (this can be because of conflicts)
-    Unknown, // The frame type of an IRI that has no frame at all (can be overriten)
+
+    /// The frame type of an IRI that has no valid frame (this can be because of conflicts)
+    Invalid,
+    /// The frame type of an IRI that has no frame at all (can be overriten)
+    Unknown,
 }
 
 impl FrameType {
@@ -1994,32 +1850,6 @@ mod tests {
                         )
             "#}
         );
-    }
-
-    #[test]
-    fn internal_document_ontology_id_should_return_none() {
-        let doc = InternalDocument::new(Url::parse("http://foo").unwrap(), -1, "Ontology: ".into());
-
-        let iri = doc.ontology_id();
-
-        assert_eq!(iri, None);
-    }
-
-    #[test]
-    fn internal_document_ontology_id_should_return_some() {
-        let doc = InternalDocument::new(
-            Url::parse("http://foo/bar").unwrap(),
-            -1,
-            "Ontology: <http://foo/bar>
-            Class: Foo"
-                .into(),
-        );
-
-        let iri = doc.ontology_id();
-
-        info!("{}", doc.tree.root_node().to_sexp());
-
-        assert_eq!(iri, Some("http://foo/bar".to_string()));
     }
 
     #[test]

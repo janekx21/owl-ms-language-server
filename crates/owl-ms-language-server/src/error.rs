@@ -35,6 +35,8 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Tokio Join Error: {0}")]
     TokioJoin(#[from] tokio::task::JoinError),
+    #[error("Rope Error: {0}")]
+    Rope(#[from] ropey::Error),
 }
 
 impl From<Error> for tower_lsp::jsonrpc::Error {
