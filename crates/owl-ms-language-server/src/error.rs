@@ -57,14 +57,28 @@ impl From<Error> for tower_lsp::jsonrpc::Error {
 pub trait ResultExt<T> {
     /// Consumes and logs the result if it contains error
     fn log_if_error(self);
+    /// Inspects the Result and logs an Error if needed
+    fn inspect_log(self) -> Self;
 }
 
 impl<T> ResultExt<T> for Result<T> {
     fn log_if_error(self) {
-        match self {
-            Ok(_) => {}
-            Err(e) => error!("{e}"),
-        }
+        let _ = self.inspect_log();
+    }
+
+    fn inspect_log(self) -> Self {
+        self.inspect_err(|e| error!("{e}"))
+    }
+}
+
+pub trait ResultIterator<T> {
+    /// Filters out Errors and logs them
+    fn filter_and_log(self) -> impl Iterator<Item = T>;
+}
+
+impl<T, I: Iterator<Item = Result<T>>> ResultIterator<T> for I {
+    fn filter_and_log(self) -> impl Iterator<Item = T> {
+        self.filter_map(|r| r.inspect_log().ok())
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::catalog::CatalogUri;
 use crate::consts::{get_fixed_infos, keyword_hover_info};
-use crate::error::{Error, Result, RwLockExt};
+use crate::error::{Error, Result, ResultExt, ResultIterator, RwLockExt};
 use crate::pos::Position;
 use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type_index};
 use crate::web::HttpClient;
@@ -439,9 +439,8 @@ impl InternalDocument {
 
     fn reachable_docs_recusive(&self, http_client: &dyn HttpClient) -> Vec<Url> {
         let mut set: HashSet<Url> = HashSet::new();
-        let _ = self
-            .reachable_docs_recursive_helper(&mut set, http_client)
-            .inspect_err(|e| error!("{e}"));
+        self.reachable_docs_recursive_helper(&mut set, http_client)
+            .log_if_error();
         set.into_iter().collect_vec()
     }
 
@@ -463,7 +462,7 @@ impl InternalDocument {
                 timeit("\t resolve url to doc", || {
                     Workspace::resolve_url_to_document(self.try_get_workspace()?, url, http_client)
                 })
-                .inspect_err(|e| error!("{e:?}"))
+                .inspect_log()
                 .ok()
             })
             .collect_vec();
@@ -691,7 +690,7 @@ impl InternalDocument {
                     }))
                 }
             })
-            .filter_map(|r| r.inspect_err(|e: &Error| error!("{e}")).ok())
+            .filter_and_log()
             .flatten()
             .collect())
     }
@@ -791,7 +790,7 @@ impl InternalDocument {
                 }
             })
             .filter_map_ok(|x| x)
-            .filter_map(|r: Result<String>| r.inspect_err(|e| error!("{e}")).ok())
+            .filter_and_log()
             .collect_vec()
     }
 
@@ -893,9 +892,7 @@ fn imports_helper(doc: &InternalDocument) -> Vec<Url> {
     doc.query(&ALL_QUERIES.import_query)
         .iter()
         .filter_map(|m| match &m.captures[..] {
-            [iri] => Url::parse(&trim_full_iri(&iri.node.text)[..])
-                .inspect_err(|e| warn!("Url could not be parsed {e:#}"))
-                .ok(),
+            [iri] => Url::parse(&trim_full_iri(&iri.node.text)[..]).ok(),
             _ => unimplemented!(),
         })
         .collect_vec()
@@ -1087,7 +1084,7 @@ impl ExternalDocument {
             .iter()
             .filter_map(|url| {
                 Workspace::resolve_url_to_document(workspace.clone(), url, http_client)
-                    .inspect_err(|e| error!("{e:?}"))
+                    .inspect_log()
                     .ok()
             })
             .collect_vec();

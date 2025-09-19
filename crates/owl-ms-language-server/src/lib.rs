@@ -12,7 +12,7 @@ mod web;
 mod workspace;
 
 use debugging::timeit;
-use error::{Error, Result as MyResult, ResultExt, RwLockExt};
+use error::{Error, Result as MyResult, ResultExt, ResultIterator, RwLockExt};
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
@@ -231,7 +231,7 @@ impl LanguageServer for Backend {
                         data: None,
                     })
                 })
-                .filter_map(|r: Result<Diagnostic>| r.inspect_err(|e| error!("{e}")).ok())
+                .filter_and_log()
                 .collect_vec();
 
             let client = self.client.clone();
@@ -295,7 +295,7 @@ impl LanguageServer for Backend {
                         data: None,
                     })
                 })
-                .filter_map(|r: Result<Diagnostic>| r.inspect_err(|e| error!("{e}")).ok())
+                .filter_and_log()
                 .collect_vec();
             let client = self.client.clone();
             let version = Some(document.version);
@@ -437,7 +437,7 @@ impl LanguageServer for Backend {
                         l.clone()
                             .into_lsp(&doc.rope, &__self.position_encoding.read())
                     })
-                    .filter_map(|r| r.inspect_err(|e| error!("{e}")).ok())
+                    .filter_and_log()
                     .collect_vec();
 
                 return Ok(Some(GotoDefinitionResponse::Array(locations)));
@@ -614,7 +614,7 @@ impl LanguageServer for Backend {
                         })
                     })
                 })
-                .filter_map(|r: MyResult<SymbolInformation>| r.inspect_err(|e| error!("{e}")).ok())
+                .filter_and_log()
                 .collect_vec(),
         )));
     }
@@ -749,7 +749,7 @@ impl LanguageServer for Backend {
                                 Ok(None)
                             }
                         })
-                        .filter_map(|r| r.inspect_err(|e: &Error| error!("{e}")).ok())
+                        .filter_and_log()
                         .flatten()
                         .collect_vec()
                 })
@@ -994,7 +994,7 @@ impl LanguageServer for Backend {
                                 Ok(None)
                             }
                         })
-                        .filter_map(|r| r.inspect_err(|e: &Error| error!("{e}")).ok())
+                        .filter_and_log()
                         .flatten()
                         .collect_vec();
                     (doc.uri.clone(), edits)
@@ -1096,8 +1096,7 @@ async fn resolve_imports(
 
     for url in urls {
         Workspace::resolve_url_to_document(document.try_get_workspace()?, &url, http_client)
-            .inspect_err(|e| error!("Resolve imports error: {e:?}"))
-            .ok();
+            .log_if_error();
     }
     Ok(())
 }

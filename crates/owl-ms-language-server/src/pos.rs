@@ -1,4 +1,4 @@
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, ResultExt};
 use log::{debug, error};
 use ropey::Rope;
 use std::fmt::Display;
@@ -96,7 +96,7 @@ impl Position {
     pub fn byte_index(&self, rope: &Rope) -> usize {
         rope.try_line_to_byte(self.line as usize)
             .map_err(|e| e.into())
-            .inspect_err(|e: &Error| error!("{e}"))
+            .inspect_log()
             .unwrap_or(rope.line_to_byte(rope.len_lines() - 1))
             + self.character as usize
     }
@@ -104,7 +104,7 @@ impl Position {
     pub fn char_index(&self, rope: &Rope) -> usize {
         rope.try_byte_to_char(self.byte_index(rope))
             .map_err(|e| e.into())
-            .inspect_err(|e: &Error| error!("{e}"))
+            .inspect_log()
             .unwrap_or(rope.len_chars() - 1)
     }
 
