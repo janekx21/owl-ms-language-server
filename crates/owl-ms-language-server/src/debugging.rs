@@ -12,12 +12,12 @@ pub fn timeit<F: FnMut() -> T, T>(name: &str, mut f: F) -> T {
     let result = f();
     let end = Instant::now();
     let duration = end.duration_since(start);
-    debug!("⏲ {} took {:?}", name, duration);
+    debug!("⏲ {name} took {duration:?}");
     result
 }
 
 /// Write a log message to the LSP client. The [`msg`] can include log types, they will get converted.
-pub fn log_to_client(client: &Client, msg: String) -> task::JoinHandle<()> {
+pub fn log_to_client(client: &Client, msg: String) {
     let c = client.clone();
     task::spawn(async move {
         // Reformat the log message
@@ -35,7 +35,7 @@ pub fn log_to_client(client: &Client, msg: String) -> task::JoinHandle<()> {
         }
 
         c.log_message(message_type, msg.trim_end()).await;
-    })
+    });
 }
 
 pub struct BackendLogger {
@@ -45,6 +45,7 @@ pub struct BackendLogger {
 }
 
 impl BackendLogger {
+    #[must_use]
     pub fn new(client: Client, file: Option<File>) -> Self {
         Self {
             client,
@@ -59,14 +60,14 @@ impl Write for BackendLogger {
         let str = String::from_utf8_lossy(buf);
         self.client_log_line.push_str(&str);
 
-        if self.client_log_line.ends_with("\n") {
+        if self.client_log_line.ends_with('\n') {
             log_to_client(&self.client, self.client_log_line.clone());
             self.client_log_line.clear();
         }
 
         if let Some(f) = &mut self.file {
             f.write_all(buf).unwrap_or_else(|err| {
-                log_to_client(&self.client, format!("Could not log to file. {}", err));
+                log_to_client(&self.client, format!("Could not log to file. {err}"));
             });
         }
         Ok(buf.len())

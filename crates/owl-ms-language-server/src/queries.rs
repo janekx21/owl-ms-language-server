@@ -1,21 +1,19 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::LazyLock};
 
 use dashmap::DashMap;
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tree_sitter_c2rust::Query;
 
 use crate::LANGUAGE;
 
-pub static NODE_TYPES: Lazy<DashMap<String, StaticNode>> = Lazy::new(|| {
+pub static NODE_TYPES: LazyLock<DashMap<String, StaticNode>> = LazyLock::new(|| {
     let node_types: Vec<StaticNode> =
         serde_json::from_str(tree_sitter_owl_ms::NODE_TYPES).expect("valid node types");
 
-    DashMap::<String, StaticNode>::from_iter(
-        node_types
-            .iter()
-            .map(|node| (node.type_.clone(), (*node).clone())),
-    )
+    node_types
+        .iter()
+        .map(|node| (node.type_.clone(), (*node).clone()))
+        .collect::<DashMap<String, StaticNode>>()
 });
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -36,10 +34,11 @@ pub struct StaticNodeChildren {
     pub types: Vec<StaticNode>,
 }
 
-pub static GRAMMAR: Lazy<Grammar> =
-    Lazy::new(|| serde_json::from_str(tree_sitter_owl_ms::GRAMMAR).expect("valid grammar json"));
+pub static GRAMMAR: LazyLock<Grammar> = LazyLock::new(|| {
+    serde_json::from_str(tree_sitter_owl_ms::GRAMMAR).expect("valid grammar json")
+});
 
-pub static KEYWORDS: Lazy<Vec<String>> = Lazy::new(|| {
+pub static KEYWORDS: LazyLock<Vec<String>> = LazyLock::new(|| {
     GRAMMAR
         .rules
         .iter()
@@ -68,7 +67,7 @@ pub struct AllQueries {
     pub prefix: Query,
 }
 
-pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
+pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
     import_query: Query::new(
         &LANGUAGE,
         "(import [(full_iri) (simple_iri) (abbreviated_iri)]@iri)",
@@ -262,16 +261,12 @@ pub struct SymbolRule {
 
 pub fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) -> u32 {
     match str {
-        "punctuation.bracket" => 21,   // SemanticTokenType::OPERATOR,
-        "punctuation.delimiter" => 21, // SemanticTokenType::OPERATOR,
-        "keyword" => 15,               // SemanticTokenType::KEYWORD,
-        "operator" => 21,              // SemanticTokenType::OPERATOR,
-        "variable.buildin" => 8,       // SemanticTokenType::VARIABLE,
-        "string" => 18,                // SemanticTokenType::STRING,
-        "number" => 19,                // SemanticTokenType::NUMBER,
-        "constant.builtin" => 8,       // SemanticTokenType::VARIABLE,
-        "variable" => 8,               // SemanticTokenType::VARIABLE,
-        "comment" => 17,               // SemanticTokenType::COMMENT,
+        "keyword" => 15, // SemanticTokenType::KEYWORD,
+        "operator" | "punctuation.delimiter" | "punctuation.bracket" => 21, // SemanticTokenType::OPERATOR,
+        "variable.buildin" | "constant.builtin" | "variable" => 8, // SemanticTokenType::VARIABLE,
+        "string" => 18,                                            // SemanticTokenType::STRING,
+        "number" => 19,                                            // SemanticTokenType::NUMBER,
+        "comment" => 17,                                           // SemanticTokenType::COMMENT,
         _ => todo!("highlight capture {} not implemented", str),
     }
 }

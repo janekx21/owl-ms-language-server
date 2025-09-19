@@ -22,22 +22,25 @@ impl Position {
         Self { line, character }
     }
 
+    /// Consumes an LSP Position to create a UTF-8 based Position
     pub fn from_lsp(
-        pos: &tower_lsp::lsp_types::Position,
+        pos: tower_lsp::lsp_types::Position,
         rope: &Rope,
         encoding: &tower_lsp::lsp_types::PositionEncodingKind,
     ) -> Result<Self> {
         let character = match encoding.as_str() {
             "utf-8" => pos.character,
             "utf-16" => {
+                // because the source is u32
+                #[allow(clippy::cast_possible_truncation)]
                 let i = utf16_offset_to_utf8_offset(
                     rope.get_line(pos.line as usize)
-                        .ok_or(Error::PositionOutOfBoundsTowerLsp(*pos))?
+                        .ok_or(Error::PositionOutOfBoundsTowerLsp(pos))?
                         .to_string()
                         .as_str(),
                     pos.character as usize,
                 )
-                .ok_or(Error::PositionOutOfBoundsTowerLsp(*pos))? as u32;
+                .ok_or(Error::PositionOutOfBoundsTowerLsp(pos))? as u32;
                 debug!(
                     "Converting utf-16 ({}) index into utf-8 ({})",
                     pos.character, i
@@ -59,14 +62,19 @@ impl Position {
     ) -> Result<tower_lsp::lsp_types::Position> {
         let character = match encoding.as_str() {
             "utf-8" => self.character,
-            "utf-16" => utf8_offset_to_utf16_offset(
-                rope.get_line(self.line as usize)
-                    .ok_or(Error::PositionOutOfBounds(self))?
-                    .to_string()
-                    .as_str(),
-                self.character as usize,
-            )
-            .ok_or(Error::PositionOutOfBounds(self))? as u32,
+            "utf-16" => {
+                // because the source is u32
+                #[allow(clippy::cast_possible_truncation)]
+                let i = utf8_offset_to_utf16_offset(
+                    rope.get_line(self.line as usize)
+                        .ok_or(Error::PositionOutOfBounds(self))?
+                        .to_string()
+                        .as_str(),
+                    self.character as usize,
+                )
+                .ok_or(Error::PositionOutOfBounds(self))? as u32;
+                i
+            }
             _ => todo!(),
         };
         Ok(tower_lsp::lsp_types::Position {
@@ -79,43 +87,45 @@ impl Position {
         let line = rope.try_byte_to_line(index).unwrap_or(rope.len_lines() - 1);
         // TODO this could be out of bounds
         let character = index - rope.line_to_byte(line);
+        // because the source is u32
+        #[allow(clippy::cast_possible_truncation)]
         Self {
             line: line as u32,
             character: character as u32,
         }
     }
 
-    pub fn line(&self) -> u32 {
+    pub fn line(self) -> u32 {
         self.line
     }
 
-    pub fn character_byte(&self) -> u32 {
+    pub fn character_byte(self) -> u32 {
         self.character
     }
 
-    pub fn byte_index(&self, rope: &Rope) -> usize {
+    pub fn byte_index(self, rope: &Rope) -> usize {
         rope.try_line_to_byte(self.line as usize)
-            .map_err(|e| e.into())
+            .map_err(std::convert::Into::into)
             .inspect_log()
             .unwrap_or(rope.line_to_byte(rope.len_lines() - 1))
             + self.character as usize
     }
 
-    pub fn char_index(&self, rope: &Rope) -> usize {
+    pub fn char_index(self, rope: &Rope) -> usize {
         rope.try_byte_to_char(self.byte_index(rope))
-            .map_err(|e| e.into())
+            .map_err(std::convert::Into::into)
             .inspect_log()
             .unwrap_or(rope.len_chars() - 1)
     }
 
-    pub fn moved_right(&self, char_offset: u32, rope: &Rope) -> Self {
+    pub fn moved_right(self, char_offset: u32, rope: &Rope) -> Self {
         let char_idx = self.char_index(rope);
         let char_idx = char_idx.saturating_add(char_offset as usize);
         let char_idx = char_idx.min(rope.len_chars() - 1); // clamp
         Self::new_from_byte_index(rope, rope.char_to_byte(char_idx))
     }
 
-    pub fn moved_left(&self, char_offset: u32, rope: &Rope) -> Self {
+    pub fn moved_left(self, char_offset: u32, rope: &Rope) -> Self {
         let char_idx = self.char_index(rope);
         let char_idx = char_idx.saturating_sub(char_offset as usize);
         Self::new_from_byte_index(rope, rope.char_to_byte(char_idx))
@@ -181,6 +191,9 @@ fn utf8_offset_to_utf16_offset(s: &str, utf8_offset: usize) -> Option<usize> {
 impl From<tree_sitter_c2rust::Point> for Position {
     fn from(value: tree_sitter_c2rust::Point) -> Self {
         // The assumption is that this is also byte based!
+
+        // because the source is u32
+        #[allow(clippy::cast_possible_truncation)]
         Position {
             line: value.row as u32,
             character: value.column as u32,
@@ -257,7 +270,7 @@ mod tests {
         let s = "Hello 🌍 World! 🦀";
 
         // Test that converting UTF-16 -> UTF-8 -> UTF-16 gives the original
-        for utf16_offset in 0..=s.chars().map(|c| c.len_utf16()).sum::<usize>() {
+        for utf16_offset in 0..=s.chars().map(char::len_utf16).sum::<usize>() {
             if let Some(utf8_offset) = utf16_offset_to_utf8_offset(s, utf16_offset) {
                 assert_eq!(
                     utf8_offset_to_utf16_offset(s, utf8_offset),

@@ -22,8 +22,8 @@ impl Range {
         encoding: &tower_lsp::lsp_types::PositionEncodingKind,
     ) -> Result<Self> {
         Ok(Range {
-            start: Position::from_lsp(&range.start, rope, encoding)?,
-            end: Position::from_lsp(&range.end, rope, encoding)?,
+            start: Position::from_lsp(range.start, rope, encoding)?,
+            end: Position::from_lsp(range.end, rope, encoding)?,
         })
     }
 

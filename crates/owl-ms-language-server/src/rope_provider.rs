@@ -16,10 +16,12 @@ impl<'a> TextProvider<&'a [u8]> for RopeProvider<'a> {
 }
 
 impl<'a> RopeProvider<'a> {
+    #[must_use]
     pub fn new(value: &'a Rope) -> Self {
         RopeProvider(value)
     }
 
+    #[must_use]
     pub fn chunk_callback(&self, byte_idx: usize) -> &[u8] {
         // TODO Why is reparsing this not O(log n)?
         // Maybe the rope traversal takes too long.

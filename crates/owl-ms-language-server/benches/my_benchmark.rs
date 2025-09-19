@@ -40,7 +40,7 @@ Ontology: <http://foo.bar>
             },
             |(source, parser)| parse_helper(source, parser),
             criterion::BatchSize::SmallInput,
-        )
+        );
     });
 }
 
@@ -64,7 +64,7 @@ fn ontology_size_bench(c: &mut Criterion) {
                 },
                 |(source, parser)| parse_helper(source, parser),
                 criterion::BatchSize::SmallInput,
-            )
+            );
         });
     }
     group.finish();
@@ -111,7 +111,7 @@ fn ontology_change_bench(c: &mut Criterion) {
                 },
                 |(source, parser, old_tree)| re_parse_helper(source, parser, old_tree),
                 criterion::BatchSize::SmallInput,
-            )
+            );
         });
     }
     group.finish();
@@ -157,7 +157,7 @@ fn ontology_query_bench(c: &mut Criterion) {
                     }
                 },
                 criterion::BatchSize::SmallInput,
-            )
+            );
         });
     }
     group.finish();

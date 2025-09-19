@@ -13,21 +13,20 @@ use cached::SizedCache;
 use core::fmt;
 use dashmap::DashMap;
 use horned_owl::io::ParserConfiguration;
-use horned_owl::model::Component::*;
+use horned_owl::model::Component::AnnotationAssertion;
 use horned_owl::model::{ArcStr, Build};
 use horned_owl::ontology::iri_mapped::ArcIRIMappedOntology;
 use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
-use once_cell::sync::Lazy;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use pretty::RcDoc;
 use ropey::Rope;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter::once;
-use std::ops::Deref;
-use std::sync::Weak;
+use std::path::Path;
+use std::sync::{LazyLock, Weak};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Display,
@@ -41,14 +40,14 @@ use tower_lsp::lsp_types::{
 };
 use tree_sitter_c2rust::{InputEdit, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
-static GLOBAL_PARSER: Lazy<Mutex<Parser>> = Lazy::new(|| {
+static GLOBAL_PARSER: LazyLock<Mutex<Parser>> = LazyLock::new(|| {
     let mut parser = Parser::new();
     parser
         .set_language(&LANGUAGE)
         .expect("the language to be valid");
     parser.set_logger(Some(Box::new(|type_, str| match type_ {
-        tree_sitter_c2rust::LogType::Parse => trace!(target: "tree-sitter-parse", "{}", str),
-        tree_sitter_c2rust::LogType::Lex => trace!(target: "tree-sitter-lex", "{}", str),
+        tree_sitter_c2rust::LogType::Parse => trace!(target: "tree-sitter-parse", "{str}"),
+        tree_sitter_c2rust::LogType::Lex => trace!(target: "tree-sitter-lex", "{str}"),
     })));
 
     Mutex::new(parser)
@@ -58,7 +57,7 @@ pub fn lock_global_parser() -> MutexGuard<'static, Parser> {
     (*GLOBAL_PARSER).lock()
 }
 
-static GLOBAL_BUILD_ARC: Lazy<Mutex<Build<ArcStr>>> = Lazy::new(|| {
+static GLOBAL_BUILD_ARC: LazyLock<Mutex<Build<ArcStr>>> = LazyLock::new(|| {
     let build = Build::new_arc();
     Mutex::new(build)
 });
@@ -72,13 +71,13 @@ pub struct Workspace {
     /// Maps an URL to a document that can be internal or external
     pub internal_documents: DashMap<Url, Arc<RwLock<InternalDocument>>>,
     pub external_documents: DashMap<Url, Arc<RwLock<ExternalDocument>>>,
-    pub workspace_folder: WorkspaceFolder,
+    pub folder: WorkspaceFolder,
     pub catalogs: Vec<Catalog>,
 }
 
 impl Workspace {
     pub fn new(workspace_folder: WorkspaceFolder) -> Self {
-        let catalogs = Catalog::load_catalogs_recursive(workspace_folder.uri.clone());
+        let catalogs = Catalog::load_catalogs_recursive(&workspace_folder.uri);
         info!(
             "New workspace {} at {} with catalogs {catalogs:?}",
             workspace_folder.name, workspace_folder.uri
@@ -86,13 +85,13 @@ impl Workspace {
         Workspace {
             internal_documents: DashMap::new(),
             external_documents: DashMap::new(),
-            workspace_folder,
+            folder: workspace_folder,
             catalogs,
         }
     }
 
     pub fn insert_internal_document(
-        workspace: Arc<RwLock<Workspace>>,
+        workspace: &Arc<RwLock<Workspace>>,
         document: InternalDocument,
     ) -> Arc<RwLock<InternalDocument>> {
         debug!(
@@ -103,7 +102,7 @@ impl Workspace {
         let uri = document.uri.clone();
         let arc = Arc::new(RwLock::new(document));
         let mut doc = arc.write();
-        doc.workspace = Arc::downgrade(&workspace);
+        doc.workspace = Arc::downgrade(workspace);
         let workspace = workspace.read();
         workspace.internal_documents.insert(uri, arc.clone());
         arc.clone()
@@ -151,7 +150,7 @@ impl Workspace {
     ///
     /// - `iri` should be a full iri
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
-        let external_infos = self.external_documents.iter().flat_map(|doc| {
+        let external_infos = self.external_documents.iter().filter_map(|doc| {
             let mut doc = doc.write();
             doc.get_frame_info(iri)
         });
@@ -168,7 +167,7 @@ impl Workspace {
     }
 
     pub fn get_frame_info_recursive(
-        workspace: Arc<RwLock<Workspace>>,
+        workspace: &Arc<RwLock<Workspace>>,
         iri: &Iri,
         doc: &InternalDocument,
         http_client: &dyn HttpClient,
@@ -177,7 +176,7 @@ impl Workspace {
             .iter()
             .filter_map(|url| {
                 if let Ok(doc) = timeit("\tresolve document", || {
-                    Workspace::resolve_url_to_document(workspace.clone(), url, http_client)
+                    Workspace::resolve_url_to_document(workspace, url, http_client)
                 }) {
                     match &doc {
                         DocumentReference::Internal(rw_lock) => {
@@ -220,7 +219,7 @@ impl Workspace {
                 let iri = node_text(node, &doc.rope);
                 debug!("Getting node info for {iri} at doc {}", doc.uri);
                 let iri = doc
-                    .abbreviated_iri_to_full_iri(iri.to_string())
+                    .abbreviated_iri_to_full_iri(&iri)
                     .unwrap_or(iri.to_string());
                 self.get_frame_info(&iri)
                     .map(|fi| fi.info_display(self))
@@ -257,7 +256,7 @@ impl Workspace {
 
     /// Resolves a URL (file or http/https protocol) to a document that is inserted into this workspace
     pub fn resolve_url_to_document(
-        workspace: Arc<RwLock<Workspace>>,
+        workspace: &Arc<RwLock<Workspace>>,
         url: &Url,
         client: &dyn HttpClient,
     ) -> Result<DocumentReference> {
@@ -267,9 +266,7 @@ impl Workspace {
         }
 
         let ws = workspace.read();
-        let (catalog, catalog_uri) = if let Some(a) = ws.find_catalog_uri(url) {
-            a
-        } else {
+        let Some((catalog, catalog_uri)) = ws.find_catalog_uri(url) else {
             warn!("Url {url} could not be found in any catalog");
             let document_text = client.get(url.as_str())?;
             let document = ExternalDocument::new(document_text, url.clone())?;
@@ -279,45 +276,39 @@ impl Workspace {
 
         let url_from_catalog = Url::parse(&catalog_uri.uri);
 
-        match url_from_catalog {
-            Ok(url) => {
-                if let Some(doc) = workspace.read().get_document_by_url(&url) {
-                    return Ok(doc);
-                }
-
-                match url.to_file_path() {
-                    Ok(path) => {
-                        // This is an abolute file path url
-                        Workspace::resolve_path_to_document(workspace.clone(), path)
-                    }
-                    Err(_) => {
-                        // This is an external url
-                        let document_text = client.get(url.as_str())?;
-                        let document = ExternalDocument::new(document_text, url)?;
-                        let doc = workspace.read().insert_external_document(document);
-                        Ok(DocumentReference::External(doc))
-                    }
-                }
+        if let Ok(url) = url_from_catalog {
+            if let Some(doc) = workspace.read().get_document_by_url(&url) {
+                return Ok(doc);
             }
-            Err(_) => {
-                // This is a relative file path
-                let path = catalog.parent_folder().join(&catalog_uri.uri);
-                let url =
-                    Url::from_file_path(&path).map_err(|_| Error::InvalidFilePath(path.clone()))?;
-                if let Some(doc) = workspace.read().get_document_by_url(&url) {
-                    return Ok(doc);
-                }
 
-                Workspace::resolve_path_to_document(workspace.clone(), path)
+            if let Ok(path) = url.to_file_path() {
+                // This is an abolute file path url
+                Workspace::resolve_path_to_document(workspace, &path)
+            } else {
+                // This is an external url
+                let document_text = client.get(url.as_str())?;
+                let document = ExternalDocument::new(document_text, url)?;
+                let doc = workspace.read().insert_external_document(document);
+                Ok(DocumentReference::External(doc))
             }
+        } else {
+            // This is a relative file path
+            let path = catalog.parent_folder().join(&catalog_uri.uri);
+            let url =
+                Url::from_file_path(&path).map_err(|()| Error::InvalidFilePath(path.clone()))?;
+            if let Some(doc) = workspace.read().get_document_by_url(&url) {
+                return Ok(doc);
+            }
+
+            Workspace::resolve_path_to_document(workspace, &path)
         }
     }
 
     fn resolve_path_to_document(
-        workspace: Arc<RwLock<Workspace>>,
-        path: PathBuf,
+        workspace: &Arc<RwLock<Workspace>>,
+        path: &Path,
     ) -> Result<DocumentReference> {
-        let (document_text, document_url) = load_file_from_disk(path.clone())?;
+        let (document_text, document_url) = load_file_from_disk(path.to_path_buf())?;
 
         match path
             .extension()
@@ -345,7 +336,7 @@ fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
 
     Ok((
         fs::read_to_string(&path)?,
-        Url::from_file_path(&path).map_err(|_| Error::InvalidFilePath(path))?,
+        Url::from_file_path(&path).map_err(|()| Error::InvalidFilePath(path))?,
     ))
 }
 
@@ -407,7 +398,7 @@ impl InternalDocument {
     pub fn formatted(&self, tab_size: u32, ruler_width: usize) -> String {
         let root = self.tree.root_node();
         let doc = to_doc(&root, &self.rope, tab_size);
-        debug!("doc:\n{:#?}", doc);
+        debug!("doc:\n{doc:#?}");
         doc.pretty(ruler_width).to_string()
     }
 
@@ -460,7 +451,7 @@ impl InternalDocument {
             .iter()
             .filter_map(|url| {
                 timeit("\t resolve url to doc", || {
-                    Workspace::resolve_url_to_document(self.try_get_workspace()?, url, http_client)
+                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, url, http_client)
                 })
                 .inspect_log()
                 .ok()
@@ -473,11 +464,11 @@ impl InternalDocument {
                     .read()
                     .reachable_docs_recursive_helper(result, http_client)?,
                 DocumentReference::External(e) => e.read().reachable_docs_recursive_helper(
-                    self.try_get_workspace()?,
+                    &self.try_get_workspace()?,
                     result,
                     http_client,
                 )?,
-            };
+            }
         }
         Ok(())
     }
@@ -539,7 +530,7 @@ impl InternalDocument {
         debug!("content changes {:#?}", params.content_changes);
 
         // This range is relative to the *old* document not the new one
-        for change in params.content_changes.iter() {
+        for change in &params.content_changes {
             let range = change.range.expect("range to be defined");
             // LSP ranges are in bytes when encoding is utf-8!!!
             let old_range: Range = Range::from_lsp(&range, &self.rope, enconding)?;
@@ -603,7 +594,7 @@ impl InternalDocument {
         Ok(())
     }
 
-    pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: String) -> Option<String> {
+    pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: &str) -> Option<String> {
         let prefixes = self.prefixes();
         if let Some((prefix, simple_iri)) = abbriviated_iri.split_once(':') {
             prefixes
@@ -614,20 +605,19 @@ impl InternalDocument {
             // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
             prefixes
                 .get("")
-                .map(|resolved_prefix| resolved_prefix.clone() + &abbriviated_iri)
+                .map(|resolved_prefix| resolved_prefix.clone() + abbriviated_iri)
         }
     }
 
-    pub fn full_iri_to_abbreviated_iri(&self, full_iri: String) -> Option<String> {
+    pub fn full_iri_to_abbreviated_iri(&self, full_iri: &str) -> Option<String> {
         self.prefixes()
             .into_iter()
             .filter_map(|(prefix, url)| match full_iri.split_once(&url) {
                 Some(("", post)) if prefix.is_empty() => Some(post.to_string()),
                 Some(("", post)) => Some(prefix + ":" + post),
-                Some(_) => None,
-                None => None,
+                Some(_) | None => None,
             })
-            .sorted_by_key(|s| s.len()) // short IRI's are preferred
+            .sorted_by_key(String::len) // short IRI's are preferred
             .next()
     }
 
@@ -664,10 +654,10 @@ impl InternalDocument {
             .flat_map(|match_| match_.captures)
             .map(|capture| {
                 let iri = trim_full_iri(capture.node.text);
-                let iri = self.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
+                let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
                 let label = timeit("get frame info recursive", || {
-                    Workspace::get_frame_info_recursive(workspace.clone(), &iri, self, http_client)
+                    Workspace::get_frame_info_recursive(&workspace, &iri, self, http_client)
                 })
                 .and_then(|frame_info| frame_info.label())
                 .unwrap_or_default();
@@ -716,10 +706,10 @@ impl InternalDocument {
         let line = rope
             .get_line(cursor.line() as usize)
             .map(|s| s.to_string())
-            .unwrap_or("".into());
+            .unwrap_or_default();
         let partial = word_before_character(cursor.character_byte() as usize, &line);
 
-        debug!("Cursor node text is {:?}", partial);
+        debug!("Cursor node text is {partial:?}");
 
         let keywords = &*queries::KEYWORDS;
 
@@ -785,7 +775,7 @@ impl InternalDocument {
                         .is_error()
                 {
                     debug!("Found possible keyword {kw}!");
-                    Ok(Some(kw.to_string()))
+                    Ok(Some((*kw).to_string()))
                 } else {
                     debug!("{kw} is not possible");
                     Ok(None)
@@ -894,7 +884,7 @@ fn imports_helper(doc: &InternalDocument) -> Vec<Url> {
     doc.query(&ALL_QUERIES.import_query)
         .iter()
         .filter_map(|m| match &m.captures[..] {
-            [iri] => Url::parse(&trim_full_iri(&iri.node.text)[..]).ok(),
+            [iri] => Url::parse(&trim_full_iri(iri.node.text.clone())[..]).ok(),
             _ => unimplemented!(),
         })
         .collect_vec()
@@ -970,9 +960,9 @@ fn document_annotations(doc: &InternalDocument) -> Vec<(String, String, String)>
         .map(|m| match &m.captures[..] {
             [frame_iri, annoation_iri, literal] => {
                 let iri = trim_full_iri(frame_iri.node.text.clone());
-                let frame_iri = doc.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
+                let frame_iri = doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
                 let iri = trim_full_iri(annoation_iri.node.text.clone());
-                let annoation_iri = doc.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
+                let annoation_iri = doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
                 let literal = trim_string_value(&literal.node.text);
 
                 (frame_iri, annoation_iri, literal)
@@ -988,7 +978,7 @@ fn document_definitions(doc: &InternalDocument) -> Vec<(String, Range, String)> 
         .map(|m| match &m.captures[..] {
             [frame_iri, frame] => {
                 let iri = trim_full_iri(frame_iri.node.text.clone());
-                let frame_iri = doc.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
+                let frame_iri = doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
                 (frame_iri, frame.node.range, frame.node.kind.clone())
             }
@@ -1015,6 +1005,7 @@ impl fmt::Debug for ExternalDocument {
         f.debug_struct("ExternalDocument")
             .field("uri", &self.uri)
             .field("text.len()", &self.text.len())
+            .field("ontology.iter()", &self.ontology.iter())
             .finish()
     }
 }
@@ -1025,7 +1016,7 @@ impl ExternalDocument {
         let b = horned_owl::model::Build::new_arc();
         let mut buffer = text.as_bytes();
 
-        match url.path().rsplit_once(".") {
+        match url.path().rsplit_once('.') {
             // TODO parse both
             Some((_, "owx")) => {
                 let (ontology, _) = horned_owl::io::owx::reader::read_with_build(&mut buffer, &b)?;
@@ -1061,16 +1052,16 @@ impl ExternalDocument {
         self.ontology
             .iter()
             .filter_map(|ac| match &ac.component {
-                horned_owl::model::Component::Import(import) => Some(Url::parse(import.0.deref())),
+                horned_owl::model::Component::Import(import) => Some(Url::parse(&import.0)),
                 _ => None,
             })
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect_vec()
     }
 
     fn reachable_docs_recursive_helper(
         &self,
-        workspace: Arc<RwLock<Workspace>>,
+        workspace: &Arc<RwLock<Workspace>>,
         result: &mut HashSet<Url>,
         http_client: &dyn HttpClient,
     ) -> Result<()> {
@@ -1085,7 +1076,7 @@ impl ExternalDocument {
             .imports()
             .iter()
             .filter_map(|url| {
-                Workspace::resolve_url_to_document(workspace.clone(), url, http_client)
+                Workspace::resolve_url_to_document(workspace, url, http_client)
                     .inspect_log()
                     .ok()
             })
@@ -1096,12 +1087,11 @@ impl ExternalDocument {
                 DocumentReference::Internal(internal_document) => internal_document
                     .read()
                     .reachable_docs_recursive_helper(result, http_client)?,
-                DocumentReference::External(e) => e.read().reachable_docs_recursive_helper(
-                    workspace.clone(),
-                    result,
-                    http_client,
-                )?,
-            };
+                DocumentReference::External(e) => {
+                    e.read()
+                        .reachable_docs_recursive_helper(workspace, result, http_client)?;
+                }
+            }
         }
         Ok(())
     }
@@ -1221,7 +1211,7 @@ impl Location {
 
 impl FrameInfo {
     fn merge(a: FrameInfo, b: FrameInfo) -> FrameInfo {
-        let mut c = a.clone();
+        let mut c = a;
         c.extend(b);
         c
     }
@@ -1281,7 +1271,7 @@ impl FrameInfo {
                 let mut annoation_display = self.annoation_display(iri).unwrap_or(iri.clone());
 
                 // If this is a multiline string then give it some space to work whith
-                if annoation_display.contains("\n") {
+                if annoation_display.contains('\n') {
                     annoation_display = format!("\n{annoation_display}\n\n");
                 }
 
@@ -1297,7 +1287,7 @@ impl FrameInfo {
 }
 
 fn trim_url_before_last(iri: &str) -> &str {
-    iri.rsplit_once(['/', '#']).map(|(_, b)| b).unwrap_or(iri)
+    iri.rsplit_once(['/', '#']).map_or(iri, |(_, b)| b)
 }
 
 fn trim_string_value(value: &str) -> String {
@@ -1318,8 +1308,7 @@ pub type Iri = String;
 
 pub fn node_text(node: &Node, rope: &Rope) -> String {
     rope.get_byte_slice(node.start_byte()..node.end_byte())
-        .map(|rs| rs.to_string())
-        .unwrap_or("".into())
+        .map_or(String::new(), |rs| rs.to_string())
 }
 
 /// Generate the diagnostics for a single node, walking recusivly down to every child and every syntax error within
@@ -1403,7 +1392,7 @@ fn capitilize_string(s: &str) -> String {
     }
 }
 
-/// taken from https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing
+/// taken from <https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing>
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum FrameType {
     Class,
@@ -1423,20 +1412,15 @@ pub enum FrameType {
 impl FrameType {
     pub fn parse(kind: &str) -> FrameType {
         match kind {
-            "class_iri" => FrameType::Class,
-            "datatype_iri" => FrameType::DataType,
-            "annotation_property_iri" => FrameType::AnnotationProperty,
-            "individual_iri" => FrameType::Individual,
-            "ontology_iri" => FrameType::Ontology,
-            "data_property_iri" => FrameType::DataProperty,
-            "object_property_iri" => FrameType::ObjectProperty,
-            "class_frame" => FrameType::Class,
-            "datatype_frame" => FrameType::DataType,
-            "annotation_property_frame" => FrameType::AnnotationProperty,
-            "individual_frame" => FrameType::Individual,
-            "ontology_frame" => FrameType::Ontology,
-            "data_property_frame" => FrameType::DataProperty,
-            "object_property_frame" => FrameType::ObjectProperty,
+            "datatype_iri" | "datatype_frame" => FrameType::DataType,
+            "annotation_property_iri" | "annotation_property_frame" => {
+                FrameType::AnnotationProperty
+            }
+            "individual_iri" | "individual_frame" => FrameType::Individual,
+            "ontology_iri" | "ontology_frame" => FrameType::Ontology,
+            "data_property_iri" | "data_property_frame" => FrameType::DataProperty,
+            "object_property_iri" | "object_property_frame" => FrameType::ObjectProperty,
+            "class_frame" | "class_iri" => FrameType::Class,
             kind => {
                 error!("Implement {kind}");
                 FrameType::Invalid
@@ -1450,13 +1434,12 @@ impl From<FrameType> for tower_lsp::lsp_types::SymbolKind {
         match val {
             FrameType::Class => SymbolKind::CLASS,
             FrameType::DataType => SymbolKind::STRUCT,
-            FrameType::ObjectProperty => SymbolKind::PROPERTY,
-            FrameType::DataProperty => SymbolKind::PROPERTY,
-            FrameType::AnnotationProperty => SymbolKind::PROPERTY,
+            FrameType::ObjectProperty | FrameType::DataProperty | FrameType::AnnotationProperty => {
+                SymbolKind::PROPERTY
+            }
             FrameType::Individual => SymbolKind::OBJECT,
             FrameType::Ontology => SymbolKind::MODULE,
-            FrameType::Invalid => SymbolKind::NULL,
-            FrameType::Unknown => SymbolKind::NULL,
+            FrameType::Invalid | FrameType::Unknown => SymbolKind::NULL,
         }
     }
 }
@@ -1479,11 +1462,10 @@ impl Display for FrameType {
 }
 
 /// Takes an IRI in any form and removed the <> symbols
-pub fn trim_full_iri<T: ToString>(untrimmed_iri: T) -> Iri {
-    untrimmed_iri
-        .to_string()
-        .trim_end_matches(">")
-        .trim_start_matches("<")
+pub fn trim_full_iri(untrimmed_iri: String) -> Iri {
+    let iri = untrimmed_iri;
+    iri.trim_end_matches('>')
+        .trim_start_matches('<')
         .to_string()
 }
 
@@ -1524,7 +1506,9 @@ fn prefixes_helper(doc: &InternalDocument) -> HashMap<String, String> {
         .collect()
 }
 
-fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
+fn to_doc(node: &Node, rope: &Rope, tab_size: u32) -> RcDoc<'static, ()> {
+    // I do not target 32 systems
+    #[allow(clippy::cast_possible_wrap)]
     let nest_depth = tab_size as isize;
     let text = node_text(node, rope);
     debug!(
@@ -1542,63 +1526,10 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
 
     match node.kind() {
         "source_file" => {
-            let prefix_docs = node.children_by_field_name(
-                "prefix", &mut cursor)
-            .map(|n| to_doc(&n, rope, tab_size)).collect_vec();
-
-            let ontology_doc = node.child_by_field_name("ontology")
-                .map(|n| to_doc(&n, rope, tab_size)).unwrap_or(RcDoc::nil());
-
-            if prefix_docs.is_empty() {
-                ontology_doc
-            } else {
-                RcDoc::intersperse([
-                    RcDoc::intersperse(prefix_docs , RcDoc::hardline()),
-                    ontology_doc
-                ], RcDoc::hardline().append(RcDoc::hardline()))
-            }
+            source_file_to_doc(node, rope, tab_size)
         },
         "ontology" =>
-            RcDoc::intersperse(
-        [
-            RcDoc::text("Ontology:")
-            .append(RcDoc::line())
-            .append(RcDoc::intersperse(
-                node.child_by_field_name("iri")
-                    .into_iter()
-                    .map(|n| to_doc(&n, rope, tab_size))
-                    .chain(
-                        node.child_by_field_name("version_iri")
-                            .into_iter()
-                            .map(|n| to_doc(&n, rope, tab_size)),
-                    ),
-                RcDoc::line(),
-            ))
-            .nest(nest_depth)
-            .group()
-        ,
-            // imports
-            RcDoc::intersperse(
-                node.children_by_field_name("import", &mut cursor.clone())
-                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
-                RcDoc::nil(),
-            )
-        ,
-            // annotations
-            RcDoc::intersperse(
-                node.children_by_field_name("annotations", &mut cursor.clone())
-                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
-                RcDoc::nil(),
-            )
-        ,
-            // frames
-            RcDoc::intersperse(
-                node.children_by_field_name("frame", &mut cursor)
-                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
-                RcDoc::hardline(),
-            )
-        ], RcDoc::hardline())
-
+            ontology_to_doc(node, rope, tab_size, nest_depth)
         ,
         "prefix_declaration" | "import" | "annotation" => RcDoc::intersperse(
             node.children(&mut cursor)
@@ -1609,71 +1540,21 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
         .group(),
         "annotations"
         // class
-        | "sub_class_of"
-        | "class_equivalent_to"
-        | "class_disjoint_with"
-        | "disjoint_union_of"
-        | "has_key"
+        | "sub_class_of" | "class_equivalent_to" | "class_disjoint_with" | "disjoint_union_of" | "has_key"
         // datatype
         | "datatype_equavalent_to"
         // individual
-        | "individual_facts"
-        | "individual_same_as"
-        | "individual_different_from"
-        | "individual_types"
+        | "individual_facts" | "individual_same_as" | "individual_different_from" | "individual_types"
         // annotation property
-        | "annotation_property_domin"
-        | "annotation_property_range"
-        | "annotation_property_sub_property_of"
+        | "annotation_property_domin" | "annotation_property_range" | "annotation_property_sub_property_of"
         // data property
-        | "data_property_domain"
-        | "data_property_range"
-        | "data_property_characteristics"
-        | "data_property_sub_property_of"
-        | "data_property_equivalent_to"
-        | "data_property_disjoint_with"
+        | "data_property_domain" | "data_property_range" | "data_property_characteristics" | "data_property_sub_property_of" | "data_property_equivalent_to" | "data_property_disjoint_with"
         // object property
-        |"domain"
-        |"range"
-        |"sub_property_of"
-        |"object_property_equivalent_to"
-        |"object_property_disjoint_with"
-        |"inverse_of"
-        |"characteristics"
-        |"sub_property_chain"
+        |"domain" |"range" |"sub_property_of" |"object_property_equivalent_to" |"object_property_disjoint_with" |"inverse_of" |"characteristics" |"sub_property_chain"
         // misc
-        |"equivalent_classes"
-        |"disjoint_classes"
-        |"equivalent_object_properties"
-        |"disjoint_object_properties"
-        |"equivalent_data_properties"
-        |"disjoint_data_properties"
-        |"same_individual"
-        |"different_individuals"
+        |"equivalent_classes" |"disjoint_classes" |"equivalent_object_properties" |"disjoint_object_properties" |"equivalent_data_properties" |"disjoint_data_properties" |"same_individual" |"different_individuals"
          => {
-            let mut docs = vec![];
-
-            // This should be the keyword
-            if let Some(child) = node.child(0) {
-                docs.push(to_doc(&child, rope, tab_size).append(RcDoc::line()));
-            }
-
-            for(is_seperator, chunk) in &node.children(&mut cursor).skip(1).chunk_by(|x| x.kind()==","||x.kind()=="o") {
-                if is_seperator {
-                    let n = &chunk.exactly_one()
-                            .unwrap_or_else(|_| unreachable!("chunk should contain exacly one seperator node"));
-
-                if n.kind()=="o" {
-                        docs.push(RcDoc::text(" o").append(RcDoc::line()));
-                    } else {
-                        docs.push(RcDoc::text(",").append(RcDoc::line()));
-                    }
-                } else {
-                    docs.push(RcDoc::intersperse(chunk.map(|n|to_doc(&n, rope, tab_size)), RcDoc::line()));
-                }
-            }
-
-            RcDoc::concat(docs).nest(nest_depth).group()
+            nesting_property_with_keyword_to_frame(node, rope, tab_size, nest_depth)
         },
         "description"
          => {
@@ -1727,29 +1608,135 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
         | "object_property_frame"
         | "annotation_property_frame"
         | "individual_frame"
-         => node
-            .child(0)
-            .map(|n| to_doc(&n, rope, tab_size))
-            .unwrap_or(RcDoc::nil())
-            .append(RcDoc::line())
-            .append(
-                node.child(1)
-                    .map(|n| to_doc(&n, rope, tab_size))
-                    .unwrap_or(RcDoc::nil()),
-            )
-            .nest(nest_depth)
-            .group()
-            .append(RcDoc::hardline())
-            .append(RcDoc::intersperse(
-                node.children(&mut cursor)
-                    .skip(2)
-                    .map(|n| to_doc(&n, rope, tab_size)),
-                RcDoc::hardline(),
-            ))
-            .nest(nest_depth)
-            .group(),
+         => frame_to_doc(node, rope, tab_size, nest_depth),
         _ => RcDoc::text(text), // this applies also to "ERROR" nodes!
     }
+}
+
+fn nesting_property_with_keyword_to_frame(
+    node: &Node,
+    rope: &Rope,
+    tab_size: u32,
+    nest_depth: isize,
+) -> RcDoc<'static> {
+    let mut cursor = node.walk();
+    let mut docs = vec![];
+
+    // This should be the keyword
+    if let Some(child) = node.child(0) {
+        docs.push(to_doc(&child, rope, tab_size).append(RcDoc::line()));
+    }
+
+    for (is_seperator, chunk) in &node
+        .children(&mut cursor)
+        .skip(1)
+        .chunk_by(|x| x.kind() == "," || x.kind() == "o")
+    {
+        if is_seperator {
+            let n = &chunk
+                .exactly_one()
+                .unwrap_or_else(|_| unreachable!("chunk should contain exacly one seperator node"));
+
+            if n.kind() == "o" {
+                docs.push(RcDoc::text(" o").append(RcDoc::line()));
+            } else {
+                docs.push(RcDoc::text(",").append(RcDoc::line()));
+            }
+        } else {
+            docs.push(RcDoc::intersperse(
+                chunk.map(|n| to_doc(&n, rope, tab_size)),
+                RcDoc::line(),
+            ));
+        }
+    }
+
+    RcDoc::concat(docs).nest(nest_depth).group()
+}
+
+fn source_file_to_doc(node: &Node, rope: &Rope, tab_size: u32) -> RcDoc<'static, ()> {
+    let mut cursor = node.walk();
+    let prefix_docs = node
+        .children_by_field_name("prefix", &mut cursor)
+        .map(|n| to_doc(&n, rope, tab_size))
+        .collect_vec();
+    let ontology_doc = node
+        .child_by_field_name("ontology")
+        .map_or(RcDoc::nil(), |n| to_doc(&n, rope, tab_size));
+    if prefix_docs.is_empty() {
+        ontology_doc
+    } else {
+        RcDoc::intersperse(
+            [
+                RcDoc::intersperse(prefix_docs, RcDoc::hardline()),
+                ontology_doc,
+            ],
+            RcDoc::hardline().append(RcDoc::hardline()),
+        )
+    }
+}
+
+fn ontology_to_doc(node: &Node, rope: &Rope, tab_size: u32, nest_depth: isize) -> RcDoc<'static> {
+    let mut cursor = node.walk();
+    RcDoc::intersperse(
+        [
+            RcDoc::text("Ontology:")
+                .append(RcDoc::line())
+                .append(RcDoc::intersperse(
+                    node.child_by_field_name("iri")
+                        .into_iter()
+                        .map(|n| to_doc(&n, rope, tab_size))
+                        .chain(
+                            node.child_by_field_name("version_iri")
+                                .into_iter()
+                                .map(|n| to_doc(&n, rope, tab_size)),
+                        ),
+                    RcDoc::line(),
+                ))
+                .nest(nest_depth)
+                .group(),
+            // imports
+            RcDoc::intersperse(
+                node.children_by_field_name("import", &mut cursor.clone())
+                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
+                RcDoc::nil(),
+            ),
+            // annotations
+            RcDoc::intersperse(
+                node.children_by_field_name("annotations", &mut cursor.clone())
+                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
+                RcDoc::nil(),
+            ),
+            // frames
+            RcDoc::intersperse(
+                node.children_by_field_name("frame", &mut cursor)
+                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
+                RcDoc::hardline(),
+            ),
+        ],
+        RcDoc::hardline(),
+    )
+}
+
+fn frame_to_doc(node: &Node, rope: &Rope, tab_size: u32, nest_depth: isize) -> RcDoc<'static> {
+    let mut cursor = node.walk();
+    node.child(0)
+        .map_or(RcDoc::nil(), |n| to_doc(&n, rope, tab_size))
+        .append(RcDoc::line())
+        .append(
+            node.child(1)
+                .map_or(RcDoc::nil(), |n| to_doc(&n, rope, tab_size)),
+        )
+        .nest(nest_depth)
+        .group()
+        .append(RcDoc::hardline())
+        .append(RcDoc::intersperse(
+            node.children(&mut cursor)
+                .skip(2)
+                .map(|n| to_doc(&n, rope, tab_size)),
+            RcDoc::hardline(),
+        ))
+        .nest(nest_depth)
+        .group()
 }
 
 #[cfg(test)]
@@ -1815,11 +1802,11 @@ mod tests {
         let doc = InternalDocument::new(
             Url::parse("http://formatted").unwrap(),
             -1,
-            indoc! {r#"
+            indoc! {r"
                 Ontology:a
                 Class: a
                 SubClassOf:   (aaaaaaaa and bbbbbb)    or   (bbbb and hasRel some (ccccccc or ddddddd or eeeeeeeee))
-            "#}
+            "}
             .into(),
         );
 
@@ -1829,7 +1816,7 @@ mod tests {
 
         assert_eq!(
             result,
-            indoc! {r#"
+            indoc! {r"
                 Ontology: a
 
 
@@ -1847,7 +1834,7 @@ mod tests {
                                 or eeeeeeeee
                             )
                         )
-            "#}
+            "}
         );
     }
 
@@ -1863,8 +1850,8 @@ mod tests {
             .into(),
         );
 
-        let full_iri = doc.abbreviated_iri_to_full_iri("owl:Nothing".into());
-        let full_iri_2 = doc.abbreviated_iri_to_full_iri("ja:Janek".into());
+        let full_iri = doc.abbreviated_iri_to_full_iri("owl:Nothing");
+        let full_iri_2 = doc.abbreviated_iri_to_full_iri("ja:Janek");
 
         assert_eq!(
             full_iri,
@@ -1890,8 +1877,8 @@ mod tests {
             .into(),
         );
 
-        let full_iri = doc.abbreviated_iri_to_full_iri(":Nothing".into());
-        let full_iri_2 = doc.abbreviated_iri_to_full_iri("Nothing".into());
+        let full_iri = doc.abbreviated_iri_to_full_iri(":Nothing");
+        let full_iri_2 = doc.abbreviated_iri_to_full_iri("Nothing");
 
         assert_eq!(
             full_iri,
@@ -1927,7 +1914,7 @@ mod tests {
             prefixes,
             vec![
                 (
-                    "".into(),
+                    String::new(),
                     "http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3/"
                         .into()
                 ),
@@ -2063,8 +2050,7 @@ mod tests {
             .into(),
         );
 
-        let abbr_iri =
-            doc.full_iri_to_abbreviated_iri("http://www.w3.org/2002/07/owl#Thing".into());
+        let abbr_iri = doc.full_iri_to_abbreviated_iri("http://www.w3.org/2002/07/owl#Thing");
 
         assert_eq!(abbr_iri, Some("owl:Thing".to_string()));
     }
@@ -2080,8 +2066,7 @@ mod tests {
             .into(),
         );
 
-        let abbr_iri =
-            doc.full_iri_to_abbreviated_iri("http://www.w3.org/2002/07/owl#Thing".into());
+        let abbr_iri = doc.full_iri_to_abbreviated_iri("http://www.w3.org/2002/07/owl#Thing");
 
         assert_eq!(abbr_iri, Some("Thing".to_string()));
     }
