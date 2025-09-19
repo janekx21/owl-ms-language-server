@@ -531,7 +531,9 @@ impl InternalDocument {
             .any(|change| change.range.is_none())
         {
             // Change the whole file
-            panic!("Whole file changes are not supported yet");
+            return Err(Error::LspFeatureNotSupported(
+                "Whole file (null range) change event",
+            ));
         }
 
         debug!("content changes {:#?}", params.content_changes);
@@ -844,7 +846,7 @@ impl InternalDocument {
             };
 
             if range.start.line != range.end.line {
-                panic!("Highlights dont span multiple lines")
+                return Err(Error::LspFeatureNotSupported("Multi line highlights"));
             }
             let length = range.end.character - range.start.character;
 

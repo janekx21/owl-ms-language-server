@@ -1,5 +1,5 @@
 use crate::error::{Error, Result, ResultExt};
-use log::{debug, error};
+use log::debug;
 use ropey::Rope;
 use std::fmt::Display;
 

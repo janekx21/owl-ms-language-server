@@ -1,4 +1,5 @@
-use crate::{catalog::Catalog, web::StaticClient, *};
+use crate::{catalog::Catalog, *};
+use dashmap::DashMap;
 use indoc::indoc;
 use pos::Position;
 use pretty_assertions::assert_eq;
@@ -2076,5 +2077,20 @@ fn assert_empty_diagnostics(service: &LspService<Backend>) {
             let doc = doc.value().read();
             assert_eq!(doc.diagnostics, vec![], "rope:\n{}", doc.rope.to_string());
         }
+    }
+}
+
+pub struct StaticClient {
+    pub data: DashMap<String, String>,
+}
+
+impl HttpClient for StaticClient {
+    fn get(&self, url: &str) -> MyResult<String> {
+        info!("Resolving {url} in static client");
+        Ok(self
+            .data
+            .get(url)
+            .unwrap_or_else(|| panic!("the url {url} should be defined"))
+            .to_string())
     }
 }

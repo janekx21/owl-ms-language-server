@@ -26,6 +26,8 @@ pub enum Error {
     PositionOutOfBounds(Position),
     #[error("The tower lsp position is not inside the bounds {0:?}")]
     PositionOutOfBoundsTowerLsp(tower_lsp::lsp_types::Position),
+    #[error("The LSP Feature is not supported at the moment: {0}")]
+    LspFeatureNotSupported(&'static str),
     // From other error types
     #[error("Ureq Error: {0}")]
     Ureq(#[from] ureq::Error),
