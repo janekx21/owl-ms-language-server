@@ -1,6 +1,7 @@
 use clap::Parser as ClapParser;
 use log::error;
 use owl_ms_language_server::{debugging::init_logging, Backend};
+use std::backtrace::Backtrace;
 use tower_lsp::{LspService, Server};
 
 /// A language server for the owl 2 manchester syntax language
@@ -17,7 +18,8 @@ async fn main() {
     let _ = Args::parse();
 
     std::panic::set_hook(Box::new(|info| {
-        error!("paniced with {}", info);
+        let backtrace = Backtrace::force_capture();
+        error!("paniced with backtrace:\n{backtrace}\n{info}");
     }));
 
     let (service, socket) = LspService::new(Backend::new);
