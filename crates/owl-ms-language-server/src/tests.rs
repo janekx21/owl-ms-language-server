@@ -19,6 +19,7 @@ use tree_sitter_c2rust::Parser;
 
 #[test]
 fn parse_ontology_should_work() {
+    setup();
     // Arrange
     let mut parser = arrange_parser();
 
@@ -34,6 +35,7 @@ fn parse_ontology_should_work() {
 #[test]
 /// This test should initilize all queries and therefore check if they are valid
 fn deref_all_queries_should_be_valid() {
+    setup();
     let _ = *ALL_QUERIES;
 }
 
@@ -43,6 +45,7 @@ fn deref_all_queries_should_be_valid() {
 
 #[test(tokio::test)]
 async fn backend_did_open_should_create_document() {
+    setup();
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
@@ -86,6 +89,7 @@ async fn backend_did_open_should_create_document() {
 /// This tests if the "did_change" feature works on the lsp. It takes the document DEF and adds two changes resolving in ABCDEFGHI.
 #[test(tokio::test)]
 async fn backend_did_change_should_update_internal_rope() -> error::Result<()> {
+    setup();
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
@@ -155,6 +159,7 @@ async fn backend_did_change_should_update_internal_rope() -> error::Result<()> {
 
 #[test(tokio::test)]
 async fn backend_hover_on_class_should_show_class_info() {
+    setup();
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
@@ -317,6 +322,7 @@ async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
 
 #[test(tokio::test)]
 async fn backend_hover_in_multi_file_ontology_should_work() {
+    setup();
     // Arrange
     let (service, tmp_dir) = arrange_multi_file_ontology().await;
 
@@ -362,6 +368,7 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
 
 #[test(tokio::test)]
 async fn backend_hover_in_multi_file_ontology_on_not_imported_iri_should_not_work() {
+    setup();
     // Arrange
     let (service, tmp_dir) = arrange_multi_file_ontology().await;
 
@@ -397,6 +404,7 @@ async fn backend_hover_in_multi_file_ontology_on_not_imported_iri_should_not_wor
 
 #[test(tokio::test)]
 async fn backend_hover_on_external_simple_iri_should_show_external_info() {
+    setup();
     // Arrange
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![WorkspaceMember::Folder {
@@ -504,6 +512,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
 
 #[test(tokio::test)]
 async fn backend_hover_on_external_full_iri_should_show_external_info() {
+    setup();
     // Arrange
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![WorkspaceMember::Folder {
@@ -608,6 +617,7 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
 }
 #[test(tokio::test)]
 async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_external_info() {
+    setup();
     // Arrange
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![WorkspaceMember::Folder {
@@ -707,6 +717,7 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
 
 #[test(tokio::test)]
 async fn backend_formatting_on_file_should_correctly_format() -> error::Result<()> {
+    setup();
     // Arrange
 
     let source = indoc! {"
@@ -844,6 +855,7 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
 
 #[test(tokio::test)]
 async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
+    setup();
     // Arrange
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![WorkspaceMember::Folder {
@@ -958,6 +970,7 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
 
 #[test(tokio::test)]
 async fn backend_import_resolve_should_load_documents() {
+    setup();
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|dir| {
@@ -1015,6 +1028,7 @@ async fn backend_import_resolve_should_load_documents() {
 
 #[test(tokio::test)]
 async fn backend_did_change_should_remove_old_infos() {
+    setup();
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
@@ -1081,6 +1095,7 @@ Class: class-in-first-file
 
 #[test(tokio::test)]
 async fn backend_workspace_symbols_should_work() {
+    setup();
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|dir| {
@@ -1169,6 +1184,7 @@ async fn backend_workspace_symbols_should_work() {
 
 #[test(tokio::test)]
 async fn backend_did_open_should_load_external_documents_via_http() {
+    setup();
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|dir| {
@@ -1272,6 +1288,7 @@ async fn backend_did_open_should_load_external_documents_via_http() {
 
 #[test(tokio::test)]
 async fn backend_did_open_should_load_external_documents_via_file() {
+    setup();
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|dir| {
@@ -1366,6 +1383,7 @@ async fn backend_did_open_should_load_external_documents_via_file() {
 
 #[test(tokio::test)]
 async fn backend_completion_should_work_for_keyword_class() {
+    setup();
     let ontology = indoc! {r#"
         Ontology: <http://foo.org/a>
 
@@ -1378,6 +1396,7 @@ async fn backend_completion_should_work_for_keyword_class() {
 
 #[test(tokio::test)]
 async fn backend_completion_should_work_for_keyword_class_at_the_end() {
+    setup();
     let ontology = indoc! {r#"
         Ontology: <http://foo.org/a> Version
 
@@ -1388,6 +1407,7 @@ async fn backend_completion_should_work_for_keyword_class_at_the_end() {
 
 #[test(tokio::test)]
 async fn backend_completion_should_work_for_keyword_datatype() {
+    setup();
     let ontology = indoc! {r#"
         Ontology: <http://foo.org/a>
 
@@ -1400,6 +1420,7 @@ async fn backend_completion_should_work_for_keyword_datatype() {
 
 #[test(tokio::test)]
 async fn backend_completion_should_work_for_keyword_integer() {
+    setup();
     let ontology = indoc! {r#"
         Ontology: <http://foo.org/a>
 
@@ -1413,6 +1434,7 @@ async fn backend_completion_should_work_for_keyword_integer() {
 
 #[test(tokio::test)]
 async fn backend_completion_should_work_for_keyword_some() {
+    setup();
     let ontology = indoc! {r#"
         Ontology: <http://foo.org/a>
 
@@ -1427,6 +1449,7 @@ async fn backend_completion_should_work_for_keyword_some() {
 
 #[test(tokio::test)]
 async fn backend_completion_should_work_for_keyword_functionnal() {
+    setup();
     let ontology = indoc! {r#"
         Ontology: <http://foo.org/a>
 
@@ -1522,6 +1545,7 @@ async fn backend_completion_test_helper(partial: &str, full: &str, ontology: &st
 
 #[test(tokio::test)]
 async fn backend_completion_should_not_panic() {
+    setup();
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|_| vec![]);
@@ -1583,6 +1607,7 @@ async fn backend_completion_should_not_panic() {
 
 #[test(tokio::test)]
 async fn backend_references_in_multi_file_ontology_should_work() {
+    setup();
     // Arrange
     let (service, tmp_dir) = arrange_multi_file_ontology().await;
 
@@ -1621,6 +1646,7 @@ async fn backend_references_in_multi_file_ontology_should_work() {
 
 #[test(tokio::test)]
 async fn backend_goto_definition_in_multi_file_ontology_should_work() {
+    setup();
     // Arrange
     let (service, tmp_dir) = arrange_multi_file_ontology().await;
 
@@ -1661,6 +1687,7 @@ async fn backend_goto_definition_in_multi_file_ontology_should_work() {
 #[test(tokio::test)]
 async fn backend_document_symbols_in_multi_file_ontology_should_just_show_symbols_from_active_file()
 {
+    setup();
     // Arrange
     let (service, tmp_dir) = arrange_multi_file_ontology().await;
 
@@ -1694,6 +1721,7 @@ async fn backend_document_symbols_in_multi_file_ontology_should_just_show_symbol
 
 #[test(tokio::test)]
 async fn backend_rename_simple_iri_should_work() {
+    setup();
     let ontology = indoc! {"
         Prefix: : <https://example.com/ontology#>
         Prefix: o: <https://example.com/ontology#>
@@ -1716,6 +1744,7 @@ async fn backend_rename_simple_iri_should_work() {
 
 #[test(tokio::test)]
 async fn backend_rename_at_end_should_work() {
+    setup();
     let ontology = indoc! {"
         Prefix: : <https://example.com/ontology#>
 
@@ -1734,6 +1763,7 @@ async fn backend_rename_at_end_should_work() {
 
 #[test(tokio::test)]
 async fn backend_rename_prefixless_simple_iri_should_work() {
+    setup();
     let ontology = indoc! {"
         Ontology:
         Class: B
@@ -1750,6 +1780,7 @@ async fn backend_rename_prefixless_simple_iri_should_work() {
 
 #[test(tokio::test)]
 async fn backend_rename_unknown_abbriviated_iri_should_work() {
+    setup();
     let ontology = indoc! {"
         Ontology:
         Class: unknown:B
@@ -1766,6 +1797,7 @@ async fn backend_rename_unknown_abbriviated_iri_should_work() {
 
 #[test(tokio::test)]
 async fn backend_rename_full_iri_should_shorten() {
+    setup();
     let ontology = indoc! {"
         Prefix: : <https://example.com/ontology#>
         Prefix: o: <https://example.com/ontology#>
@@ -1794,6 +1826,7 @@ async fn backend_rename_full_iri_should_shorten() {
 
 #[test(tokio::test)]
 async fn backend_rename_abbriviated_iri_should_work_for_matching() {
+    setup();
     let ontology = indoc! {"
         Prefix: o: <https://example.com/ontology#>
 
@@ -1814,6 +1847,7 @@ async fn backend_rename_abbriviated_iri_should_work_for_matching() {
 
 #[test(tokio::test)]
 async fn backend_rename_full_iri_should_work_for_matching() {
+    setup();
     let ontology = indoc! {"
         Ontology:
         Class: <https://example.com/ontology#B>
@@ -1836,6 +1870,7 @@ async fn backend_rename_full_iri_should_work_for_matching() {
 
 #[test(tokio::test)]
 async fn backend_rename_full_iri_should_not_shorten() {
+    setup();
     let ontology = indoc! {"
         Prefix: o: <https://example.com/ontology#B>
 
@@ -1949,9 +1984,55 @@ async fn backend_rename_helper(
     assert_eq!(doc_content, new_ontology);
 }
 
+#[test(tokio::test)]
+#[should_panic]
+#[ignore = "panic not working. using abort but that cant be detected"]
+async fn lock_test() {
+    setup();
+    info!("lock test...");
+    let a = RwLock::new(());
+    let mut w = a.write();
+    let r = a.read();
+    *w = ();
+    info!("{r:?}");
+}
+
 //////////////////////////
-// Arrange
+// Setup & Arrange
 //////////////////////////
+
+/// The setup is for setting up test fixture stuff. No test data or otherwise test dependent stuff is set up here.
+fn setup() {
+    setup_deadlock_detection();
+}
+
+fn setup_deadlock_detection() {
+    use parking_lot::deadlock;
+    use std::thread;
+    use std::time::Duration;
+
+    thread::spawn(|| {
+        // Create a background thread which checks for deadlocks every 1s
+        loop {
+            thread::sleep(Duration::from_secs(10));
+            let deadlocks = deadlock::check_deadlock();
+            if deadlocks.is_empty() {
+                continue;
+            }
+
+            error!("{} deadlocks detected", deadlocks.len());
+            for (i, threads) in deadlocks.iter().enumerate() {
+                error!("Deadlock #{}", i);
+                for t in threads {
+                    error!("Thread Id {:#?}", t.thread_id());
+                    error!("{:#?}", t.backtrace());
+                }
+            }
+            // panic sadly does not stop the test BECAUSE it is deadlocked :<
+            std::process::abort();
+        }
+    });
+}
 
 #[derive(Debug, Clone)]
 enum WorkspaceMember {
