@@ -12,9 +12,11 @@ use cached::proc_macro::cached;
 use cached::SizedCache;
 use core::fmt;
 use dashmap::DashMap;
-use horned_owl::io::ParserConfiguration;
+use horned_owl::io::rdf::reader::{ConcreteRDFOntology, RDFOntology};
+use horned_owl::io::{OWXParserConfiguration, ParserConfiguration, RDFParserConfiguration};
 use horned_owl::model::Component::AnnotationAssertion;
-use horned_owl::model::{ArcStr, Build};
+use horned_owl::model::Component::OntologyAnnotation;
+use horned_owl::model::{AnnotatedComponent, ArcStr, Build};
 use horned_owl::ontology::iri_mapped::ArcIRIMappedOntology;
 use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
@@ -120,9 +122,10 @@ impl Workspace {
         document: ExternalDocument,
     ) -> Arc<RwLock<ExternalDocument>> {
         debug!(
-            "Insert external document {} length is {}",
+            "Insert external document {} length is {} into workspace at {}",
             document.uri,
-            document.text.len()
+            document.text.len(),
+            self.folder.uri
         );
         let uri = document.uri.clone();
         let arc = Arc::new(RwLock::new(document));
@@ -150,6 +153,10 @@ impl Workspace {
     ///
     /// - `iri` should be a full iri
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
+        debug!(
+            "getting workspace frame info for {iri} on {}",
+            self.folder.uri
+        );
         let external_infos = self.external_documents.iter().filter_map(|doc| {
             let mut doc = doc.write();
             doc.get_frame_info(iri)
@@ -302,6 +309,23 @@ impl Workspace {
 
             Workspace::resolve_path_to_document(workspace, &path)
         }
+    }
+
+    /// Resolves a URL (file or http/https protocol) to a document that is inserted into this workspace
+    pub fn resolve_prefix_url_to_document(
+        workspace: &Arc<RwLock<Workspace>>,
+        url: &Url,
+        client: &dyn HttpClient,
+    ) -> Result<DocumentReference> {
+        let w = workspace.read();
+        if let Some(doc) = w.get_document_by_url(url) {
+            return Ok(doc);
+        }
+
+        let document_text = client.get(url.as_str())?;
+        let document = ExternalDocument::new(document_text, url.clone())?;
+        let document = w.insert_external_document(document);
+        Ok(DocumentReference::External(document))
     }
 
     fn resolve_path_to_document(
@@ -473,7 +497,7 @@ impl InternalDocument {
         Ok(())
     }
 
-    fn imports(&self) -> Vec<Url> {
+    pub fn imports(&self) -> Vec<Url> {
         imports_helper(self)
     }
 
@@ -621,7 +645,7 @@ impl InternalDocument {
             .next()
     }
 
-    /// Returns the prefixes of a document (without colon :)
+    /// Returns the prefixes of a document (without colon :) in a prefix name to iri map.
     ///
     /// Some prefixes should always be defined
     ///
@@ -1013,39 +1037,70 @@ impl fmt::Debug for ExternalDocument {
 impl ExternalDocument {
     /// The ontology type is currently determent by the url extention
     pub fn new(text: String, url: Url) -> Result<ExternalDocument> {
-        let b = horned_owl::model::Build::new_arc();
+        debug!("try creating external document {url}\n{text}");
+        let builder = horned_owl::model::Build::new_arc();
+
+        // try parsing different styles
+
+        debug!("try owx...");
         let mut buffer = text.as_bytes();
+        let doc = match horned_owl::io::owx::reader::read_with_build(&mut buffer, &builder) {
+            Ok((ontology, _)) => Ok(ExternalDocument {
+                uri: url,
+                text,
+                ontology,
+            }),
+            Err(err) => {
+                warn!("owx/xml failed {err}");
+                debug!("try rdf...");
+                let mut buffer = text.as_bytes();
 
-        match url.path().rsplit_once('.') {
-            // TODO parse both
-            Some((_, "owx")) => {
-                let (ontology, _) = horned_owl::io::owx::reader::read_with_build(&mut buffer, &b)?;
+                let tmp = tempdir::TempDir::new("owl-ms")?;
+                let path = tmp.path().join("ont.owl");
+                fs::write(&path, text.clone()).unwrap();
 
-                Ok(ExternalDocument {
-                    uri: url,
-                    text,
-                    ontology,
-                })
-            }
-            // For owl files and files without extention
-            _ => {
-                let (ontology, _) = horned_owl::io::rdf::reader::read_with_build(
+                let iri = horned_owl::resolve::path_to_file_iri(&builder, &path);
+                let ont = horned_owl::io::rdf::closure_reader::read::<
+                    ArcStr,
+                    AnnotatedComponent<ArcStr>,
+                    ConcreteRDFOntology<ArcStr, AnnotatedComponent<ArcStr>>,
+                >(&iri, Default::default())
+                .unwrap();
+
+                info!("bla={ont:#?}");
+
+                match horned_owl::io::rdf::reader::read_with_build(
                     &mut buffer,
-                    &b,
-                    ParserConfiguration::default(),
-                )?;
+                    &builder,
+                    ParserConfiguration {
+                        rdf: RDFParserConfiguration { lax: false },
+                        owx: OWXParserConfiguration::default(),
+                    },
+                ) {
+                    Ok((ontology, i)) => {
+                        debug!("lara={ontology:#?}");
 
-                let ontology = SetOntology::from_index(ontology.i().clone());
+                        let ontology = SetOntology::from_index(ontology.i().clone());
 
-                let ontology = ArcIRIMappedOntology::from(ontology);
+                        debug!("janek={ontology:#?}");
 
-                Ok(ExternalDocument {
-                    uri: url,
-                    text,
-                    ontology,
-                })
+                        let ontology = ArcIRIMappedOntology::from(ontology);
+
+                        Ok(ExternalDocument {
+                            uri: url,
+                            text,
+                            ontology,
+                        })
+                    }
+                    Err(err) => {
+                        warn!("rdf/xml failed {err}");
+                        Err(Error::HornedOwl(err))
+                    }
+                }
             }
-        }
+        };
+        info!("parsing worked! {doc:?}");
+        doc
     }
 
     fn imports(&self) -> Vec<Url> {
@@ -1097,7 +1152,10 @@ impl ExternalDocument {
     }
 
     pub fn get_frame_info(&mut self, iri: &Iri) -> Option<FrameInfo> {
-        get_frame_info_helper_ex(self, iri)
+        debug!("getting frame info for {iri} on {}", self.uri);
+        let o = get_frame_info_helper_ex(self, iri);
+        debug!("found {o:#?}");
+        o
     }
 }
 
@@ -1119,6 +1177,10 @@ fn get_frame_info_helper_ex(doc: &mut ExternalDocument, iri: &Iri) -> Option<Fra
 
     iri_mapped_ontology
         .components_for_iri(&iri)
+        .inspect(|a| {
+            debug!("a={a:#?}");
+            // TODO why is not a thig here?
+        })
         .filter_map(|c| match &c.component {
             AnnotationAssertion(aa) => match &aa.subject {
                 horned_owl::model::AnnotationSubject::IRI(iri_) if iri_ == &iri => {
@@ -1126,6 +1188,10 @@ fn get_frame_info_helper_ex(doc: &mut ExternalDocument, iri: &Iri) -> Option<Fra
                 }
                 _ => None,
             },
+            // OntologyAnnotation(oa) => {
+            //     let a = oa.0;
+            //     let ap = a.ap;
+            //     ap.k            }
             _ => None,
         })
         .filter_map(|annotation| match annotation.av {
@@ -1255,6 +1321,8 @@ impl FrameInfo {
         let label = self
             .label()
             .unwrap_or(trim_url_before_last(&self.iri).to_string());
+
+        debug!("frame annotations {:#?}", self.annotations);
 
         let annotations = self
             .annotations

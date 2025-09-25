@@ -1038,6 +1038,11 @@ impl Backend {
                         Err(()) => false,
                     }
                 })
+                // Check if the provided URL is a subset of a workspace URL.
+                // 
+                // Like how    file:///path/to/workspace              is a
+                // superset of file:///path/to/workspace/ontology.omn
+                || workspace.folder.uri.make_relative(url).is_some()
         });
 
         Ok(match maybe_workspace {
@@ -1082,18 +1087,26 @@ fn resolve_imports(
 ) -> MyResult<()> {
     let document = document.read();
     debug!("Resolve imports for {}", document.uri);
-    let urls = document
-        .query(&ALL_QUERIES.import_query)
-        .iter()
-        .filter_map(|match_| match &match_.captures[..] {
-            [iri] => Url::parse(&trim_full_iri(iri.node.text.clone())[..]).ok(),
-            _ => unimplemented!(),
-        })
-        .collect_vec();
 
-    for url in urls {
+    let import_urls = document.imports();
+    let prefix_urls = document
+        .prefixes()
+        .into_values()
+        .filter_map(|url| Url::parse(&url).ok());
+
+    for url in import_urls {
         Workspace::resolve_url_to_document(&document.try_get_workspace()?, &url, http_client)
             .log_if_error();
     }
+
+    for url in prefix_urls {
+        Workspace::resolve_prefix_url_to_document(
+            &document.try_get_workspace()?,
+            &url,
+            http_client,
+        )
+        .log_if_error();
+    }
+
     Ok(())
 }

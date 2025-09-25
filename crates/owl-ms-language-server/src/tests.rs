@@ -1,5 +1,10 @@
 use crate::{catalog::Catalog, *};
 use dashmap::DashMap;
+use horned_owl::{
+    error::HornedError,
+    io::{OWXParserConfiguration, ParserConfiguration, RDFParserConfiguration},
+    model::{AnnotatedComponent, Build},
+};
 use indoc::indoc;
 use pos::Position;
 use pretty_assertions::assert_eq;
@@ -42,6 +47,40 @@ fn deref_all_queries_should_be_valid() {
 ///////////////////////////////////////////
 // Backend Tests
 //////////////////////////////////////////
+
+#[test]
+fn a() {
+    let x = r##"    
+<rdf:RDF xmlns="http://www.example.com/iri#"
+     xml:base="http://www.example.com/iri"
+     xmlns:o="http://www.example.com/iri#"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://www.example.com/iri">
+        <owl:versionIRI rdf:resource="http://www.example.com/viri"/>
+    </owl:Ontology>
+
+    <owl:Class rdf:about="http://www.example.com/iri#C"/>
+</rdf:RDF>"##;
+    let mut buffer = x.as_bytes();
+
+    let b = Build::new_string();
+
+    let a =
+        horned_owl::io::rdf::reader::read_with_build::<String, AnnotatedComponent<String>, &[u8]>(
+            &mut buffer,
+            &b,
+            ParserConfiguration {
+                rdf: RDFParserConfiguration { lax: true },
+                owx: OWXParserConfiguration::default(),
+            },
+        )
+        .unwrap();
+    info!("{a:?}");
+}
 
 #[test(tokio::test)]
 async fn backend_did_open_should_create_document() {
@@ -1285,12 +1324,13 @@ async fn backend_did_open_should_load_external_documents_via_http() {
         "One external document should be loaded"
     );
 }
+
 #[test(tokio::test)]
 async fn backend_did_open_should_load_external_rdf_via_http() {
     setup();
     // Arrange
 
-    let tmp_dir = arrange_workspace_folders(|dir| vec![]);
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
 
     let service = arrange_backend(
         Some(WorkspaceFolder {
@@ -1298,119 +1338,147 @@ async fn backend_did_open_should_load_external_rdf_via_http() {
             name: "foo".into(),
         }),
         vec![(
-            "https://www.w3.org/2000/01/rdf-schema#",
-            r##"
-@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
-@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
-@prefix owl: <http://www.w3.org/2002/07/owl#> .
-@prefix dc: <http://purl.org/dc/elements/1.1/> .
+            "http://www.w3.org/2000/01/rdf-schema#",
+            r##"<?xml version="1.0"?>
+<rdf:RDF xmlns="http://www.example.com/iri#"
+     xml:base="http://www.example.com/iri"
+     xmlns:o="http://www.example.com/iri#"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://www.example.com/iri">
+        <owl:versionIRI rdf:resource="http://www.example.com/viri"/>
+    </owl:Ontology>
 
-<http://www.w3.org/2000/01/rdf-schema#> a owl:Ontology ;
-	dc:title "The RDF Schema vocabulary (RDFS)" .
-
-rdfs:Resource a rdfs:Class ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:label "Resource" ;
-	rdfs:comment "The class resource, everything." .
-
-rdfs:Class a rdfs:Class ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:label "Class" ;
-	rdfs:comment "The class of classes." ;
-	rdfs:subClassOf rdfs:Resource .
-
-rdfs:subClassOf a rdf:Property ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:label "subClassOf" ;
-	rdfs:comment "The subject is a subclass of a class." ;
-	rdfs:range rdfs:Class ;
-	rdfs:domain rdfs:Class .
-
-rdfs:subPropertyOf a rdf:Property ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:label "subPropertyOf" ;
-	rdfs:comment "The subject is a subproperty of a property." ;
-	rdfs:range rdf:Property ;
-	rdfs:domain rdf:Property .
-
-rdfs:comment a rdf:Property ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:label "comment" ;
-	rdfs:comment "A description of the subject resource." ;
-	rdfs:domain rdfs:Resource ;
-	rdfs:range rdfs:Literal .
-
-rdfs:label a rdf:Property ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:label "label" ;
-	rdfs:comment "A human-readable name for the subject." ;
-	rdfs:domain rdfs:Resource ;
-	rdfs:range rdfs:Literal .
-
-rdfs:domain a rdf:Property ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:label "domain" ;
-	rdfs:comment "A domain of the subject property." ;
-	rdfs:range rdfs:Class ;
-	rdfs:domain rdf:Property .
-
-rdfs:range a rdf:Property ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:label "range" ;
-	rdfs:comment "A range of the subject property." ;
-	rdfs:range rdfs:Class ;
-	rdfs:domain rdf:Property .
-
-rdfs:seeAlso a rdf:Property ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:label "seeAlso" ;
-	rdfs:comment "Further information about the subject resource." ;
-	rdfs:range rdfs:Resource ;
-	rdfs:domain rdfs:Resource .
-
-rdfs:isDefinedBy a rdf:Property ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:subPropertyOf rdfs:seeAlso ;
-	rdfs:label "isDefinedBy" ;
-	rdfs:comment "The definition of the subject resource." ;
-	rdfs:range rdfs:Resource ;
-	rdfs:domain rdfs:Resource .
-
-rdfs:Literal a rdfs:Class ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:label "Literal" ;
-	rdfs:comment "The class of literal values, eg. textual strings and integers." ;
-	rdfs:subClassOf rdfs:Resource .
-
-rdfs:Container a rdfs:Class ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:label "Container" ;
-	rdfs:subClassOf rdfs:Resource ;
-	rdfs:comment "The class of RDF containers." .
-
-rdfs:ContainerMembershipProperty a rdfs:Class ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:label "ContainerMembershipProperty" ;
-	rdfs:comment """The class of container membership properties, rdf:_1, rdf:_2, ..., all of which are sub-properties of 'member'.""" ;
-	rdfs:subClassOf rdf:Property .
-
-rdfs:member a rdf:Property ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:label "member" ;
-	rdfs:comment "A member of the subject resource." ;
-	rdfs:domain rdfs:Resource ;
-	rdfs:range rdfs:Resource .
-
-rdfs:Datatype a rdfs:Class ;
-	rdfs:isDefinedBy <http://www.w3.org/2000/01/rdf-schema#> ;
-	rdfs:label "Datatype" ;
-	rdfs:comment "The class of RDF datatypes." ;
-	rdfs:subClassOf rdfs:Class .
-
-<http://www.w3.org/2000/01/rdf-schema#> rdfs:seeAlso <http://www.w3.org/2000/01/rdf-schema-more> .            "##,
+    <owl:Class rdf:about="http://www.example.com/iri#C"/>
+</rdf:RDF>"##,
         )],
     )
     .await;
+
+    //  <owl:Ontology
+    //      rdf:about="http://www.w3.org/2000/01/rdf-schema#"
+    //      dc:title="The RDF Schema vocabulary (RDFS)"/>
+
+    // <rdfs:Class rdf:about="http://www.w3.org/2000/01/rdf-schema#Resource">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:label>Resource</rdfs:label>
+    //   <rdfs:comment>The class resource, everything.</rdfs:comment>
+    // </rdfs:Class>
+
+    // <rdfs:Class rdf:about="http://www.w3.org/2000/01/rdf-schema#Class">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:label>Class</rdfs:label>
+    //   <rdfs:comment>The class of classes.</rdfs:comment>
+    //   <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+    // </rdfs:Class>
+
+    // <rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#subClassOf">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:label>subClassOf</rdfs:label>
+    //   <rdfs:comment>The subject is a subclass of a class.</rdfs:comment>
+    //   <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    //   <rdfs:domain rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    // </rdf:Property>
+
+    // <rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#subPropertyOf">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:label>subPropertyOf</rdfs:label>
+    //   <rdfs:comment>The subject is a subproperty of a property.</rdfs:comment>
+    //   <rdfs:range rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"/>
+    //   <rdfs:domain rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"/>
+    // </rdf:Property>
+
+    // <rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#comment">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:label>comment</rdfs:label>
+    //   <rdfs:comment>A description of the subject resource.</rdfs:comment>
+    //   <rdfs:domain rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+    //   <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Literal"/>
+    // </rdf:Property>
+
+    // <rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#label">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:label>label</rdfs:label>
+    //   <rdfs:comment>A human-readable name for the subject.</rdfs:comment>
+    //   <rdfs:domain rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+    //   <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Literal"/>
+    // </rdf:Property>
+
+    // <rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#domain">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:label>domain</rdfs:label>
+    //   <rdfs:comment>A domain of the subject property.</rdfs:comment>
+    //  <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    //   <rdfs:domain rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"/>
+    // </rdf:Property>
+
+    // <rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#range">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:label>range</rdfs:label>
+    //   <rdfs:comment>A range of the subject property.</rdfs:comment>
+    //   <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    //   <rdfs:domain rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"/>
+    // </rdf:Property>
+
+    // <rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#seeAlso">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:label>seeAlso</rdfs:label>
+    //   <rdfs:comment>Further information about the subject resource.</rdfs:comment>
+    //   <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+    //   <rdfs:domain   rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+    // </rdf:Property>
+
+    // <rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#isDefinedBy">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:subPropertyOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#seeAlso"/>
+    //   <rdfs:label>isDefinedBy</rdfs:label>
+    //   <rdfs:comment>The definition of the subject resource.</rdfs:comment>
+    //   <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+    //   <rdfs:domain rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+    // </rdf:Property>
+
+    // <rdfs:Class rdf:about="http://www.w3.org/2000/01/rdf-schema#Literal">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:label>Literal</rdfs:label>
+    //   <rdfs:comment>The class of literal values, eg. textual strings and integers.</rdfs:comment>
+    //   <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+    // </rdfs:Class>
+
+    // <rdfs:Class rdf:about="http://www.w3.org/2000/01/rdf-schema#Container">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:label>Container</rdfs:label>
+    //   <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+    //   <rdfs:comment>The class of RDF containers.</rdfs:comment>
+    // </rdfs:Class>
+
+    // <rdfs:Class rdf:about="http://www.w3.org/2000/01/rdf-schema#ContainerMembershipProperty">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:label>ContainerMembershipProperty</rdfs:label>
+    //   <rdfs:comment>The class of container membership properties, rdf:_1, rdf:_2, ..., all of which are sub-properties of 'member'.</rdfs:comment>
+    //   <rdfs:subClassOf rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"/>
+    // </rdfs:Class>
+
+    // <rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#member">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:label>member</rdfs:label>
+    //   <rdfs:comment>A member of the subject resource.</rdfs:comment>
+    //   <rdfs:domain rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+    //   <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+    // </rdf:Property>
+
+    // <rdfs:Class rdf:about="http://www.w3.org/2000/01/rdf-schema#Datatype">
+    //   <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+    //   <rdfs:label>Datatype</rdfs:label>
+    //   <rdfs:comment>The class of RDF datatypes.</rdfs:comment>
+    //   <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    // </rdfs:Class>
+
+    // <rdf:Description rdf:about="http://www.w3.org/2000/01/rdf-schema#">
+    //   <rdfs:seeAlso rdf:resource="http://www.w3.org/2000/01/rdf-schema-more"/>
+    // </rdf:Description>
 
     let url = Url::from_file_path(tmp_dir.path().join("has-rdf.omn")).unwrap();
 
@@ -1442,6 +1510,7 @@ rdfs:Datatype a rdfs:Class ;
 
     assert_empty_diagnostics(&service);
     let workspaces = service.inner().workspaces.read();
+    info!("{workspaces:#?}");
     let workspace = workspaces
         .iter()
         .exactly_one()
@@ -1461,6 +1530,229 @@ rdfs:Datatype a rdfs:Class ;
         1,
         "One external document should be loaded"
     );
+}
+
+#[test(tokio::test)]
+async fn backend_hover_should_use_external_rdf_info() {
+    setup();
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "foo".into(),
+        }),
+        vec![(
+            "http://www.w3.org/2000/01/rdf-schema#",
+//             r##"<?xml version="1.0"?>
+// <rdf:RDF xmlns="http://www.example.com/iri#"
+//      xml:base="http://www.example.com/iri"
+//      xmlns:o="http://www.example.com/iri#"
+//      xmlns:owl="http://www.w3.org/2002/07/owl#"
+//      xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+//      xmlns:xml="http://www.w3.org/XML/1998/namespace"
+//      xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+//      xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+//     <owl:Ontology rdf:about="http://www.example.com/iri">
+//         <owl:versionIRI rdf:resource="http://www.example.com/viri"/>
+//     </owl:Ontology>
+
+//     <owl:Class rdf:about="http://www.example.com/iri#C"/>
+// </rdf:RDF>"##,
+//
+            r##"
+            <rdf:RDF
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+   xmlns:owl="http://www.w3.org/2002/07/owl#"
+   xmlns:dc="http://purl.org/dc/elements/1.1/">
+
+ <owl:Ontology
+     rdf:about="http://www.w3.org/2000/01/rdf-schema#"
+     dc:title="The RDF Schema vocabulary (RDFS)"/>
+
+<rdfs:Class rdf:about="http://www.w3.org/2000/01/rdf-schema#Resource">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:label>Resource</rdfs:label>
+  <rdfs:comment>The class resource, everything.</rdfs:comment>
+</rdfs:Class>
+
+<rdfs:Class rdf:about="http://www.w3.org/2000/01/rdf-schema#Class">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:label>Class</rdfs:label>
+  <rdfs:comment>The class of classes.</rdfs:comment>
+  <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+</rdfs:Class>
+
+<rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#subClassOf">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:label>subClassOf</rdfs:label>
+  <rdfs:comment>The subject is a subclass of a class.</rdfs:comment>
+  <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+  <rdfs:domain rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+</rdf:Property>
+
+<rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#subPropertyOf">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:label>subPropertyOf</rdfs:label>
+  <rdfs:comment>The subject is a subproperty of a property.</rdfs:comment>
+  <rdfs:range rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"/>
+  <rdfs:domain rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"/>
+</rdf:Property>
+
+<rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#comment">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:label>comment</rdfs:label>
+  <rdfs:comment>A description of the subject resource.</rdfs:comment>
+  <rdfs:domain rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Literal"/>
+</rdf:Property>
+
+<rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#label">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:label>label</rdfs:label>
+  <rdfs:comment>A human-readable name for the subject.</rdfs:comment>
+  <rdfs:domain rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Literal"/>
+</rdf:Property>
+
+<rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#domain">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:label>domain</rdfs:label>
+  <rdfs:comment>A domain of the subject property.</rdfs:comment>
+ <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+  <rdfs:domain rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"/>
+</rdf:Property>
+
+<rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#range">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:label>range</rdfs:label>
+  <rdfs:comment>A range of the subject property.</rdfs:comment>
+  <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+  <rdfs:domain rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"/>
+</rdf:Property>
+
+<rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#seeAlso">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:label>seeAlso</rdfs:label>
+  <rdfs:comment>Further information about the subject resource.</rdfs:comment>
+  <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+  <rdfs:domain   rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+</rdf:Property>
+
+<rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#isDefinedBy">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:subPropertyOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#seeAlso"/>
+  <rdfs:label>isDefinedBy</rdfs:label>
+  <rdfs:comment>The definition of the subject resource.</rdfs:comment>
+  <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+  <rdfs:domain rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+</rdf:Property>
+
+<rdfs:Class rdf:about="http://www.w3.org/2000/01/rdf-schema#Literal">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:label>Literal</rdfs:label>
+  <rdfs:comment>The class of literal values, eg. textual strings and integers.</rdfs:comment>
+  <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+</rdfs:Class>
+
+<rdfs:Class rdf:about="http://www.w3.org/2000/01/rdf-schema#Container">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:label>Container</rdfs:label>
+  <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+  <rdfs:comment>The class of RDF containers.</rdfs:comment>
+</rdfs:Class>
+
+<rdfs:Class rdf:about="http://www.w3.org/2000/01/rdf-schema#ContainerMembershipProperty">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:label>ContainerMembershipProperty</rdfs:label>
+  <rdfs:comment>The class of container membership properties, rdf:_1, rdf:_2, ..., all of which are sub-properties of 'member'.</rdfs:comment>
+  <rdfs:subClassOf rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"/>
+</rdfs:Class>
+
+<rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#member">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:label>member</rdfs:label>
+  <rdfs:comment>A member of the subject resource.</rdfs:comment>
+  <rdfs:domain rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+</rdf:Property>
+
+<rdfs:Class rdf:about="http://www.w3.org/2000/01/rdf-schema#Datatype">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+  <rdfs:label>Datatype</rdfs:label>
+  <rdfs:comment>The class of RDF datatypes.</rdfs:comment>
+  <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+</rdfs:Class>
+
+<rdf:Description rdf:about="http://www.w3.org/2000/01/rdf-schema#">
+  <rdfs:seeAlso rdf:resource="http://www.w3.org/2000/01/rdf-schema-more"/>
+</rdf:Description>
+
+</rdf:RDF>
+        "##
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("has-rdf.omn")).unwrap();
+
+    let ontology = indoc! {r#"
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Ontology: <http://foo.org/has-rdf>
+            Class: some-class
+                Annotations:
+                    rdfs:seeAlso "bar"
+
+            Class: some-other-class
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    let position = Position::new(2, 13); // at some-class
+
+    // Act
+
+    let result = service
+        .inner()
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url },
+                position: tower_lsp::lsp_types::Position {
+                    line: 2,
+                    character: 13,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await;
+
+    // Assert
+
+    assert_empty_diagnostics(&service);
+    let result = result.unwrap();
+    let result = result.unwrap();
+    let contents = result.contents;
+    let string = match contents {
+        HoverContents::Scalar(MarkedString::String(string)) => string,
+        _ => todo!(),
+    };
+    info!("string={string}");
+    assert!(string.contains("rdfs:seeAlso"));
 }
 
 #[test(tokio::test)]
