@@ -1092,7 +1092,9 @@ fn resolve_imports(
     let prefix_urls = document
         .prefixes()
         .into_values()
-        .filter_map(|url| Url::parse(&url).ok());
+        .filter_map(|url| Url::parse(&url).ok())
+        // Filter out the current document as a prefix (most likely the empty prefix ":")
+        .filter(|url| url != &document.uri);
 
     for url in import_urls {
         Workspace::resolve_url_to_document(&document.try_get_workspace()?, &url, http_client)

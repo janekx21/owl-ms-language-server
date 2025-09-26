@@ -36,6 +36,7 @@ walkdir = "2.5"
 indoc = "2"
 pretty = "0.12.4"
 thiserror = "2.0.16"
+sophia = { version = "0.9.0", features = ["xml"] }
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }

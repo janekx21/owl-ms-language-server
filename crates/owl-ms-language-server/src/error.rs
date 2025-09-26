@@ -14,6 +14,8 @@ pub enum Error {
     DocumentNotFound(Url),
     #[error("The provided document type is not supported extention: {0}")]
     DocumentNotSupported(String),
+    #[error("The provided document was empty: {0}")]
+    DocumentEmpty(Url),
     #[error("The provided file path is not a URL {0}")]
     InvalidFilePath(PathBuf),
     #[error("The workspace of the document was not found {0}")]
@@ -39,6 +41,8 @@ pub enum Error {
     TokioJoin(#[from] tokio::task::JoinError),
     #[error("Rope Error: {0}")]
     Rope(#[from] ropey::Error),
+    #[error("Sophia Error: {0}")]
+    Sophia(String), // I could not crate a streaming error type, because one of the generics is not importable, because of a foreign crate
 }
 
 impl From<Error> for tower_lsp::jsonrpc::Error {
