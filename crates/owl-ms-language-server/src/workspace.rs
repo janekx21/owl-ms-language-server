@@ -2107,18 +2107,8 @@ mod tests {
         let doc = external_doc.unwrap();
         assert_eq!(doc.text, ontology_text);
 
-        // TODO
-        // doc.ontology.iter().for_each(|ac| match &ac.component {
-        //     horned_owl::model::Component::DeclareClass(declare_class) => {
-        //         let iri = &(declare_class.0).0;
-        //         assert_eq!(&iri[..], "https://www.example.com/o1");
-        //     }
-        //     horned_owl::model::Component::OntologyID(ontology_id) => {
-        //         let iri = ontology_id.iri.clone().unwrap();
-        //         assert_eq!(&iri[..], "http://www.example.com/iri");
-        //     }
-        //     _ => {}
-        // });
+        let triple_count = doc.graph.0.triples().count();
+        assert!(triple_count > 0);
     }
 
     #[test]
