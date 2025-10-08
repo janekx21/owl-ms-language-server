@@ -1669,13 +1669,21 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
     );
     let mut cursor = node.walk();
 
+    // So if this node as an error child then the translation into RcDoc could exclude that error node.
+    // Therefore lets not translate it at all.
+    if node.children(&mut cursor).any(|child| child.is_error()) {
+        return RcDoc::text(text);
+    }
+
     match node.kind() {
         "source_file" => {
             let prefix_docs = node.children_by_field_name(
                 "prefix", &mut cursor)
             .map(|n| to_doc(&n, rope, tab_size)).collect_vec();
+
             let ontology_doc = node.child_by_field_name("ontology")
                 .map(|n| to_doc(&n, rope, tab_size)).unwrap_or(RcDoc::nil());
+
             if prefix_docs.is_empty() {
                 ontology_doc
             } else {
