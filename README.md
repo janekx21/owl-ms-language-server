@@ -2,6 +2,11 @@
 <img src="https://raw.githubusercontent.com/janekx21/owl-ms-language-server/refs/heads/main/img/icon.png" height="128"><br>Owl Mancherster Syntax Language Server</h2>
 <p align="center"><strong>Owl 2 Mancherster Syntax language server support for Visual Studio Code</strong></p>
 
+[<img alt="github" src="https://img.shields.io/github/commit-activity/w/janekx21/owl-ms-language-server?style=for-the-badge&labelColor=555555&logo=github" height="20">](https://github.com/janekx21/owl-ms-language-server)
+[<img alt="crates.io" src="https://img.shields.io/crates/v/owl-ms-language-server.svg?style=for-the-badge&color=fc8d62&logo=rust" height="20">](https://crates.io/crates/owl-ms-language-server)
+[<img alt="crates.io" src="https://img.shields.io/open-vsx/dt/JanekWinkler/vscode-owl-ms?style=for-the-badge&color=179ff1" height="20">](https://open-vsx.org/extension/JanekWinkler/vscode-owl-ms)
+[<img alt="crates.io" src="https://img.shields.io/visual-studio-marketplace/d/JanekWinkler.vscode-owl-ms?style=for-the-badge&color=da70d6" height="20">](https://marketplace.visualstudio.com/items?itemName=JanekWinkler.vscode-owl-ms)
+
 <img src="https://raw.githubusercontent.com/janekx21/owl-ms-language-server/refs/heads/main/img/vscode_demo.gif">
 
 
