@@ -82,7 +82,11 @@ impl Catalog {
                         from_str(xml.as_str()).ok().map(|c: Catalog| (c, entry))
                     })
                     .map(|(mut catalog, entry)| {
-                        catalog.locaton = entry.path().to_str().unwrap().to_string();
+                        catalog.locaton = entry
+                            .path()
+                            .to_str()
+                            .expect("path should be valid utf-8")
+                            .to_string();
                         info!("Found catalog {catalog:?}");
                         catalog
                     })
@@ -110,7 +114,9 @@ impl Catalog {
     }
 
     pub fn parent_folder(&self) -> &Path {
-        Path::new(self.locaton.as_str()).parent().unwrap()
+        Path::new(self.locaton.as_str())
+            .parent()
+            .expect("catalog file should have a parent folder, because it is a file")
     }
 }
 
