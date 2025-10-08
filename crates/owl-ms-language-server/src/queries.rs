@@ -80,13 +80,14 @@ pub static ALL_QUERIES: Lazy<AllQueries> = Lazy::new(|| AllQueries {
         &LANGUAGE,
         "
         (_ iri: (_)@frame_iri
-            (annotation
-                (annotation_property_iri)@iri
-                [
-                    (string_literal_no_language)
-                    (string_literal_with_language)
-                    (typed_literal)
-                ]@literal))
+            (annotations
+                (annotation
+                    (annotation_property_iri)@iri
+                    [
+                        (string_literal_no_language)
+                        (string_literal_with_language)
+                        (typed_literal)
+                    ]@literal)))
         ",
     )
     .unwrap(),

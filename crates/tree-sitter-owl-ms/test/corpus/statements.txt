@@ -45,10 +45,11 @@ Ontology:
 	    (class_frame 
   			(keyword_class)
   			(class_iri (simple_iri))
-          (keyword_annotations)
-          (annotation
-    				(annotation_property_iri (simple_iri))
-    				(string_literal_no_language)))))
+		  (annotations
+	          (keyword_annotations)
+	          (annotation
+	    				(annotation_property_iri (simple_iri))
+	    				(string_literal_no_language))))))
 
 ===================
 Datatype Frame integer
@@ -100,10 +101,11 @@ Ontology:
 		(datatype_frame 
 			(keyword_datatype)
 			(keyword_integer)
-			(keyword_annotations)
-      (annotation
-        (annotation_property_iri (simple_iri))
-        (simple_iri)))))
+	    (annotations
+		(keyword_annotations)
+	        (annotation
+	        	(annotation_property_iri (simple_iri))
+	        	(simple_iri))))))
 
 ===================
 Datatype Frame EquivalentTo
@@ -125,10 +127,11 @@ Ontology:
 				(datatype_iri (simple_iri))
 				(datatype_equavalent_to
 				  (keyword_equivalent_to)
+				(annotations
 				  (keyword_annotations)
-          (annotation
-						(annotation_property_iri (simple_iri))
-            (simple_iri))
+		          (annotation
+					(annotation_property_iri (simple_iri))
+		            (simple_iri)))
           (data_range
               (datatype_restriction
                 (keyword_integer)
@@ -201,7 +204,10 @@ Ontology:
 			(sub_class_of
 			  (keyword_sub_class_of)
 				(description
-					(class_iri (abbreviated_iri)))))))
+				  (conjunction
+				    (primary
+					  (class_iri
+                        (abbreviated_iri)))))))))
 
 ===================
 Class Frame SubClassOf with List
@@ -759,60 +765,78 @@ Class: C
 ---
 
 (source_file
-      (prefix_declaration
-        (keyword_prefix)
-        (prefix_name)
-        (full_iri))
-      (ontology
-        (keyword_ontology)
-        (object_property_frame
-          (keyword_object_property)
-          (object_property_iri
-            (simple_iri)))
-        (class_frame
-          (keyword_class)
-          (class_iri
-            (simple_iri)))
-        (class_frame
-          (keyword_class)
-          (class_iri
-            (simple_iri)))
-        (class_frame
-          (keyword_class)
-          (class_iri
-            (simple_iri))
-          (sub_class_of
-            (keyword_sub_class_of)
-            (description
+  (prefix_declaration
+    (keyword_prefix)
+    (prefix_name)
+    (full_iri))
+  (ontology
+    (keyword_ontology)
+    (object_property_frame
+      (keyword_object_property)
+      (object_property_iri
+        (simple_iri)))
+    (class_frame
+      (keyword_class)
+      (class_iri
+        (simple_iri)))
+    (class_frame
+      (keyword_class)
+      (class_iri
+        (simple_iri)))
+    (class_frame
+      (keyword_class)
+      (class_iri
+        (simple_iri))
+      (sub_class_of
+        (keyword_sub_class_of)
+        (description
+          (conjunction
+            (primary
               (object_property_iri
                 (simple_iri))
               (keyword_some)
-              (description
-                (class_iri
-                  (simple_iri))
-                (class_iri
-                  (simple_iri)))))
-          (sub_class_of
-            (keyword_sub_class_of)
-            (description
+              (primary
+                (nested_description
+                  (description
+                    (conjunction
+                      (primary
+                        (class_iri
+                          (simple_iri)))
+                      (primary
+                        (class_iri
+                          (simple_iri)))))))))))
+      (sub_class_of
+        (keyword_sub_class_of)
+        (description
+          (conjunction
+            (primary
               (keyword_inverse)
               (object_property_iri
                 (simple_iri))
               (keyword_some)
-              (description
-                (class_iri
-                  (simple_iri))
-                (class_iri
-                  (simple_iri)))))
-          (comment)
-          (sub_class_of
-            (keyword_sub_class_of)
-            (description
+              (primary
+                (nested_description
+                  (description
+                    (conjunction
+                      (primary
+                        (class_iri
+                          (simple_iri)))
+                      (primary
+                        (class_iri
+                          (simple_iri)))))))))))
+      (comment)
+      (sub_class_of
+        (keyword_sub_class_of)
+        (description
+          (conjunction
+            (primary
               (keyword_inverse)
               (object_property_iri
                 (simple_iri))
               (keyword_some)
+              (primary
+                (class_iri
+                  (simple_iri))))
+            (primary
               (class_iri
-                (simple_iri))
-              (class_iri
-                (simple_iri)))))))
+                (simple_iri)))))))))

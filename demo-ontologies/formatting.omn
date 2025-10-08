@@ -1,0 +1,24 @@
+Prefix:    a:    <http://a.b/c/>
+
+    Prefix:    b:    <http://a.b/b/>
+    Ontology:   foo    ver
+                        Annotations: rdfs:comment "hi", fo "batr"
+
+    Class:    A    SubClassOf: Y    Annotations:   rdfs:label    "Y"    EquivalentTo:    Y
+
+                 DisjointWith:    Y   DisjointUnionOf:    Y,Z    HasKey:    Y
+
+
+     
+    Datatype:     B
+               EquivalentTo:    Y
+    DataProperty:    C
+     SubPropertyOf:    a
+      Characteristics:    Functional
+          Domain:    B
+            Range:    c
+              EquivalentTo:    Y
+                DisjointWith:  T
+    ObjectProperty:    D
+    AnnotationProperty:    E
+    Individual:    F

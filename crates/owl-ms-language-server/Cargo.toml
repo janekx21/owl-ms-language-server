@@ -36,6 +36,7 @@ tree-sitter-owl-ms.workspace = true
 ureq = "3.0"
 walkdir = "2.5"
 indoc = "2"
+pretty = "0.12.4"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }

@@ -1,4 +1,5 @@
 use crate::catalog::CatalogUri;
+use crate::consts::{get_fixed_infos, keyword_hover_info};
 use crate::position::Position;
 use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type_index};
 use crate::web::HttpClient;
@@ -17,11 +18,11 @@ use horned_owl::model::Component::*;
 use horned_owl::model::{ArcStr, Build};
 use horned_owl::ontology::iri_mapped::ArcIRIMappedOntology;
 use horned_owl::ontology::set::SetOntology;
-use indoc::indoc;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, MutexGuard, RwLock};
+use pretty::RcDoc;
 use ropey::Rope;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -161,20 +162,32 @@ impl Workspace {
         doc: &InternalDocument,
         http_client: &dyn HttpClient,
     ) -> Option<FrameInfo> {
-        doc.reachable_docs_recusive(self, http_client)
-            .iter()
-            .filter_map(|url| {
-                if let Ok(doc) = self.resolve_url_to_document(url, http_client) {
-                    match &doc {
-                        DocumentReference::Internal(rw_lock) => rw_lock.read().get_frame_info(iri),
-                        DocumentReference::External(rw_lock) => rw_lock.write().get_frame_info(iri),
+        timeit("rechable docs", || {
+            doc.reachable_docs_recusive(self, http_client)
+        })
+        .iter()
+        .filter_map(|url| {
+            if let Ok(doc) = timeit("\tresolve document", || {
+                self.resolve_url_to_document(url, http_client)
+            }) {
+                match &doc {
+                    DocumentReference::Internal(rw_lock) => {
+                        timeit("\t|-> get frame info internal", || {
+                            rw_lock.read().get_frame_info(iri)
+                        })
                     }
-                } else {
-                    None
+                    DocumentReference::External(rw_lock) => {
+                        timeit("\t|-> get frame info external", || {
+                            rw_lock.write().get_frame_info(iri)
+                        })
+                    }
                 }
-            })
-            .chain(get_fixed_infos(iri))
-            .tree_reduce(FrameInfo::merge)
+            } else {
+                None
+            }
+        })
+        .chain(get_fixed_infos(iri))
+        .tree_reduce(FrameInfo::merge)
     }
 
     pub fn node_info(&self, node: &Node, doc: &InternalDocument) -> String {
@@ -197,915 +210,14 @@ impl Workspace {
             "simple_iri" | "abbreviated_iri" => {
                 let iri = node_text(node, &doc.rope);
                 debug!("Getting node info for {iri} at doc {}", doc.uri);
-                let iri = doc.abbreviated_iri_to_full_iri(iri.to_string()).unwrap_or(iri.to_string());
+                let iri = doc
+                    .abbreviated_iri_to_full_iri(iri.to_string())
+                    .unwrap_or(iri.to_string());
                 self.get_frame_info(&iri)
                     .map(|fi| fi.info_display(self))
                     .unwrap_or(iri)
             }
-
-            // Keyword hover information
-            "keyword_prefix" => indoc! {"
-                `Prefix:`
-                
-                *Top-level keyword* 
-
-                ---
-
-                Declare a namespace prefix for use in abbriviated IRIs.
-
-                A prefix always comes before the ontology. Abbreviated IRIs without a prefix part are treated as if they have the empty prefix `:`.
-
-                Example:
-                ```owl-ms
-                Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-                Prefix: : <http://example.com/ontology/>
-
-                Ontology: ...
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities)
-            "}.to_string(),
-            "keyword_ontology" => indoc! {"
-               `Ontology:`
-
-               *Top-level keyword* 
-
-                ---
-
-                Defines an ontology with its IRI and optional version IRI.
-
-                
-                OWL 2 provides several built-in annotation properties for ontology annotations. The usage of these annotation properties on entities other than ontologies is discouraged.
-
-                - The `owl:priorVersion` annotation property specifies the IRI of a prior version of the containing ontology.
-                - The `owl:backwardCompatibleWith` annotation property specifies the IRI of a prior version of the containing ontology that is compatible with the current version of the containing ontology.
-                - The `owl:incompatibleWith` annotation property specifies the IRI of a prior version of the containing ontology that is incompatible with the current version of the containing ontology.
-
-                Example:
-                ```owl-ms
-                Ontology: <http://example.com/ontology/physical/> <http://example.com/ontology/v1.2.3/physical.omn>
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Ontologies)
-            "}.to_string(),
-            "keyword_integer" => indoc!{"
-                `integer`
-
-                *Facet* 
-
-                ---
-                *Built-in alias for* `xsd:integer`. A datatype for integer values.
-
-                [Specification](https://www.w3.org/TR/2012/REC-xmlschema11-2-20120405/#integer)"
-                }.to_string(),
-            "keyword_decimal" => indoc!{"
-                *Facet* `decimal`
-
-                ---
-                *Built-in alias for* `xsd:decimal`. A datatype for decimal numbers with arbitrary precision.
-
-                [Specification](https://www.w3.org/TR/2012/REC-xmlschema11-2-20120405/#decimal)"
-            }.to_string(),
-            "keyword_float" => indoc!{"
-                `float`
-                
-                *Facet* 
-
-                ---
-                *Built-in alias for* `xsd:float`. A datatype for 32-bit floating-point numbers.
-
-                [Specification](https://www.w3.org/TR/2012/REC-xmlschema11-2-20120405/#float)"
-            }.to_string(),
-            "keyword_string" => indoc!{"
-                `string`
-
-                *Facet* 
-
-                ---
-                *Built-in alias for* `xsd:string`. A datatype for character strings.
-
-                [Specification](https://www.w3.org/TR/2012/REC-xmlschema11-2-20120405/#string)"
-            }.to_string(),
-            "keyword_import" => indoc!{"
-                `Import:`
-
-                *Top-level keyword* 
-
-                ---
-                
-                Imports another ontology into the current ontology.
-
-                Import other ontologies in order to gain access to their entities, expressions, and axioms. This provides the basic facility for ontology modularization. The IRIs of the imported ontology do not automaticly join the default namespace.
-
-                Example:
-                ```owl-ms
-                Ontology: <http://www.example.com/importing-ontology>
-
-                    Import: <http://www.example.com/my/2.0>
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Imports)
-            "}.to_string(),
-            "keyword_annotations" => indoc!{"
-                `Annotations:`
-
-                *Keyword* 
-
-                ---
-
-                Defines annotation assertions for an entity.
-
-                Ontologies, axioms, and annotations themselves can be annotated using annotations. They consist of an annotation property and an annotation value, where the latter can be anonymous individuals, IRIs, and literals.
-
-                
-                The annotation properties with the IRIs listed below are available in OWL 2 as built-in annotation properties with a predefined semantics:
-                - The `rdfs:label` annotation property can be used to provide an IRI with a human-readable label.
-                - The `rdfs:comment` annotation property can be used to provide an IRI with a human-readable comment.
-                - The `rdfs:seeAlso` annotation property can be used to provide an IRI with another IRI such that the latter provides additional information about the former.
-                - The `rdfs:isDefinedBy` annotation property can be used to provide an IRI with another IRI such that the latter provides information about the definition of the former; the way in which this information is provided is not described by this specification.
-                - An annotation with the `owl:deprecated` annotation property and the value equal to `\"true\"^^xsd:boolean` can be used to specify that an IRI is deprecated.
-                - The `owl:versionInfo` annotation property can be used to provide an IRI with a string that describes the IRI's version.
-                - The `owl:priorVersion` annotation property is described in more detail in Section 3.5.
-                - The `owl:backwardCompatibleWith` annotation property is described in more detail in Section 3.5.
-                - The `owl:incompatibleWith` annotation property is described in more detail in Section 3.5.
-
-                Example:
-                ```owl-ms
-                Class: OEO0042
-
-                    Annotations: 
-                        <http://example.com/o/CH_0000118> \"CO2\"@de,
-                        Annotations: rdfs:comment \"this is an annotated annotation\"
-                            rdfs:label \"greenhouse gas\",
-                        rdfs:label \"Treibhausgas\"@de
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Annotations)
-            "}.to_string(),
-            "keyword_inverse" => indoc!{"
-                `inverse`
-
-                *Object property expression* 
-
-                ---
-
-                An inverse property expression connects an individual i with j if and only if j is connected to i by the current object property.
-
-                [Specification](https://www.w3.org/TR/2012/REC-owl2-syntax-20121211/#Inverse_Object_Properties)"
-            }.to_string(),
-            "keyword_length" => indoc!{"
-                `length`
-
-                *Facet* 
-
-                ---
-
-                Built-in alias for `xsd:length`. Constrains the exact length of a datatype value. Must be a non-negative integer.
-            
-                [Specification](https://www.w3.org/TR/2012/REC-xmlschema11-2-20120405/#rf-length)"}.to_string(),
-            "keyword_min_length" => indoc!{"
-                `minLength`
-
-                *Facet* 
-
-                ---
-
-                Built-in alias for `xsd:minLength`. Constrains the minimum length of a datatype value. Must be a non-negative integer.
-
-                [Specification](https://www.w3.org/TR/2012/REC-xmlschema11-2-20120405/#rf-minLength)"}.to_string(),
-            "keyword_max_length" => indoc!{"
-                `maxLength`
-
-                *Facet* 
-
-                ---
-
-                Built-in alias for `xsd:maxLength`. Constrains the maximum length of a datatype value. Must be a non-negative integer.
-
-                [Specification](https://www.w3.org/TR/2012/REC-xmlschema11-2-20120405/#rf-maxLength)"}.to_string(),
-            "keyword_pattern" => indoc!{"
-                `pattern`
-
-                *Facet* 
-
-                ---
-
-                Built-in alias for `xsd:pattern`. Constrains datatype values to match a regular expression pattern.
-                
-                [Specification](https://www.w3.org/TR/2012/REC-xmlschema11-2-20120405/#rf-pattern)
-            "
-            }.to_string(),
-            "keyword_lang_range" => indoc!{"
-                `langRange`
-
-                *Facet* 
-
-                ---
-
-                Built-in alias for rdf:langRange. Constrains literal values to specific language ranges"
-            }.to_string(),
-            "keyword_some" => indoc!{"
-                `some`
-
-                *Class expression* 
-
-                ---
-
-                The existential class expression `ope some ce` describes a class of individuals that are connected by the object property expression `ope` to at least one individual of the class `ce`.
-                The existential class expression `dp some dr` describes a class of individuals that are connected by the data property `dp` to at least one literal in `dr`.
-
-                Example:
-                ```owl-ms
-                Class: Parent
-                    SubClassOf: hasChild some Person
-                
-                Class: Adult
-                    SubClassOf: hasAge some integer[>= 18]
-                ```
-
-                Specifications:
-                - [Existential Quantification over Object Properties](https://www.w3.org/TR/owl2-syntax/#Existential_Quantification)
-                - [Existential Quantification over Data Properties](https://www.w3.org/TR/owl2-syntax/#Existential_Quantification_2)
-
-            "}.to_string(),
-            "keyword_only" => indoc!{"
-                `only`
-
-                *Class expression* 
-
-                ---
-
-                The universal class expression `ope only ce` describes a class of individuals that are connected by the object property expression `ope` only to individuals of the class `ce`.
-                The universal class expression `dp only dr` describes a class of individuals that are connected by the data property `dp` only to literals in `dr`.
-
-                Example:
-                ```owl-ms
-                Class: VegetarianPizza
-                    SubClassOf: hasTopping only (VegetableTopping or CheeseTopping)
-
-                Class: Adult
-                    SubClassOf: hasAge only integer
-                ```
-
-                Specifications:
-                - [Universal Quantification over Object Properties](https://www.w3.org/TR/owl2-syntax/#Universal_Quantification)
-                - [Universal Quantification over Data Properties](https://www.w3.org/TR/owl2-syntax/#Universal_Quantification_2)
-            "}.to_string(),
-            "keyword_self" => indoc! {"
-                `self`
-
-                *Class expression* 
-
-                ---
-
-                The self-restriction `ope self` describes a class of individuals that are connected by the object property expression `ope` to themselves.
-
-                Example:
-                ```owl-ms
-                Class: Person
-                    SubClassOf: likes self
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Self-Restriction)
-            "}.to_string(),
-            "keyword_value" => indoc!{"
-                `value`
-
-                *Class expression* 
-
-                ---
-
-                The has-value class expression `ope value i` describes a class of individuals that are connected by the object property expression `ope` to the individual `i`.
-                The has-value class expression `dp value l` describes a class of individuals that are connected by the data property `dp` to the literal `l`.
-
-                Example:
-                ```owl-ms
-                Class: Alices
-                    SubClassOf: hasName value \"Alice\"@en
-                Class: InitProcess
-                    SubClassOf: hasPID value 1
-                ```
-
-                Specifications:
-                - [Individual Value Restriction](https://www.w3.org/TR/owl2-syntax/#Individual_Value_Restriction)
-                - [Literal Value Restriction](https://www.w3.org/TR/owl2-syntax/#Literal_Value_Restriction)
-            "}.to_string(),
-
-            "keyword_datatype" => indoc!{"
-                `Datatype:`
-
-                *Frame*
-
-                ---
-                
-                Declares a custom datatype.
-                    
-                Example:
-                ```owl-ms
-            	Datatype: NegInt
-            		EquivalentTo:
-            			integer[< 0]
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Datatypes)
-            "}.to_string(),
-            "keyword_equivalent_to" => indoc!{"
-                `EquivalentTo:`
-
-                *Axiom* 
-
-                ---
-
-                Declares that the current frame entity is logically equivalent to another.
-
-                Example:
-                ```owl-ms
-                Class: Child
-                    EquivalentTo: Person and hasAge some integer[< 18]
-                Datatype: PositiveInteger
-                    EquivalentTo: integer[>= 0]
-                ObjectProperty: hasParent
-                    EquivalentTo: isParentOf inverseOf isChildOf
-                DataProperty: hasAge
-                    EquivalentTo: isAgeOf
-                ```
-
-                Specifications:
-                - [Equivalent Classes](https://www.w3.org/TR/owl2-syntax/#Equivalent_Classes)
-                - [Equivalent Datatypes](https://www.w3.org/TR/owl2-syntax/#Datatype_Definitions)
-                - [Equivalent Object Properties](https://www.w3.org/TR/owl2-syntax/#Equivalent_Object_Properties)
-                - [Equivalent Data Properties](https://www.w3.org/TR/owl2-syntax/#Equivalent_Data_Properties)
-            "}.to_string(),
-            "keyword_class" => indoc!{"
-                `Class:`
-
-                *Frame*
-
-                ---
-
-                Declares a class in the ontology.
-
-                Classes can be understood as sets of individuals.
-
-                For example, classes `Child` and `Person` can be used to represent the set of all children and persons, respectively, in the application domain.
-                ```owl-ms
-                Class: Person
-            	Class: Child
-            	    SubClassOf: Person
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Classes)
-            "}.to_string(),
-            "keyword_sub_class_of" => indoc!{"
-                `SubClassOf:`
-
-                *Axiom*
-
-                ---
-
-                States that the current class is a subclass of all listed classes.
-
-                Example:
-                ```owl-ms
-                Class: Child
-                    SubClassOf: Person
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Subclass_Axioms)
-            "}.to_string(),
-            "keyword_disjoint_with" => indoc!{"
-                `DisjointWith:`
-
-                *Axiom*
-
-                ---
-
-                States that the current class is disjoint with the listed classes.
-
-                Example:
-                ```owl-ms
-                Class: Child
-                    DisjointWith: Adult
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Classes)
-            "}.to_string(),
-            "keyword_disjoint_union_of" => indoc! {"
-                `DisjointUnionOf:`
-
-                *Axiom*
-
-                ---
-
-                States a class as the disjoint union of the listed classes.
-
-                Example:
-                ```owl-ms
-                Class: Party
-                    DisjointUnionOf: Person, PrivateCompany, PublicOrganization
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Union_of_Class_Expressions)
-            "}.to_string(),
-            "keyword_has_key" => indoc!{"
-                `HasKey:`
-
-                *Axiom*
-
-                ---
-
-                States that each individual in the current class has a combination of values for the listed properties that uniquely identifies them.
-
-                Example:
-                ```owl-ms
-                Class: Person
-                    HasKey: hasSocialSecurityNumber
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Keys)
-            "}.to_string(),
-            "keyword_object_property" => indoc!{"
-                `ObjectProperty:`
-
-                *Frame*
-
-                ---
-
-                Declares a property that connects individuals to individuals.
-
-                Example:
-                ```owl-ms
-                ObjectProperty: HasEnergy
-                    Domain: 
-                        ArtificialObject
-                    Range: 
-                        Energy
-                    InverseOf: 
-                        IsEnergyParticipantOf
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Object_Properties)
-            "}.to_string(),
-            "keyword_domain" => indoc!{"
-                `Domain:`
-
-                *Axiom*
-
-                ---
-
-                States that the range of the current object property is the specified class expression.
-                States that the range of the current data property is the specified datarange.
-
-                Example:
-                ```owl-ms
-                ObjectProperty: hasParent
-                    Domain: Person
-                DataProperty: hasAge
-                    Domain: integer[>= 0]
-                ```
-
-                Specifications:
-                - [Object Property Domain](https://www.w3.org/TR/owl2-syntax/#Object_Property_Domain)
-                - [Data Property Domain](https://www.w3.org/TR/owl2-syntax/#Data_Property_Domain)
-            "}.to_string(),
-            "keyword_range" => indoc!{"
-                `Range:`
-
-                *Axiom*
-
-                ---
-
-                States that the range of the current object property is the specified class expression.
-                States that the range of the current data property is the specified datarange.
-
-                Example:
-                ```owl-ms
-                ObjectProperty: hasParent
-                    Range: Person
-                DataProperty: hasAge
-                    Range: integer[>= 0]
-                ```
-
-                Specifications:
-                - [Object Property Range](https://www.w3.org/TR/owl2-syntax/#Object_Property_Range)
-                - [Data Property Range](https://www.w3.org/TR/owl2-syntax/#Data_Property_Range)
-            "}.to_string(),
-            "keyword_sub_property_of" => indoc!{"
-                `SubPropertyOf:`
-
-                *Axiom*
-
-                ---
-
-                States that the current property is a subproperty of the listed object properties. If p is a subproperty of q, then if an individual x is connected to an individual y by p, then x is also connected to y by q.
-
-                Example:
-                ```owl-ms
-                ObjectProperty: hasDog
-                    SubPropertyOf: hasPet
-                DataProperty: hasLastName
-                    SubPropertyOf: hasName
-                ```
-
-                Specifications:
-                - [Object Subproperties](https://www.w3.org/TR/owl2-syntax/#Object_Subproperties)
-                - [Data Subproperties](https://www.w3.org/TR/owl2-syntax/#Data_Subproperties)
-            "}.to_string(),
-            "keyword_inverse_of" => indoc!{"
-                `InverseOf:`
-
-                *Axiom*
-
-                ---
-
-                States that the current object property is the inverse of the listed object properties.
-
-                Example:
-                ```owl-ms
-                ObjectProperty: hasParent
-                    InverseOf: isParentOf
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Inverse_Object_Properties)
-            "}.to_string(),
-            "keyword_sub_property_chain" => indoc!{"
-                `SubPropertyChainOf:`
-
-                *Axiom*
-
-                ---
-
-                States that, if an individual x is connected by a sequence of the listed object property expressions to an individual y, then x is also connected to y by the current object property.
-
-                Example:
-                ```owl-ms
-                ObjectProperty: hasGrandParent
-                    SubPropertyChainOf: hasParent o hasParent
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Object_Subproperties)
-            "}.to_string(),
-            "keyword_functional" => indoc!{"
-                `Functional`
-
-                *Object property characteristic*
-
-                ---
-
-                States that the current object property is functional, meaning that each individual can be connected to at most one distinct individual by this property.
-
-                Example:
-                ```owl-ms
-                ObjectProperty: hasFather
-                    Characteristic: Functional
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Functional_Object_Properties)
-            "}.to_string(),
-            "keyword_inverse_functional" => indoc!{"
-                `InverseFunctional`
-
-                *Object property characteristic*
-
-                ---
-
-                States that the current object property is inverse functional, meaning that for each individual x there can be at most one individual y such that y is connected to x by this property.
-
-                Example:
-                ```owl-ms
-                ObjectProperty: fatherOf
-                    Characteristic: InverseFunctional
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Inverse-Functional_Object_Properties)
-            "}.to_string(),
-            "keyword_reflexive" => indoc!{"
-                `Reflexive`
-
-                *Object property characteristic*
-
-                ---
-
-                States that the current object property connects each individual to itself.
-
-                Example:
-                ```owl-ms
-                ObjectProperty: knows
-                    Characteristic: Reflexive
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Reflexive_Object_Properties)
-            "}.to_string(),
-            "keyword_irreflexive" => indoc!{"
-                `Irreflexive`
-
-                *Object property characteristic*
-
-                ---
-
-                States that the current object property does not connect any individual to itself.
-
-                Example:
-                ```owl-ms
-                ObjectProperty: marriedTo
-                    Characteristic: Irreflexive
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Irreflexive_Object_Properties)
-            "}.to_string(),
-            "keyword_symmetric" => indoc!{"
-                `Symmetric`
-
-                *Object property characteristic*
-
-                ---
-
-                States that if an individual x is connected to an individual y by the current object property, then y is also connected to x by this property.
-
-                Example:
-                ```owl-ms
-                ObjectProperty: isSiblingOf
-                    Characteristic: Symmetric
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Symmetric_Object_Properties)
-            "}.to_string(),
-            "keyword_asymmetric" => indoc!{"
-                `Asymmetric`
-
-                *Object property characteristic*
-
-                ---
-
-                States that if an individual x is connected to an individual y by the current object property, then y cannot be connected to x by this property.
-
-                Example:
-                ```owl-ms
-                ObjectProperty: isParentOf
-                    Characteristic: Asymmetric
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Asymmetric_Object_Properties)
-            "}.to_string(),
-            "keyword_transitive" => indoc!{"
-                `Transitive`
-
-                *Object property characteristic*
-
-                ---
-
-                States that if an individual x is connected to an individual y by the current object property, and y is connected to an individual z by this property, then x is also connected to z by this property.
-
-                Example:
-                ```owl-ms
-                ObjectProperty: isAncestorOf
-                    Characteristic: Transitive
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Transitive_Object_Properties)
-            "}.to_string(),
-            "keyword_data_property" => indoc!{"
-                `DataProperty:`
-
-                *Frame*
-
-                ---
-
-                Declares a property that connects individuals to literal values.
-
-                Example:
-                ```owl-ms
-                DataProperty: hasAge
-                    Domain: Person
-                    Range: xsd:integer
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Data_Properties)
-            "}.to_string(),
-            "keyword_characteristics" => indoc!{"
-                `Characteristics:`
-
-                *Axiom*
-
-                ---
-
-                States the characteristics of the current object property.
-
-                Example:
-                ```owl-ms
-                ObjectProperty: fatherOf
-                    Characteristics: InverseFunctional, Irreflexive
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Object_Property_Axioms)
-            "}.to_string(),
-            "keyword_annotation_property" => indoc!{"
-                `AnnotationProperty:`
-
-                *Frame*
-
-                ---
-                
-                Declares a property used for annotations (metadata).
-
-                Example:
-                ```owl-ms
-                AnnotationProperty: rdfs:label
-                    Domain: owl:Thing
-                    Range: xsd:string
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Annotation_Properties)
-            "}.to_string(),
-            "keyword_individual" => indoc! {"
-                `Individual:`
-
-                *Frame*
-
-                ---
-
-                Declares a named or anonymous individual in the ontology. Individuals which use the blank node (start with `_:`) are considered anonymous. Their identifier is then only available within the current ontology.
-
-                Example:
-                ```owl-ms
-                Individual: john
-                    Types: Person
-                    Facts: hasAge 25
-                Individual: _:genid1
-                    Types: Person
-                    Facts: hasAge 30
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Individuals)
-            "}.to_string(),
-            "keyword_types" => indoc!{"
-                `Types:`
-
-                *Axiom*
-
-                ---
-
-                States that the current individual belongs to the listed classes.
-
-                Example:
-                ```owl-ms
-                Individual: john
-                    Types: Person
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Class_Assertions)
-            "}.to_string(),
-            "keyword_facts" => indoc!{"
-                `Facts:`
-
-                *Axiom*
-
-                ---
-
-                States that the current individual has the specified property values.
-
-                Example:
-                ```owl-ms
-                Individual: john
-                    Facts: hasAge 25, hasMother mary
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Positive_Object_Property_Assertions)
-            "}.to_string(),
-            "keyword_same_as" => indoc!{"
-                `SameAs:`
-
-                *Axiom*
-
-                ---
-
-                States that the current individual is the same as the listed individuals.
-
-                Example:
-                ```owl-ms
-                Individual: john
-                    SameAs: john_doe, j_doe
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Individual_Equality)
-            "}.to_string(),
-            "keyword_equivalent_classes" => indoc!{"
-                `EquivalentClasses:`
-
-                *Axiom*
-
-                ---
-
-                States logical equivalence between multiple classes.
-
-                Example:
-                ```owl-ms
-                EquivalentClasses: Person, People
-                ```
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Equivalent_Classes)
-            "}.to_string(),
-            "keyword_disjoint_classes" => indoc!{"
-                `DisjointClasses:`
-
-                *Axiom*
-
-                ---
-
-                States that multiple classes are pairwise disjoint.
-
-                Example:
-                ```owl-ms
-                DisjointClasses: Person, Animal, Plant
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Classes)
-            "}.to_string(),
-            "keyword_equivalent_properties" => indoc!{"
-                `EquivalentProperties:`
-
-                *Axiom*
-
-                ---
-
-                States logical equivalence between multiple properties.
-
-                Example:
-                ```owl-ms
-                EquivalentProperties: hasBrother, hasMaleSibling
-                ```
-
-                Specifications:
-                - [Equivalent Object Properties](https://www.w3.org/TR/owl2-syntax/#Equivalent_Object_Properties)
-                - [Equivalent Data Properties](https://www.w3.org/TR/owl2-syntax/#Equivalent_Data_Properties)
-            "}.to_string(),
-            "keyword_disjoint_properties" => indoc!{"
-                `DisjointProperties:`
-
-                *Axiom*
-
-                ---
-
-                States that multiple properties are pairwise disjoint.
-
-                Example:
-                ```owl-ms
-                DisjointProperties: hasFather, hasMother
-                ```
-
-                Specifications:
-                - [Disjoint Object Properties](https://www.w3.org/TR/owl2-syntax/#Disjoint_Object_Properties)
-                - [Disjoint Data Properties](https://www.w3.org/TR/owl2-syntax/#Disjoint_Data_Properties)
-            "}.to_string(),
-            "keyword_same_individual" => indoc!{"
-                `SameIndividual:`
-
-                *Axiom*
-
-                ---
-
-                States that multiple individuals are the same entity.
-
-                Example:
-                ```owl-ms
-                SameIndividual: john, john_doe
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Individual_Equality)
-            "}.to_string(),
-            "keyword_different_individuals" => indoc!{"
-                `DifferentIndividuals:`
-
-                *Axiom*
-
-                ---
-
-                States that multiple individuals are pairwise distinct entities. This axiom can be used to axiomatize the unique name assumption — the assumption that all different individual names denote different individuals.
-            
-                Example:
-                ```owl-ms
-                DifferentIndividuals: john, jane, jack
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Individual_Inequality)
-            "}.to_string(),
-            "keyword_different_from"=> indoc!{"
-                `DifferentFrom:`
-
-                *Axiom*
-
-                ---
-
-                States that an individual is distinct from another specific individual.
-
-                Example:
-                ```owl-ms
-                Individual: john
-                    DifferentFrom: jane, jack
-                ```
-
-                [Specification](https://www.w3.org/TR/owl2-syntax/#Individual_Inequality)
-            "}.to_string(),
-            _ => "".into(),
+            kind => keyword_hover_info(kind),
         }
     }
 
@@ -1216,34 +328,6 @@ impl Workspace {
     }
 }
 
-pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
-    match &iri[..] {
-        "http://www.w3.org/2000/01/rdf-schema#label" => vec![FrameInfo {
-            iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-            annotations: vec![(
-                "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                vec!["label".to_string()],
-            )]
-            .into_iter()
-            .collect(),
-            frame_type: FrameType::AnnotationProperty,
-            definitions: vec![],
-        }],
-        "http://www.w3.org/2000/01/rdf-schema#comment" => vec![FrameInfo {
-            iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
-            annotations: vec![(
-                "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                vec!["comment".to_string()],
-            )]
-            .into_iter()
-            .collect(),
-            frame_type: FrameType::AnnotationProperty,
-            definitions: vec![],
-        }],
-        _ => vec![],
-    }
-}
-
 fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
     info!("Loading file from disk {}", path.display());
 
@@ -1304,6 +388,13 @@ impl InternalDocument {
             rope,
             diagnostics,
         }
+    }
+
+    pub fn formatted(&self, tab_size: u32, ruler_with: usize) -> String {
+        let root = self.tree.root_node();
+        let doc = to_doc(&root, &self.rope, tab_size);
+        debug!("doc:\n{:#?}", doc);
+        doc.pretty(ruler_with).to_string()
     }
 
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
@@ -1385,14 +476,14 @@ impl InternalDocument {
 
         result.insert(self.uri.clone());
 
-        let docs = self
-            .imports()
+        let docs = timeit("\timports query", || self.imports())
             .iter()
             .filter_map(|url| {
-                workspace
-                    .resolve_url_to_document(url, http_client)
-                    .inspect_err(|e| error!("{e:?}"))
-                    .ok()
+                timeit("\t resolve url to doc", || {
+                    workspace.resolve_url_to_document(url, http_client)
+                })
+                .inspect_err(|e| error!("{e:?}"))
+                .ok()
             })
             .collect_vec();
 
@@ -1410,15 +501,7 @@ impl InternalDocument {
     }
 
     fn imports(&self) -> Vec<Url> {
-        self.query(&ALL_QUERIES.import_query)
-            .iter()
-            .filter_map(|m| match &m.captures[..] {
-                [iri] => Url::parse(&trim_full_iri(&iri.node.text)[..])
-                    .inspect_err(|e| warn!("Url could not be parsed {e:#}"))
-                    .ok(),
-                _ => unimplemented!(),
-            })
-            .collect_vec()
+        imports_helper(self)
     }
 
     pub fn query_helper(&self, query: &Query, range: Option<Range>) -> Vec<UnwrappedQueryMatch> {
@@ -1444,7 +527,7 @@ impl InternalDocument {
                             range: c.node.range().into(),
                             kind: c.node.kind().into(),
                         },
-                        _index: c.index,
+                        index: c.index,
                     })
                     .collect_vec(),
             })
@@ -1464,6 +547,8 @@ impl InternalDocument {
             // Change the whole file
             panic!("Whole file changes are not supported yet");
         }
+
+        debug!("content changes {:#?}", params.content_changes);
 
         // This range is relative to the *old* document not the new one
         let change_ranges = params
@@ -1491,6 +576,12 @@ impl InternalDocument {
 
                     // rope replace
                     timeit("rope operations", || {
+                        if old_end_char < start_char {
+                            error!(
+                                "Invalid rope remove operation range. {start_char}..{old_end_char}"
+                            );
+                        }
+                        // TODO this panics now while formatting oeo physical :<
                         self.rope.remove(start_char..old_end_char);
                         self.rope.insert(start_char, &change.text);
                     });
@@ -1670,12 +761,18 @@ impl InternalDocument {
                 let iri = trim_full_iri(capture.node.text);
                 let iri = self.abbreviated_iri_to_full_iri(iri.clone()).unwrap_or(iri);
 
-                let label = workspace
-                    .get_frame_info_recursive(&iri, self, http_client)
-                    .and_then(|frame_info| frame_info.label())
-                    .unwrap_or_default();
+                let label = timeit("get frame info recursive", || {
+                    workspace.get_frame_info_recursive(&iri, self, http_client)
+                })
+                .and_then(|frame_info| frame_info.label())
+                .unwrap_or_default();
 
-                if label.is_empty() {
+                let mut label_normalized = label.clone().to_lowercase();
+                label_normalized.retain(char::is_alphanumeric);
+
+                let same = iri.to_lowercase().contains(&label_normalized);
+
+                if label.is_empty() || same {
                     None
                 } else {
                     Some(InlayHint {
@@ -1867,9 +964,30 @@ pub fn word_before_character(character: usize, line: &str) -> String {
     size = 20,
     key = "u64",
     convert = r#"{
-            let mut hasher = DefaultHasher::new();
-            doc.hash(&mut hasher);
-            hasher.finish()
+        let mut hasher = DefaultHasher::new();
+        doc.hash(&mut hasher);
+        hasher.finish()
+     } "#
+)]
+fn imports_helper(doc: &InternalDocument) -> Vec<Url> {
+    doc.query(&ALL_QUERIES.import_query)
+        .iter()
+        .filter_map(|m| match &m.captures[..] {
+            [iri] => Url::parse(&trim_full_iri(&iri.node.text)[..])
+                .inspect_err(|e| warn!("Url could not be parsed {e:#}"))
+                .ok(),
+            _ => unimplemented!(),
+        })
+        .collect_vec()
+}
+
+#[cached(
+    size = 20,
+    key = "u64",
+    convert = r#"{
+        let mut hasher = DefaultHasher::new();
+        doc.hash(&mut hasher);
+        hasher.finish()
      } "#
 )]
 fn document_all_frame_infos(doc: &InternalDocument) -> HashMap<Iri, FrameInfo> {
@@ -1917,10 +1035,10 @@ fn document_all_frame_infos(doc: &InternalDocument) -> HashMap<Iri, FrameInfo> {
     size = 200,
     key = "u64",
     convert = r#"{
-            let mut hasher = DefaultHasher::new();
-            doc.hash(&mut hasher);
-            iri.hash(&mut hasher);
-            hasher.finish()
+        let mut hasher = DefaultHasher::new();
+        doc.hash(&mut hasher);
+        iri.hash(&mut hasher);
+        hasher.finish()
      } "#
 )]
 fn get_frame_info_helper(doc: &InternalDocument, iri: &Iri) -> Option<FrameInfo> {
@@ -2064,10 +1182,6 @@ impl ExternalDocument {
             .collect_vec()
     }
 
-    fn reachable_documents(&self) -> Vec<Url> {
-        self.imports()
-    }
-
     fn reachable_docs_recursive_helper(
         &self,
         workspace: &Workspace,
@@ -2182,11 +1296,19 @@ pub struct UnwrappedQueryMatch {
     _id: u32,
 }
 
+impl UnwrappedQueryMatch {
+    pub fn capture_by_name(&self, query: &Query, name: &str) -> Option<&UnwrappedQueryCapture> {
+        query
+            .capture_index_for_name(name)
+            .map(|i| &self.captures[i as usize])
+    }
+}
+
 /// This is a version of a query capture that has no reference to the tree or cursor
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnwrappedQueryCapture {
     pub node: UnwrappedNode,
-    _index: u32,
+    pub index: u32,
 }
 
 /// This is a version of a node that has no reference to the tree
@@ -2335,7 +1457,7 @@ fn trim_string_value(value: &str) -> String {
 }
 
 // TODO maybe use Arc<String>
-type Iri = String;
+pub type Iri = String;
 
 pub fn node_text<'a>(node: &Node, rope: &'a Rope) -> ropey::RopeSlice<'a> {
     rope.byte_slice(node.start_byte()..node.end_byte())
@@ -2550,13 +1672,311 @@ fn prefixes_helper(doc: &InternalDocument) -> HashMap<String, String> {
         .collect()
 }
 
+fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
+    let nest_depth = tab_size as isize;
+    let text = node_text(node, rope);
+    debug!(
+        "to_doc for {text} that is {} at {:?}",
+        node.kind(),
+        node.range()
+    );
+    let mut cursor = node.walk();
+
+    match node.kind() {
+        "source_file" => {
+            let prefix_docs = node.children_by_field_name(
+                "prefix", &mut cursor)
+            .map(|n| to_doc(&n, rope, tab_size)).collect_vec();
+            let ontology_doc = node.child_by_field_name("ontology")
+                .map(|n| to_doc(&n, rope, tab_size)).unwrap_or(RcDoc::nil());
+            if prefix_docs.is_empty() {
+                ontology_doc
+            } else {
+                RcDoc::intersperse([
+                    RcDoc::intersperse(prefix_docs , RcDoc::hardline()),
+                    ontology_doc
+                ], RcDoc::hardline().append(RcDoc::hardline()))
+            }
+        },
+        "ontology" =>
+            RcDoc::intersperse(
+        [
+            RcDoc::text("Ontology:")
+            .append(RcDoc::line())
+            .append(RcDoc::intersperse(
+                node.child_by_field_name("iri")
+                    .into_iter()
+                    .map(|n| to_doc(&n, rope, tab_size))
+                    .chain(
+                        node.child_by_field_name("version_iri")
+                            .into_iter()
+                            .map(|n| to_doc(&n, rope, tab_size)),
+                    ),
+                RcDoc::line(),
+            ))
+            .nest(nest_depth)
+            .group()
+        ,
+            // imports
+            RcDoc::intersperse(
+                node.children_by_field_name("import", &mut cursor.clone())
+                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
+                RcDoc::nil(),
+            )
+        ,
+            // annotations
+            RcDoc::intersperse(
+                node.children_by_field_name("annotations", &mut cursor.clone())
+                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
+                RcDoc::nil(),
+            )
+        ,
+            // frames
+            RcDoc::intersperse(
+                node.children_by_field_name("frame", &mut cursor)
+                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
+                RcDoc::hardline(),
+            )
+        ], RcDoc::hardline())
+
+        ,
+        "prefix_declaration" | "import" | "annotation" => RcDoc::intersperse(
+            node.children(&mut cursor)
+                .map(|n| to_doc(&n, rope, tab_size)),
+            RcDoc::line(),
+        )
+        .nest(nest_depth)
+        .group(),
+        "annotations"
+        // class
+        | "sub_class_of"
+        | "class_equivalent_to"
+        | "class_disjoint_with"
+        | "disjoint_union_of"
+        | "has_key"
+        // datatype
+        | "datatype_equavalent_to"
+        // individual
+        | "individual_facts"
+        | "individual_same_as"
+        | "individual_different_from"
+        | "individual_types"
+        // annotation property
+        | "annotation_property_domin"
+        | "annotation_property_range"
+        | "annotation_property_sub_property_of"
+        // data property
+        | "data_property_domain"
+        | "data_property_range"
+        | "data_property_characteristics"
+        | "data_property_sub_property_of"
+        | "data_property_equivalent_to"
+        | "data_property_disjoint_with"
+        // object property
+        |"domain"
+        |"range"
+        |"sub_property_of"
+        |"object_property_equivalent_to"
+        |"object_property_disjoint_with"
+        |"inverse_of"
+        |"characteristics"
+        |"sub_property_chain"
+        // misc
+        |"equivalent_classes"
+        |"disjoint_classes"
+        |"equivalent_object_properties"
+        |"disjoint_object_properties"
+        |"equivalent_data_properties"
+        |"disjoint_data_properties"
+        |"same_individual"
+        |"different_individuals"
+         => {
+            let mut docs = vec![];
+
+            // This should be the keyword
+            if let Some(child) = node.child(0) {
+                docs.push(to_doc(&child, rope, tab_size).append(RcDoc::line()));
+            }
+
+            for(is_seperator, chunk) in &node.children(&mut cursor).skip(1).chunk_by(|x| x.kind()==","||x.kind()=="o") {
+                if is_seperator {
+                    let n = &chunk.exactly_one()
+                            .map_err(|_|anyhow!("not one"))
+                        .expect("chunk should contain exacly one seperator node");
+
+                if n.kind()=="o" {
+                        docs.push(RcDoc::text(" o").append(RcDoc::line()));
+                    } else {
+                        docs.push(RcDoc::text(",").append(RcDoc::line()));
+                    }
+                } else {
+                    docs.push(RcDoc::intersperse(chunk.map(|n|to_doc(&n, rope, tab_size)), RcDoc::line()));
+                }
+            }
+
+            RcDoc::concat(docs).nest(nest_depth).group()
+        },
+        "description"
+         => {
+             let subs=node.children(&mut cursor).chunk_by(|n| n.kind()=="or").into_iter().map(|(is_or, chunks)|{
+                 if is_or {
+                     RcDoc::line().append(RcDoc::text("or").append(RcDoc::space()))
+                 } else {
+                     let conjunction_node = chunks.exactly_one().map_err(|_|anyhow!("not one")).unwrap();
+                     to_doc(&conjunction_node, rope, tab_size)
+                 }
+             }).collect_vec();
+            RcDoc::concat(subs)
+        },
+        "conjunction"
+         => {
+             let subs=node.children(&mut cursor).chunk_by(|n| n.kind()=="and").into_iter().map(|(is_or, chunks)|{
+                 if is_or {
+                     RcDoc::line().append(RcDoc::text("and").append(RcDoc::space()))
+                 } else {
+                     RcDoc::intersperse(chunks.map(|n| to_doc(&n, rope, tab_size)), RcDoc::space())
+                 }
+             }).collect_vec();
+            RcDoc::concat(subs)
+        },
+        "primary"=>{
+            RcDoc::intersperse(node.children(&mut cursor).map(|n|to_doc(&n, rope, tab_size)), RcDoc::space())
+        },
+        "nested_description"
+         => {
+            RcDoc::text("(").append(RcDoc::line()).append(
+                to_doc(&node.named_child(0).unwrap(), rope, tab_size)
+            ).nest(nest_depth).append(RcDoc::line()).append(")")
+        },
+        "class_frame"
+        | "datatype_frame"
+        | "data_property_frame"
+        | "object_property_frame"
+        | "annotation_property_frame"
+        | "individual_frame"
+         => node
+            .child(0)
+            .map(|n| to_doc(&n, rope, tab_size))
+            .unwrap_or(RcDoc::nil())
+            .append(RcDoc::line())
+            .append(
+                node.child(1)
+                    .map(|n| to_doc(&n, rope, tab_size))
+                    .unwrap_or(RcDoc::nil()),
+            )
+            .nest(nest_depth)
+            .group()
+            .append(RcDoc::hardline())
+            .append(RcDoc::intersperse(
+                node.children(&mut cursor)
+                    .skip(2)
+                    .map(|n| to_doc(&n, rope, tab_size)),
+                RcDoc::hardline(),
+            ))
+            .nest(nest_depth)
+            .group(),
+        _ => RcDoc::text(text), // this applies also to "ERROR" nodes!
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::position::Position;
-
     use super::*;
+    use crate::position::Position;
+    use indoc::indoc;
     use pretty_assertions::assert_eq;
     use test_log::test;
+
+    #[test]
+    fn internal_document_formatted_should_format_correctly() {
+        let doc = InternalDocument::new(
+            Url::parse("http://formatted").unwrap(),
+            -1,
+            indoc! {"
+                Prefix:  a:  <http://a/a>  Prefix:  a:  <http://a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa>    Ontology:   a   v   Import:    <http://a/a>    Import:    <http://a/a> Annotations:    rdfs:label     \"a\"    Class:   a   SubClassOf:   b,e,f SubClassOf:   cccccccccccccccccccccccc,ddddddddddddddddddddd,eeeeeeeeeee   Class:   a     SubClassOf: a    Annotations:   rdfs:label    \"Y\"    EquivalentTo:    a   ,   a DisjointWith:    a  ,  a   DisjointUnionOf:  Annotations: y 12, a 2    a,a    HasKey:    a
+            "}
+            .into(),
+        );
+
+        info!("sexp:\n{}", doc.tree.root_node().to_sexp());
+
+        let result = doc.formatted(4, 35);
+
+        assert_eq!(
+            result,
+            indoc! {"
+                Prefix: a: <http://a/a>
+                Prefix:
+                    a:
+                    <http://a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa>
+
+                Ontology: a v
+                Import: <http://a/a>
+                Import: <http://a/a>
+
+                Annotations: rdfs:label \"a\"
+
+                Class: a
+                    SubClassOf: b, e, f
+                    SubClassOf:
+                        cccccccccccccccccccccccc,
+                        ddddddddddddddddddddd,
+                        eeeeeeeeeee
+
+                Class: a
+                    SubClassOf: a
+                    Annotations: rdfs:label \"Y\"
+                    EquivalentTo: a, a
+                    DisjointWith: a, a
+                    DisjointUnionOf:
+                        Annotations: y 12, a 2
+                        a,
+                        a
+                    HasKey: a
+            "}
+        );
+    }
+
+    #[test]
+    fn internal_document_formatted_with_description_should_format_correctly() {
+        let doc = InternalDocument::new(
+            Url::parse("http://formatted").unwrap(),
+            -1,
+            indoc! {r#"
+                Ontology:a
+                Class: a
+                SubClassOf:   (aaaaaaaa and bbbbbb)    or   (bbbb and hasRel some (ccccccc or ddddddd or eeeeeeeee))
+            "#}
+            .into(),
+        );
+
+        info!("sexp:\n{}", doc.tree.root_node().to_sexp());
+
+        let result = doc.formatted(4, 35);
+
+        assert_eq!(
+            result,
+            indoc! {r#"
+                Ontology: a
+
+
+                Class: a
+                    SubClassOf:
+                        (
+                            aaaaaaaa
+                            and bbbbbb
+                        )
+                        or (
+                            bbbb
+                            and hasRel some (
+                                ccccccc
+                                or ddddddd
+                                or eeeeeeeee
+                            )
+                        )
+            "#}
+        );
+    }
 
     #[test]
     fn internal_document_ontology_id_should_return_none() {
@@ -2778,7 +2198,7 @@ mod tests {
         .unwrap();
 
         // Act
-        let urls = external_doc.reachable_documents();
+        let urls = external_doc.imports();
 
         // Assert
         assert!(urls.contains(&Url::parse("http://www.example.com/other-property").unwrap()));
