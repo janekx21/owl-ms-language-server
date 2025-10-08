@@ -1,10 +1,10 @@
-use crate::{catalog::Catalog, web::StaticClient, *};
-use anyhow::anyhow;
+use crate::{catalog::Catalog, *};
+use dashmap::DashMap;
 use indoc::indoc;
 use pos::Position;
 use pretty_assertions::assert_eq;
 use ropey::Rope;
-use std::{fs, path::Path, thread};
+use std::{fs, path::Path};
 use tempdir::{self, TempDir};
 use test_log::test;
 use tower_lsp::LspService;
@@ -19,6 +19,7 @@ use tree_sitter_c2rust::Parser;
 
 #[test]
 fn parse_ontology_should_work() {
+    setup();
     // Arrange
     let mut parser = arrange_parser();
 
@@ -34,6 +35,7 @@ fn parse_ontology_should_work() {
 #[test]
 /// This test should initilize all queries and therefore check if they are valid
 fn deref_all_queries_should_be_valid() {
+    setup();
     let _ = *ALL_QUERIES;
 }
 
@@ -43,6 +45,7 @@ fn deref_all_queries_should_be_valid() {
 
 #[test(tokio::test)]
 async fn backend_did_open_should_create_document() {
+    setup();
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
@@ -66,14 +69,14 @@ async fn backend_did_open_should_create_document() {
     // Assert
     let workspaces = service.inner().workspaces.read();
     let workspace = workspaces.iter().exactly_one().unwrap();
+    let workspace = workspace.read();
 
     let docs = workspace.internal_documents.iter().collect_vec();
 
     let doc = docs
         .iter()
         .exactly_one()
-        .map_err(|_| anyhow!("Should be exactly one"))
-        .unwrap()
+        .unwrap_or_else(|_| panic!("Should be exactly one"))
         .value()
         .read();
 
@@ -85,7 +88,8 @@ async fn backend_did_open_should_create_document() {
 
 /// This tests if the "did_change" feature works on the lsp. It takes the document DEF and adds two changes resolving in ABCDEFGHI.
 #[test(tokio::test)]
-async fn backend_did_change_should_update_internal_rope() {
+async fn backend_did_change_should_update_internal_rope() -> error::Result<()> {
+    setup();
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
@@ -139,7 +143,8 @@ async fn backend_did_change_should_update_internal_rope() {
         .await;
 
     // Assert
-    let workspace = service.inner().find_workspace(&ontology_url);
+    let workspace = service.inner().find_workspace(&ontology_url)?;
+    let workspace = workspace.read();
 
     let doc = workspace
         .internal_documents
@@ -149,10 +154,12 @@ async fn backend_did_change_should_update_internal_rope() {
     let doc_content = doc.rope.to_string();
 
     assert_eq!(doc_content, "A😊BCDE😊FGH😊I");
+    Ok(())
 }
 
 #[test(tokio::test)]
 async fn backend_hover_on_class_should_show_class_info() {
+    setup();
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
@@ -315,6 +322,7 @@ async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
 
 #[test(tokio::test)]
 async fn backend_hover_in_multi_file_ontology_should_work() {
+    setup();
     // Arrange
     let (service, tmp_dir) = arrange_multi_file_ontology().await;
 
@@ -360,6 +368,7 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
 
 #[test(tokio::test)]
 async fn backend_hover_in_multi_file_ontology_on_not_imported_iri_should_not_work() {
+    setup();
     // Arrange
     let (service, tmp_dir) = arrange_multi_file_ontology().await;
 
@@ -395,6 +404,7 @@ async fn backend_hover_in_multi_file_ontology_on_not_imported_iri_should_not_wor
 
 #[test(tokio::test)]
 async fn backend_hover_on_external_simple_iri_should_show_external_info() {
+    setup();
     // Arrange
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![WorkspaceMember::Folder {
@@ -502,6 +512,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
 
 #[test(tokio::test)]
 async fn backend_hover_on_external_full_iri_should_show_external_info() {
+    setup();
     // Arrange
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![WorkspaceMember::Folder {
@@ -606,6 +617,7 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
 }
 #[test(tokio::test)]
 async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_external_info() {
+    setup();
     // Arrange
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![WorkspaceMember::Folder {
@@ -704,7 +716,8 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
 }
 
 #[test(tokio::test)]
-async fn backend_formatting_on_file_should_correctly_format() {
+async fn backend_formatting_on_file_should_correctly_format() -> error::Result<()> {
+    setup();
     // Arrange
 
     let source = indoc! {"
@@ -831,16 +844,18 @@ async fn backend_formatting_on_file_should_correctly_format() {
         })
         .await;
 
-    let ws = service.inner().find_workspace(&url);
-    // let ws = workspaces.iter().exactly_one().unwrap();
-    let doc = ws.internal_documents.get(&url).unwrap();
+    let workspace = service.inner().find_workspace(&url)?;
+    let workspace = workspace.read();
+    let doc = workspace.internal_documents.get(&url).unwrap();
     let doc = doc.read();
     assert_eq!(doc.diagnostics, vec![], "doc:\n{}", doc.rope.to_string());
     assert_eq!(doc.rope.to_string(), target);
+    Ok(())
 }
 
 #[test(tokio::test)]
 async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
+    setup();
     // Arrange
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![WorkspaceMember::Folder {
@@ -955,6 +970,7 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
 
 #[test(tokio::test)]
 async fn backend_import_resolve_should_load_documents() {
+    setup();
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|dir| {
@@ -1004,6 +1020,7 @@ async fn backend_import_resolve_should_load_documents() {
     let workspaces = service.inner().workspaces.read();
     assert_eq!(workspaces.len(), 1, "all files should be in one workspace");
     let workspace = workspaces.first().unwrap();
+    let workspace = workspace.read();
     info!(" Workspace documents {:#?}", workspace.internal_documents);
     let document_count = workspace.internal_documents.iter().count();
     assert_eq!(document_count, 2);
@@ -1011,6 +1028,7 @@ async fn backend_import_resolve_should_load_documents() {
 
 #[test(tokio::test)]
 async fn backend_did_change_should_remove_old_infos() {
+    setup();
     // Arrange
     let service = arrange_backend(None, vec![]).await;
 
@@ -1058,6 +1076,7 @@ Class: class-in-first-file
 
     let workspaces = service.inner().workspaces.read();
     let workspace = workspaces.iter().exactly_one().unwrap();
+    let workspace = workspace.read();
     let document = workspace
         .internal_documents
         .iter()
@@ -1076,6 +1095,7 @@ Class: class-in-first-file
 
 #[test(tokio::test)]
 async fn backend_workspace_symbols_should_work() {
+    setup();
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|dir| {
@@ -1164,6 +1184,7 @@ async fn backend_workspace_symbols_should_work() {
 
 #[test(tokio::test)]
 async fn backend_did_open_should_load_external_documents_via_http() {
+    setup();
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|dir| {
@@ -1251,6 +1272,7 @@ async fn backend_did_open_should_load_external_documents_via_http() {
         .iter()
         .exactly_one()
         .expect("Only one workspace should be crated");
+    let workspace = workspace.read();
 
     assert_eq!(
         workspace.internal_documents.len(),
@@ -1266,6 +1288,7 @@ async fn backend_did_open_should_load_external_documents_via_http() {
 
 #[test(tokio::test)]
 async fn backend_did_open_should_load_external_documents_via_file() {
+    setup();
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|dir| {
@@ -1338,13 +1361,13 @@ async fn backend_did_open_should_load_external_documents_via_file() {
         .await;
 
     // Assert
-
     assert_empty_diagnostics(&service);
     let workspaces = service.inner().workspaces.read();
     let workspace = workspaces
         .iter()
         .exactly_one()
         .expect("Only one workspace should be crated");
+    let workspace = workspace.read();
 
     assert_eq!(
         workspace.internal_documents.len(),
@@ -1360,6 +1383,7 @@ async fn backend_did_open_should_load_external_documents_via_file() {
 
 #[test(tokio::test)]
 async fn backend_completion_should_work_for_keyword_class() {
+    setup();
     let ontology = indoc! {r#"
         Ontology: <http://foo.org/a>
 
@@ -1372,6 +1396,7 @@ async fn backend_completion_should_work_for_keyword_class() {
 
 #[test(tokio::test)]
 async fn backend_completion_should_work_for_keyword_class_at_the_end() {
+    setup();
     let ontology = indoc! {r#"
         Ontology: <http://foo.org/a> Version
 
@@ -1382,6 +1407,7 @@ async fn backend_completion_should_work_for_keyword_class_at_the_end() {
 
 #[test(tokio::test)]
 async fn backend_completion_should_work_for_keyword_datatype() {
+    setup();
     let ontology = indoc! {r#"
         Ontology: <http://foo.org/a>
 
@@ -1394,6 +1420,7 @@ async fn backend_completion_should_work_for_keyword_datatype() {
 
 #[test(tokio::test)]
 async fn backend_completion_should_work_for_keyword_integer() {
+    setup();
     let ontology = indoc! {r#"
         Ontology: <http://foo.org/a>
 
@@ -1407,6 +1434,7 @@ async fn backend_completion_should_work_for_keyword_integer() {
 
 #[test(tokio::test)]
 async fn backend_completion_should_work_for_keyword_some() {
+    setup();
     let ontology = indoc! {r#"
         Ontology: <http://foo.org/a>
 
@@ -1421,6 +1449,7 @@ async fn backend_completion_should_work_for_keyword_some() {
 
 #[test(tokio::test)]
 async fn backend_completion_should_work_for_keyword_functionnal() {
+    setup();
     let ontology = indoc! {r#"
         Ontology: <http://foo.org/a>
 
@@ -1474,6 +1503,8 @@ async fn backend_completion_test_helper(partial: &str, full: &str, ontology: &st
         })
         .await;
 
+    let pos = pos.into_lsp(&rope, &PositionEncodingKind::UTF16).unwrap();
+
     // Act
 
     let result = service
@@ -1481,7 +1512,7 @@ async fn backend_completion_test_helper(partial: &str, full: &str, ontology: &st
         .completion(CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url },
-                position: pos.into_lsp(&rope, &PositionEncodingKind::UTF16),
+                position: pos,
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -1514,6 +1545,7 @@ async fn backend_completion_test_helper(partial: &str, full: &str, ontology: &st
 
 #[test(tokio::test)]
 async fn backend_completion_should_not_panic() {
+    setup();
     // Arrange
 
     let tmp_dir = arrange_workspace_folders(|_| vec![]);
@@ -1575,6 +1607,7 @@ async fn backend_completion_should_not_panic() {
 
 #[test(tokio::test)]
 async fn backend_references_in_multi_file_ontology_should_work() {
+    setup();
     // Arrange
     let (service, tmp_dir) = arrange_multi_file_ontology().await;
 
@@ -1613,6 +1646,7 @@ async fn backend_references_in_multi_file_ontology_should_work() {
 
 #[test(tokio::test)]
 async fn backend_goto_definition_in_multi_file_ontology_should_work() {
+    setup();
     // Arrange
     let (service, tmp_dir) = arrange_multi_file_ontology().await;
 
@@ -1653,6 +1687,7 @@ async fn backend_goto_definition_in_multi_file_ontology_should_work() {
 #[test(tokio::test)]
 async fn backend_document_symbols_in_multi_file_ontology_should_just_show_symbols_from_active_file()
 {
+    setup();
     // Arrange
     let (service, tmp_dir) = arrange_multi_file_ontology().await;
 
@@ -1686,6 +1721,7 @@ async fn backend_document_symbols_in_multi_file_ontology_should_just_show_symbol
 
 #[test(tokio::test)]
 async fn backend_rename_simple_iri_should_work() {
+    setup();
     let ontology = indoc! {"
         Prefix: : <https://example.com/ontology#>
         Prefix: o: <https://example.com/ontology#>
@@ -1708,6 +1744,7 @@ async fn backend_rename_simple_iri_should_work() {
 
 #[test(tokio::test)]
 async fn backend_rename_at_end_should_work() {
+    setup();
     let ontology = indoc! {"
         Prefix: : <https://example.com/ontology#>
 
@@ -1726,6 +1763,7 @@ async fn backend_rename_at_end_should_work() {
 
 #[test(tokio::test)]
 async fn backend_rename_prefixless_simple_iri_should_work() {
+    setup();
     let ontology = indoc! {"
         Ontology:
         Class: B
@@ -1742,6 +1780,7 @@ async fn backend_rename_prefixless_simple_iri_should_work() {
 
 #[test(tokio::test)]
 async fn backend_rename_unknown_abbriviated_iri_should_work() {
+    setup();
     let ontology = indoc! {"
         Ontology:
         Class: unknown:B
@@ -1758,6 +1797,7 @@ async fn backend_rename_unknown_abbriviated_iri_should_work() {
 
 #[test(tokio::test)]
 async fn backend_rename_full_iri_should_shorten() {
+    setup();
     let ontology = indoc! {"
         Prefix: : <https://example.com/ontology#>
         Prefix: o: <https://example.com/ontology#>
@@ -1786,6 +1826,7 @@ async fn backend_rename_full_iri_should_shorten() {
 
 #[test(tokio::test)]
 async fn backend_rename_abbriviated_iri_should_work_for_matching() {
+    setup();
     let ontology = indoc! {"
         Prefix: o: <https://example.com/ontology#>
 
@@ -1806,6 +1847,7 @@ async fn backend_rename_abbriviated_iri_should_work_for_matching() {
 
 #[test(tokio::test)]
 async fn backend_rename_full_iri_should_work_for_matching() {
+    setup();
     let ontology = indoc! {"
         Ontology:
         Class: <https://example.com/ontology#B>
@@ -1828,6 +1870,7 @@ async fn backend_rename_full_iri_should_work_for_matching() {
 
 #[test(tokio::test)]
 async fn backend_rename_full_iri_should_not_shorten() {
+    setup();
     let ontology = indoc! {"
         Prefix: o: <https://example.com/ontology#B>
 
@@ -1876,12 +1919,17 @@ async fn backend_rename_helper(
         })
         .await;
 
-    let pos = {
-        let workspace = service.inner().find_workspace(&url);
-        let doc = workspace.internal_documents.get(&url).unwrap();
-        let doc = doc.read();
-        position.into_lsp(&doc.rope, &PositionEncodingKind::UTF16)
-    };
+    let pos = position
+        .into_lsp(
+            &service
+                .inner()
+                .get_internal_document(&url)
+                .unwrap()
+                .read()
+                .rope,
+            &PositionEncodingKind::UTF16,
+        )
+        .unwrap();
 
     // Act
     let result = service
@@ -1928,6 +1976,7 @@ async fn backend_rename_helper(
 
     let workspaces = service.inner().workspaces.read();
     let workspace = workspaces.iter().exactly_one().unwrap();
+    let workspace = workspace.read();
     let doc = workspace.internal_documents.get(&url).unwrap();
     let doc = doc.read();
     let doc_content = doc.rope.to_string();
@@ -1935,9 +1984,55 @@ async fn backend_rename_helper(
     assert_eq!(doc_content, new_ontology);
 }
 
+#[test(tokio::test)]
+#[should_panic]
+#[ignore = "panic not working. using abort but that cant be detected"]
+async fn lock_test() {
+    setup();
+    info!("lock test...");
+    let a = RwLock::new(());
+    let mut w = a.write();
+    let r = a.read();
+    *w = ();
+    info!("{r:?}");
+}
+
 //////////////////////////
-// Arrange
+// Setup & Arrange
 //////////////////////////
+
+/// The setup is for setting up test fixture stuff. No test data or otherwise test dependent stuff is set up here.
+fn setup() {
+    setup_deadlock_detection();
+}
+
+fn setup_deadlock_detection() {
+    use parking_lot::deadlock;
+    use std::thread;
+    use std::time::Duration;
+
+    thread::spawn(|| {
+        // Create a background thread which checks for deadlocks every 1s
+        loop {
+            thread::sleep(Duration::from_secs(10));
+            let deadlocks = deadlock::check_deadlock();
+            if deadlocks.is_empty() {
+                continue;
+            }
+
+            error!("{} deadlocks detected", deadlocks.len());
+            for (i, threads) in deadlocks.iter().enumerate() {
+                error!("Deadlock #{}", i);
+                for t in threads {
+                    error!("Thread Id {:#?}", t.thread_id());
+                    error!("{:#?}", t.backtrace());
+                }
+            }
+            // panic sadly does not stop the test BECAUSE it is deadlocked :<
+            std::process::abort();
+        }
+    });
+}
 
 #[derive(Debug, Clone)]
 enum WorkspaceMember {
@@ -2058,9 +2153,25 @@ async fn arrange_backend(
 fn assert_empty_diagnostics(service: &LspService<Backend>) {
     let workspaces = service.inner().workspaces.read();
     for workspace in workspaces.iter() {
+        let workspace = workspace.read();
         for doc in workspace.internal_documents.iter() {
             let doc = doc.value().read();
             assert_eq!(doc.diagnostics, vec![], "rope:\n{}", doc.rope.to_string());
         }
+    }
+}
+
+pub struct StaticClient {
+    pub data: DashMap<String, String>,
+}
+
+impl HttpClient for StaticClient {
+    fn get(&self, url: &str) -> MyResult<String> {
+        info!("Resolving {url} in static client");
+        Ok(self
+            .data
+            .get(url)
+            .unwrap_or_else(|| panic!("the url {url} should be defined"))
+            .to_string())
     }
 }

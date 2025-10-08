@@ -29,6 +29,7 @@ pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn keyword_hover_info(kind: &str) -> String {
     match kind{
             "keyword_prefix" => indoc! {"
@@ -932,6 +933,6 @@ pub fn keyword_hover_info(kind: &str) -> String {
 
                 [Specification](https://www.w3.org/TR/owl2-syntax/#Individual_Inequality)
             "}.to_string(),
-            _ => "".into(),
+            _ => String::new(),
         }
 }
