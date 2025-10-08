@@ -10,18 +10,22 @@ use crate::{
 };
 use cached::proc_macro::cached;
 use cached::SizedCache;
-use core::fmt;
 use dashmap::DashMap;
-use horned_owl::io::ParserConfiguration;
 use horned_owl::model::Component::AnnotationAssertion;
-use horned_owl::model::{ArcStr, Build};
-use horned_owl::ontology::iri_mapped::ArcIRIMappedOntology;
+use horned_owl::model::{AnnotationSubject, AnnotationValue, ArcStr, Build, Literal};
 use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use pretty::RcDoc;
 use ropey::Rope;
+use sophia::api::graph::{Graph, MutableGraph};
+use sophia::api::prelude::Any;
+use sophia::api::source::TripleSource;
+use sophia::api::term::{BnodeId, LanguageTag, SimpleTerm, Term};
+use sophia::api::MownStr;
+use sophia::inmem::graph::LightGraph;
+use sophia::iri::IriRef;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter::once;
@@ -120,9 +124,10 @@ impl Workspace {
         document: ExternalDocument,
     ) -> Arc<RwLock<ExternalDocument>> {
         debug!(
-            "Insert external document {} length is {}",
+            "Insert external document {} length is {} into workspace at {}",
             document.uri,
-            document.text.len()
+            document.text.len(),
+            self.folder.uri
         );
         let uri = document.uri.clone();
         let arc = Arc::new(RwLock::new(document));
@@ -150,6 +155,10 @@ impl Workspace {
     ///
     /// - `iri` should be a full iri
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
+        debug!(
+            "getting workspace frame info for {iri} on {}",
+            self.folder.uri
+        );
         let external_infos = self.external_documents.iter().filter_map(|doc| {
             let mut doc = doc.write();
             doc.get_frame_info(iri)
@@ -304,6 +313,23 @@ impl Workspace {
         }
     }
 
+    /// Resolves a URL (file or http/https protocol) to a document that is inserted into this workspace
+    pub fn resolve_prefix_url_to_document(
+        workspace: &Arc<RwLock<Workspace>>,
+        url: &Url,
+        client: &dyn HttpClient,
+    ) -> Result<DocumentReference> {
+        let w = workspace.read();
+        if let Some(doc) = w.get_document_by_url(url) {
+            return Ok(doc);
+        }
+
+        let document_text = client.get(url.as_str())?;
+        let document = ExternalDocument::new(document_text, url.clone())?;
+        let document = w.insert_external_document(document);
+        Ok(DocumentReference::External(document))
+    }
+
     fn resolve_path_to_document(
         workspace: &Arc<RwLock<Workspace>>,
         path: &Path,
@@ -362,7 +388,7 @@ pub struct InternalDocument {
 impl core::hash::Hash for InternalDocument {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.uri.hash(state);
-        self.version.hash(state);
+        Hash::hash(&self.version, state);
     }
 }
 impl Eq for InternalDocument {}
@@ -473,7 +499,7 @@ impl InternalDocument {
         Ok(())
     }
 
-    fn imports(&self) -> Vec<Url> {
+    pub fn imports(&self) -> Vec<Url> {
         imports_helper(self)
     }
 
@@ -621,7 +647,7 @@ impl InternalDocument {
             .next()
     }
 
-    /// Returns the prefixes of a document (without colon :)
+    /// Returns the prefixes of a document (without colon :) in a prefix name to iri map.
     ///
     /// Some prefixes should always be defined
     ///
@@ -988,10 +1014,89 @@ fn document_definitions(doc: &InternalDocument) -> Vec<(String, Range, String)> 
 }
 
 /// External documents are ontologies that are not expected to change in any way.
+#[derive(Debug)]
 pub struct ExternalDocument {
     pub uri: Url,
     pub text: String,
-    pub ontology: ArcIRIMappedOntology,
+    pub graph: InfoGraph,
+}
+
+#[derive(Debug)]
+pub struct InfoGraph(LightGraph);
+
+impl From<SetOntology<ArcStr>> for InfoGraph {
+    fn from(value: SetOntology<ArcStr>) -> Self {
+        let mut graph = LightGraph::new();
+
+        let ontology_iri = &value.iter().find_map(|ac| match &ac.component {
+            horned_owl::model::Component::OntologyID(horned_owl::model::OntologyID {
+                iri: Some(id),
+                viri: _,
+            }) => Some(SimpleTerm::Iri(IriRef::new(MownStr::from_ref(id)).unwrap())),
+            _ => None,
+        });
+
+        for ac in &value {
+            match &ac.component {
+                AnnotationAssertion(aa) => match &aa.subject {
+                    AnnotationSubject::IRI(iri) => {
+                        let subject = SimpleTerm::Iri(IriRef::new(MownStr::from_ref(iri)).unwrap());
+                        let predicate =
+                            SimpleTerm::Iri(IriRef::new(MownStr::from_ref(&aa.ann.ap)).unwrap());
+                        let object = match &aa.ann.av {
+                            AnnotationValue::Literal(literal) => match literal {
+                                Literal::Simple { literal } => SimpleTerm::LiteralDatatype(
+                                    literal.clone().into(),
+                                    IriRef::new_unchecked(MownStr::from_ref(
+                                        "http://www.w3.org/2001/XMLSchema#string",
+                                    )),
+                                ),
+                                Literal::Language { literal, lang } => SimpleTerm::LiteralLanguage(
+                                    literal.clone().into(),
+                                    LanguageTag::new(lang.clone().into()).unwrap(),
+                                ),
+                                Literal::Datatype {
+                                    literal,
+                                    datatype_iri,
+                                } => SimpleTerm::LiteralDatatype(
+                                    literal.clone().into(),
+                                    IriRef::new(MownStr::from_ref(datatype_iri)).unwrap(),
+                                ),
+                            },
+                            AnnotationValue::IRI(iri) => {
+                                SimpleTerm::Iri(IriRef::new(MownStr::from_ref(iri)).unwrap())
+                            }
+                            AnnotationValue::AnonymousIndividual(anonymous_individual) => {
+                                SimpleTerm::BlankNode(
+                                    BnodeId::new(MownStr::from_ref(anonymous_individual)).unwrap(),
+                                )
+                            }
+                        };
+
+                        if graph.insert(subject, predicate, object).is_err() {
+                            // This sould not happen :>
+                            error!("The term index is full");
+                        }
+                    }
+                    AnnotationSubject::AnonymousIndividual(_) => {
+                        // TODO support anonymous individual
+                    }
+                },
+                horned_owl::model::Component::Import(horned_owl::model::Import(iri)) => {
+                    if let Some(subject) = ontology_iri {
+                        let predicate = SimpleTerm::Iri(IriRef::new_unchecked(MownStr::from_ref(
+                            "http://www.w3.org/2002/07/owl#imports",
+                        )));
+                        let object = SimpleTerm::Iri(IriRef::new(MownStr::from_ref(iri)).unwrap());
+                        graph.insert(subject, predicate, object).unwrap();
+                    }
+                }
+                _ => (),
+            }
+        }
+
+        Self(graph)
+    }
 }
 
 impl Hash for ExternalDocument {
@@ -1000,63 +1105,89 @@ impl Hash for ExternalDocument {
     }
 }
 
-impl fmt::Debug for ExternalDocument {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ExternalDocument")
-            .field("uri", &self.uri)
-            .field("text.len()", &self.text.len())
-            .field("ontology.iter()", &self.ontology.iter())
-            .finish()
-    }
-}
-
 impl ExternalDocument {
     /// The ontology type is currently determent by the url extention
     pub fn new(text: String, url: Url) -> Result<ExternalDocument> {
-        let b = horned_owl::model::Build::new_arc();
+        debug!("try creating external document {url}\n{text}");
+        let builder = lock_global_build_arc();
+
+        // Try parsing different styles
+        // - first owx then rdf
+        // This could try more styles in the future
+
+        debug!("try owx...");
         let mut buffer = text.as_bytes();
+        let doc = horned_owl::io::owx::reader::read_with_build::<ArcStr, SetOntology<ArcStr>, _>(
+            &mut buffer,
+            &builder,
+        )
+        .map_err(Error::HornedOwl)
+        .map(|(ontology, _)| {
+            let graph: InfoGraph = ontology.into();
 
-        match url.path().rsplit_once('.') {
-            // TODO parse both
-            Some((_, "owx")) => {
-                let (ontology, _) = horned_owl::io::owx::reader::read_with_build(&mut buffer, &b)?;
+            // TODO maybe try the other parser...
+            // if graph.0.triples().count() == 0 {
+            //     return Err(Error::DocumentEmpty(url.clone()));
+            // }
 
-                Ok(ExternalDocument {
+            ExternalDocument {
+                uri: url.clone(),
+                text: text.clone(),
+                graph,
+            }
+        })
+        .or_else(|e| {
+            warn!("owx failed with {e}");
+            debug!("try rdf...");
+
+            let graph = sophia::xml::parser::parse_str(&text)
+                .collect_triples::<LightGraph>()
+                .map_err(|e| Error::Sophia(format!("{e}")))
+                .map(|g| ExternalDocument {
                     uri: url,
                     text,
-                    ontology,
-                })
+                    graph: InfoGraph(g),
+                });
+            graph
+        });
+
+        debug!(
+            "parsing worked! {} turtle:\n{}",
+            doc.as_ref().unwrap().uri,
+            {
+                use sophia::api::serializer::Stringifier;
+                use sophia::api::serializer::TripleSerializer;
+                use sophia::turtle::serializer::nt::NtSerializer;
+                let mut nt_stringifier = NtSerializer::new_stringifier();
+                let graph = &doc.as_ref().unwrap().graph.0;
+                let str = nt_stringifier.serialize_graph(&graph).unwrap().as_str();
+                str.to_string()
             }
-            // For owl files and files without extention
-            _ => {
-                let (ontology, _) = horned_owl::io::rdf::reader::read_with_build(
-                    &mut buffer,
-                    &b,
-                    ParserConfiguration::default(),
-                )?;
-
-                let ontology = SetOntology::from_index(ontology.i().clone());
-
-                let ontology = ArcIRIMappedOntology::from(ontology);
-
-                Ok(ExternalDocument {
-                    uri: url,
-                    text,
-                    ontology,
-                })
-            }
-        }
+        );
+        doc
     }
 
     fn imports(&self) -> Vec<Url> {
-        self.ontology
-            .iter()
-            .filter_map(|ac| match &ac.component {
-                horned_owl::model::Component::Import(import) => Some(Url::parse(&import.0)),
-                _ => None,
-            })
-            .filter_map(std::result::Result::ok)
-            .collect_vec()
+        let graph = &self.graph.0;
+        let iris = graph
+            .triples_matching(
+                Any,
+                |p: SimpleTerm<'_>| {
+                    p.iri()
+                        .is_some_and(|iri| iri.as_str() == "http://www.w3.org/2002/07/owl#imports")
+                },
+                Any,
+            )
+            .inspect(|a| debug!("inspect={a:?}"))
+            .flatten()
+            .filter_map(|[_, _, o]| o.iri())
+            .flat_map(|iri| Url::parse(&iri))
+            .unique()
+            .collect_vec();
+
+        debug!("iris={iris:#?}");
+
+        iris
     }
 
     fn reachable_docs_recursive_helper(
@@ -1097,7 +1228,10 @@ impl ExternalDocument {
     }
 
     pub fn get_frame_info(&mut self, iri: &Iri) -> Option<FrameInfo> {
-        get_frame_info_helper_ex(self, iri)
+        debug!("getting frame info for {iri} on {}", self.uri);
+        let o = get_frame_info_helper_ex(self, iri);
+        debug!("found {o:#?}");
+        o
     }
 }
 
@@ -1112,38 +1246,30 @@ impl ExternalDocument {
      } "#
 )]
 fn get_frame_info_helper_ex(doc: &mut ExternalDocument, iri: &Iri) -> Option<FrameInfo> {
-    let iri_mapped_ontology = &mut doc.ontology;
+    let graph = &doc.graph.0;
 
-    let build = lock_global_build_arc();
-    let iri = build.iri(iri.clone());
+    graph
+        .triples_matching(
+            |s: SimpleTerm| s.iri().is_some_and(|subject| subject.as_str() == iri),
+            Any,
+            Any,
+        )
+        .flatten()
+        .map(|[_, p, o]| {
+            let ps = p.iri().unwrap();
+            let os = o
+                .lexical_form()
+                .map_or_else(|| o.iri().unwrap().to_string(), |l| l.to_string());
 
-    iri_mapped_ontology
-        .components_for_iri(&iri)
-        .filter_map(|c| match &c.component {
-            AnnotationAssertion(aa) => match &aa.subject {
-                horned_owl::model::AnnotationSubject::IRI(iri_) if iri_ == &iri => {
-                    Some(aa.ann.clone())
-                }
-                _ => None,
-            },
-            _ => None,
-        })
-        .filter_map(|annotation| match annotation.av {
-            horned_owl::model::AnnotationValue::Literal(horned_owl::model::Literal::Simple {
-                literal,
-            }) => {
-                let annotations = once((annotation.ap.0.to_string(), vec![literal])).collect();
-                Some(FrameInfo {
-                    iri: iri.to_string(),
-                    annotations,
-                    frame_type: FrameType::Class,
-                    definitions: vec![Location {
-                        uri: doc.uri.clone(),
-                        range: Range::ZERO,
-                    }],
-                })
+            FrameInfo {
+                iri: iri.clone(),
+                annotations: once((format!("{ps}"), vec![format!("{os}")])).collect(),
+                frame_type: FrameType::Unknown,
+                definitions: vec![Location {
+                    uri: doc.uri.clone(),
+                    range: Range::ZERO,
+                }],
             }
-            _ => None,
         })
         .tree_reduce(FrameInfo::merge)
 }
@@ -1225,6 +1351,7 @@ impl FrameInfo {
             }
         }
         self.definitions.extend(b.definitions);
+        self.definitions.dedup();
         self.frame_type = match (self.frame_type, b.frame_type) {
             (a, b) if a == b => a,
             (FrameType::Unknown, b) => b,
@@ -1255,6 +1382,8 @@ impl FrameInfo {
         let label = self
             .label()
             .unwrap_or(trim_url_before_last(&self.iri).to_string());
+
+        debug!("frame annotations {:#?}", self.annotations);
 
         let annotations = self
             .annotations
@@ -1977,18 +2106,6 @@ mod tests {
         // Assert
         let doc = external_doc.unwrap();
         assert_eq!(doc.text, ontology_text);
-
-        doc.ontology.iter().for_each(|ac| match &ac.component {
-            horned_owl::model::Component::DeclareClass(declare_class) => {
-                let iri = &(declare_class.0).0;
-                assert_eq!(&iri[..], "https://www.example.com/o1");
-            }
-            horned_owl::model::Component::OntologyID(ontology_id) => {
-                let iri = ontology_id.iri.clone().unwrap();
-                assert_eq!(&iri[..], "http://www.example.com/iri");
-            }
-            _ => {}
-        });
     }
 
     #[test]

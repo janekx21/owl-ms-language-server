@@ -1,9 +1,14 @@
 use crate::{catalog::Catalog, *};
 use dashmap::DashMap;
+use horned_owl::{
+    io::{OWXParserConfiguration, ParserConfiguration, RDFParserConfiguration},
+    model::{AnnotatedComponent, Build},
+};
 use indoc::indoc;
 use pos::Position;
 use pretty_assertions::assert_eq;
 use ropey::Rope;
+use sophia::api::term::SimpleTerm;
 use std::{fs, path::Path};
 use tempdir::{self, TempDir};
 use test_log::test;
@@ -42,6 +47,114 @@ fn deref_all_queries_should_be_valid() {
 ///////////////////////////////////////////
 // Backend Tests
 //////////////////////////////////////////
+
+#[test]
+#[ignore = "This was just a spice for messing around"]
+fn horned_owl_should_parse_rdf_xml() {
+    let x = r##"    
+<rdf:RDF xmlns="http://www.example.com/iri#"
+     xml:base="http://www.example.com/iri"
+     xmlns:o="http://www.example.com/iri#"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://www.example.com/iri">
+        <owl:versionIRI rdf:resource="http://www.example.com/viri"/>
+    </owl:Ontology>
+
+    <owl:Class rdf:about="http://www.example.com/iri#C"/>
+
+</rdf:RDF>"##;
+    let mut buffer = x.as_bytes();
+
+    let b = Build::new_string();
+
+    let a =
+        horned_owl::io::rdf::reader::read_with_build::<String, AnnotatedComponent<String>, &[u8]>(
+            &mut buffer,
+            &b,
+            ParserConfiguration {
+                rdf: RDFParserConfiguration { lax: true },
+                owx: OWXParserConfiguration::default(),
+            },
+        )
+        .unwrap();
+    info!("{a:?}");
+}
+
+#[test]
+#[ignore = "This was just a spice for messing around"]
+fn sophia_should_parse_rdf_xml() {
+    use sophia::api::prelude::*;
+    use sophia::inmem::graph::LightGraph;
+
+    use sophia::turtle::serializer::nt::NtSerializer;
+    let x = r##"    
+<rdf:RDF xmlns="http://www.example.com/iri#"
+     xml:base="http://www.example.com/iri"
+     xmlns:o="http://www.example.com/iri#"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://www.example.com/iri">
+        <owl:versionIRI rdf:resource="http://www.example.com/viri"/>
+    </owl:Ontology>
+
+    <owl:Class rdf:about="http://www.example.com/iri#C"/>
+
+    <rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#seeAlso">
+      <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+      <rdfs:label>seeAlso</rdfs:label>
+      <rdfs:comment>Further information about the subject resource.</rdfs:comment>
+      <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+      <rdfs:domain   rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+    </rdf:Property>
+</rdf:RDF>"##;
+
+    let graph: LightGraph = sophia::xml::parser::parse_str(x).collect_triples().unwrap();
+
+    let triples = graph
+        .triples_matching(
+            |s: SimpleTerm| {
+                s.iri()
+                    .map(|iri| iri.as_str() == "http://www.w3.org/2000/01/rdf-schema#seeAlso")
+                    .unwrap_or(false)
+            },
+            Any,
+            Any,
+        )
+        .flatten()
+        .flat_map(
+            |[subject, predicate, object]| match (subject, predicate, object) {
+                (SimpleTerm::Iri(r), _, c) => {
+                    info!("Found one {c:#?}");
+                    Some(r)
+                }
+                _ => None,
+            },
+        );
+    for a in triples {
+        info!("{a}");
+    }
+
+    // for [a, b, c] in triples {
+    //     let a = a.iri().unwrap();
+    //     let a = a.as_str();
+    //     let b = b.iri().unwrap();
+    //     let b = b.as_str();
+    //     let c = c.iri().unwrap();
+    //     let c = c.as_str();
+    //     info!("{a},{b},{c}");
+    // }
+
+    let mut nt_stringifier = NtSerializer::new_stringifier();
+    let example2 = nt_stringifier.serialize_graph(&graph).unwrap().as_str();
+    info!("nt={example2:#?}");
+}
 
 #[test(tokio::test)]
 async fn backend_did_open_should_create_document() {
@@ -1284,6 +1397,192 @@ async fn backend_did_open_should_load_external_documents_via_http() {
         1,
         "One external document should be loaded"
     );
+}
+
+#[test(tokio::test)]
+async fn backend_did_open_should_load_external_rdf_via_http() {
+    setup();
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "foo".into(),
+        }),
+        vec![(
+            "http://www.w3.org/2000/01/rdf-schema#",
+            r##"<?xml version="1.0"?>
+<rdf:RDF xmlns="http://www.example.com/iri#"
+     xml:base="http://www.example.com/iri"
+     xmlns:o="http://www.example.com/iri#"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://www.example.com/iri">
+        <owl:versionIRI rdf:resource="http://www.example.com/viri"/>
+    </owl:Ontology>
+
+    <owl:Class rdf:about="http://www.example.com/iri#C"/>
+</rdf:RDF>"##,
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("has-rdf.omn")).unwrap();
+
+    let ontology = r"
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Ontology: <http://foo.org/has-rdf>
+            Class: some-class
+                Annotations:
+                    rdfs:seeAlso somer-other-class
+
+            Class: some-other-class
+    ";
+
+    // Act
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+
+    assert_empty_diagnostics(&service);
+    let workspaces = service.inner().workspaces.read();
+    info!("{workspaces:#?}");
+    let workspace = workspaces
+        .iter()
+        .exactly_one()
+        .expect("Only one workspace should be crated");
+
+    let workspace = workspace.read();
+
+    assert_eq!(
+        workspace.internal_documents.len(),
+        1,
+        "One internal document should be loaded. It was given"
+    );
+
+    info!("{:#?}", workspace.external_documents);
+    assert_eq!(
+        workspace.external_documents.len(),
+        1,
+        "One external document should be loaded"
+    );
+}
+
+#[test(tokio::test)]
+async fn backend_hover_should_use_external_rdf_info() {
+    setup();
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "foo".into(),
+        }),
+        vec![(
+            "http://www.w3.org/2000/01/rdf-schema#",
+            r##"
+                <rdf:RDF
+                    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+                    xmlns:owl="http://www.w3.org/2002/07/owl#"
+                    xmlns:dc="http://purl.org/dc/elements/1.1/">
+
+                <owl:Ontology
+                     rdf:about="http://www.w3.org/2000/01/rdf-schema#"
+                     dc:title="The RDF Schema vocabulary (RDFS)"/>
+
+                <rdfs:Class rdf:about="http://www.w3.org/2000/01/rdf-schema#Resource">
+                    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+                    <rdfs:label>Resource</rdfs:label>
+                    <rdfs:comment>The class resource, everything.</rdfs:comment>
+                </rdfs:Class>
+
+                <rdf:Property rdf:about="http://www.w3.org/2000/01/rdf-schema#seeAlso">
+                    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/2000/01/rdf-schema#"/>
+                    <rdfs:label>Seeeeee Alsooooooo</rdfs:label>
+                    <rdfs:comment>Further information about the subject resource.</rdfs:comment>
+                    <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+                    <rdfs:domain   rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+                </rdf:Property>
+
+                </rdf:RDF>
+            "##,
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("has-rdf.omn")).unwrap();
+
+    let ontology = indoc! {r#"
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Ontology: <http://foo.org/has-rdf>
+            Class: some-class
+                Annotations:
+                    rdfs:seeAlso "bar"
+
+            Class: some-other-class
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    let result = service
+        .inner()
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url },
+                position: tower_lsp::lsp_types::Position {
+                    line: 2,
+                    character: 13,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await;
+
+    // Assert
+
+    assert_empty_diagnostics(&service);
+    let result = result.unwrap();
+    let result = result.unwrap();
+    let contents = result.contents;
+    let string = match contents {
+        HoverContents::Scalar(MarkedString::String(string)) => string,
+        _ => todo!(),
+    };
+    info!("string={string}");
+    assert!(string.contains("Seeeeee Alsooooooo"));
 }
 
 #[test(tokio::test)]
