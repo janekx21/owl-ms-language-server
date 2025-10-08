@@ -67,13 +67,15 @@ pub struct AllQueries {
     pub prefix: Query,
 }
 
+// All queries are in one struct for easy testing. Invalid ones are detected by unit tests.
 pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
     import_query: Query::new(
         &LANGUAGE,
         "(import [(full_iri) (simple_iri) (abbreviated_iri)]@iri)",
     )
-    .unwrap(),
-    iri_query: Query::new(&LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri").unwrap(),
+    .expect("valid query"),
+    iri_query: Query::new(&LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri")
+        .expect("valid query"),
     annotation_query: Query::new(
         &LANGUAGE,
         "
@@ -88,7 +90,7 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
                     ]@literal)))
         ",
     )
-    .unwrap(),
+    .expect("valid query"),
     frame_query: Query::new(
         &LANGUAGE,
         "
@@ -102,14 +104,14 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
             ]@frame
         ",
     )
-    .unwrap(),
+    .expect("valid query"),
     prefix: Query::new(
         &LANGUAGE,
         "
             (prefix_declaration (prefix_name)@name (full_iri)@iri)
         ",
     )
-    .unwrap(),
+    .expect("valid query"),
 });
 
 /// Tree-sitter grammar specification
@@ -291,7 +293,7 @@ mod tests {
                         SubClassOf: class-in-other-file
         "#;
         let mut parser_guard = lock_global_parser();
-        let tree = parser_guard.parse(text, None).unwrap();
+        let tree = parser_guard.parse(text, None).expect("valid query");
         let mut query_cursor = QueryCursor::new();
 
         // Act
@@ -320,7 +322,7 @@ mod tests {
         }
         "#;
 
-        let grammar: Grammar = serde_json::from_str(json).unwrap();
+        let grammar: Grammar = serde_json::from_str(json).expect("valid query");
         assert_eq!(grammar.name, "test_grammar");
         assert_eq!(grammar.rules.len(), 2);
     }
@@ -343,7 +345,7 @@ mod tests {
         }
         "#;
 
-        let rule: Rule = serde_json::from_str(json).unwrap();
+        let rule: Rule = serde_json::from_str(json).expect("valid query");
         match rule {
             Rule::Seq { members } => {
                 assert_eq!(members.len(), 2);
@@ -356,7 +358,7 @@ mod tests {
     fn from_str_node_types_should_be_valid() {
         let json = tree_sitter_owl_ms::GRAMMAR;
 
-        let grammar: Grammar = serde_json::from_str(json).unwrap();
+        let grammar: Grammar = serde_json::from_str(json).expect("valid query");
         assert_eq!(grammar.name, "owl_ms");
     }
 
