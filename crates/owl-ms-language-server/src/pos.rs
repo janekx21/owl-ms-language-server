@@ -3,7 +3,7 @@ use ropey::Rope;
 
 /// Zero and utf-8 byte offst based 2D text position.
 /// Positions are always related to documents (rope or string).
-/// There are special functions for converting fro LSP types.
+/// There are special functions for converting from and to LSP types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Position {
     line: u32,

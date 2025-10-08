@@ -256,17 +256,14 @@ impl LanguageServer for Backend {
         let url = &params.text_document.uri;
         let workspace = self.find_workspace(url);
 
-        debug!("!");
         if let Some(document) = workspace
             .internal_documents
             .get_mut(&params.text_document.uri)
         {
-            debug!("?");
             let mut document = document.write();
             document.edit(&params, &self.position_encoding.read());
 
             let uri = params.text_document.uri.clone();
-            // let diagnostics = document.diagnostics.clone();
             let diagnostics = document
                 .diagnostics
                 .iter()
@@ -575,7 +572,6 @@ impl LanguageServer for Backend {
         let workspace = self.find_workspace(&uri);
         if let Some(doc) = workspace.internal_documents.get(&uri) {
             let doc = doc.read();
-            // let range: Range = params.range.into();
             let range = Range::from_lsp(&params.range, &doc.rope, &self.position_encoding.read());
             let tokens = doc.sematic_tokens(Some(range), &self.position_encoding.read());
 
@@ -595,7 +591,6 @@ impl LanguageServer for Backend {
         let workspace = self.find_workspace(&url);
         if let Some(doc) = workspace.internal_documents.get(&url) {
             let infos = doc.read().get_all_frame_infos();
-            // drop(doc);
             return Ok(Some(DocumentSymbolResponse::Flat(
                 #[allow(deprecated)] // All fields need to be specified
                 infos
@@ -1004,7 +999,7 @@ impl Backend {
         let mut workspaces = self
             .workspaces
             .try_upgradable_read_for(Duration::from_secs(5))
-            .expect("a read in 1sec");
+            .expect("a read in 5sec");
         debug!("read locked workspace");
         // TODO there are problems when the workspace is changing
         // - A document could be in its own workspace
@@ -1041,8 +1036,6 @@ impl Backend {
         };
 
         let workspaces = RwLockUpgradableReadGuard::downgrade(workspaces);
-        // drop(workspaces);
-        // let workspaces = self.workspaces.read_recursive();
 
         RwLockReadGuard::map(workspaces, |ws| {
             ws.iter()

@@ -390,11 +390,11 @@ impl InternalDocument {
         }
     }
 
-    pub fn formatted(&self, tab_size: u32, ruler_with: usize) -> String {
+    pub fn formatted(&self, tab_size: u32, ruler_width: usize) -> String {
         let root = self.tree.root_node();
         let doc = to_doc(&root, &self.rope, tab_size);
         debug!("doc:\n{:#?}", doc);
-        doc.pretty(ruler_with).to_string()
+        doc.pretty(ruler_width).to_string()
     }
 
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
@@ -911,9 +911,6 @@ impl InternalDocument {
             } else {
                 start.character // some other line
             };
-            // let length = node_text(&node, &doc.rope).len_bytes() as u32;
-            // let length = Position::new(0, length);
-            // let length = length.into_lsp(&doc.rope, encoding).character;
 
             if range.start.line != range.end.line {
                 panic!("Highlights dont span multiple lines")
@@ -928,7 +925,6 @@ impl InternalDocument {
                 token_modifiers_bitset: 0,
             };
 
-            // last_start =  node.start_position();
             last_line = start.line;
             last_character = start.character;
             tokens.push(token);
@@ -1493,19 +1489,7 @@ pub fn gen_diagnostics(node: &Node) -> Vec<(Range, String)> {
                 let parent = node_type_to_string(parent_kind);
                 let msg = format!("Syntax Error. expected {valid_children} inside {parent}");
 
-                diagnostics.push(
-                    (range, msg.to_string()),
-                    // Diagnostic {
-                    // range: range.into_lsp(doc),
-                    // severity: Some(DiagnosticSeverity::ERROR),
-                    // code: None,
-                    // code_description: None,
-                    // source: Some("owl language server".to_string()),
-                    // message: msg.to_string(),
-                    // related_information: None,
-                    // tags: None,
-                    // data: None,
-                );
+                diagnostics.push((range, msg.to_string()));
             }
             // move along
             while !cursor.goto_next_sibling() {
