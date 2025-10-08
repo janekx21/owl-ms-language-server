@@ -124,3 +124,19 @@ jobs:
     - name: Publish on VSCE
       working-directory: editors/code
       run: npx @vscode/vsce publish --pat ${{ secrets.PAT_VSCE }} --target ${{ matrix.target }}
+
+  publish-crate:
+    runs-on: ubuntu-latest
+    name: Publish to crates.io
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Rust toolchain
+      run: |
+        rustup update --no-self-update stable
+        rustup default stable
+
+    - name: Publish crate
+      run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}      
