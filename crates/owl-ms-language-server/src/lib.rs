@@ -1,7 +1,7 @@
 mod catalog;
 mod consts;
 pub mod debugging;
-mod position;
+mod pos;
 mod queries;
 mod range;
 pub mod rope_provider;
@@ -14,13 +14,13 @@ use debugging::timeit;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
-use parking_lot::{MappedRwLockWriteGuard, RwLock, RwLockWriteGuard};
-use position::Position;
+use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockUpgradableReadGuard};
+use pos::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
 use range::Range;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::time::Duration;
 use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
@@ -37,7 +37,7 @@ pub static LANGUAGE: Lazy<Language> = Lazy::new(|| tree_sitter_owl_ms::LANGUAGE.
 
 pub struct Backend {
     pub client: Client,
-    position_encoding: Mutex<PositionEncodingKind>,
+    position_encoding: RwLock<PositionEncodingKind>,
     workspaces: RwLock<Vec<Workspace>>,
     pub http_client: Arc<dyn HttpClient>,
 }
@@ -63,21 +63,22 @@ impl LanguageServer for Backend {
     /// Does not load or index the files inside the workspaces.
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         info!("Initialize language server -----------------------------");
+        debug!("Client capabilities:\n{:#?}", params.capabilities);
+        debug!("Client locale:\n{:#?}", params.locale);
+        debug!("Client info:\n{:#?}", params.client_info);
 
         let encodings = params
             .capabilities
             .general
             .and_then(|g| g.position_encodings)
-            .unwrap_or(vec![PositionEncodingKind::UTF16]);
+            .unwrap_or_default();
 
-        let encoding = if encodings.contains(&PositionEncodingKind::UTF8) {
+        let mut position_encoding = self.position_encoding.write();
+        *position_encoding = if encodings.contains(&PositionEncodingKind::UTF8) {
             PositionEncodingKind::UTF8
         } else {
             PositionEncodingKind::UTF16
         };
-
-        let mut position_encoding = self.position_encoding.lock().await;
-        *position_encoding = encoding.clone();
 
         let mut workspaces = self.workspaces.write();
         *workspaces = params
@@ -98,7 +99,7 @@ impl LanguageServer for Backend {
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
-                position_encoding: Some(encoding),
+                position_encoding: Some(position_encoding.clone()),
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
@@ -195,7 +196,7 @@ impl LanguageServer for Backend {
             let range: Range = doc.tree.root_node().range().into();
 
             return Ok(Some(vec![TextEdit {
-                range: range.into(),
+                range: range.into_lsp(&doc.rope, &self.position_encoding.read()),
                 new_text: text,
             }]));
         }
@@ -214,12 +215,24 @@ impl LanguageServer for Backend {
             params.text_document.text,
         );
 
+        let diagnostics = internal_document
+            .diagnostics
+            .iter()
+            .map(|(range, msg)| Diagnostic {
+                range: range.into_lsp(&internal_document.rope, &self.position_encoding.read()),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("owl language server".to_string()),
+                message: msg.clone(),
+                related_information: None,
+                tags: None,
+                data: None,
+            })
+            .collect_vec();
+
         self.client
-            .publish_diagnostics(
-                url.clone(),
-                internal_document.diagnostics.clone(),
-                Some(internal_document.version),
-            )
+            .publish_diagnostics(url.clone(), diagnostics, Some(internal_document.version))
             .await;
 
         let document = workspace.insert_internal_document(internal_document);
@@ -248,10 +261,24 @@ impl LanguageServer for Backend {
             .get_mut(&params.text_document.uri)
         {
             let mut document = document.write();
-            document.edit(&params);
+            document.edit(&params, &self.position_encoding.read());
 
             let uri = params.text_document.uri.clone();
-            let diagnostics = document.diagnostics.clone();
+            let diagnostics = document
+                .diagnostics
+                .iter()
+                .map(|(range, msg)| Diagnostic {
+                    range: range.into_lsp(&document.rope, &self.position_encoding.read()),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("owl language server".to_string()),
+                    message: msg.clone(),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                })
+                .collect_vec();
             let client = self.client.clone();
             let version = Some(document.version);
             task::spawn(async move {
@@ -287,14 +314,18 @@ impl LanguageServer for Backend {
         let workspace = self.find_workspace(&url);
 
         Ok(workspace.internal_documents.get(&url).and_then(|document| {
-            let document = document.read();
-            let pos: Position = params.text_document_position_params.position.into();
-            let node = document
+            let doc = document.read();
+            let pos: Position = Position::from_lsp(
+                &params.text_document_position_params.position,
+                &doc.rope,
+                &self.position_encoding.read(),
+            );
+            let node = doc
                 .tree
                 .root_node()
                 .named_descendant_for_point_range(pos.into(), pos.into())
                 .unwrap();
-            let info = workspace.node_info(&node, &document);
+            let info = workspace.node_info(&node, &doc);
 
             if info.is_empty() {
                 None
@@ -303,7 +334,7 @@ impl LanguageServer for Backend {
                 let range: Range = node.range().into();
                 Some(Hover {
                     contents: HoverContents::Scalar(MarkedString::String(info)),
-                    range: Some(range.into()),
+                    range: Some(range.into_lsp(&doc.rope, &self.position_encoding.read())),
                 })
             }
         }))
@@ -311,12 +342,6 @@ impl LanguageServer for Backend {
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         let url = params.text_document.uri;
-        let range = params.range.into();
-
-        debug!(
-            "inlay_hint at {}:{range}",
-            url.path_segments().unwrap().next_back().unwrap()
-        );
 
         let workspace = self.find_workspace(&url);
         let document = if let Some(doc) = workspace.internal_documents.get(&url) {
@@ -328,8 +353,22 @@ impl LanguageServer for Backend {
         };
 
         let document = document.read();
+        let range = Range::from_lsp(
+            &params.range,
+            &document.rope,
+            &self.position_encoding.read(),
+        );
+        debug!(
+            "inlay_hint at {}:{range}",
+            url.path_segments().unwrap().next_back().unwrap()
+        );
 
-        let hints = document.inlay_hint(range, &workspace, &*self.http_client);
+        let hints = document.inlay_hint(
+            range,
+            &workspace,
+            &*self.http_client,
+            &self.position_encoding.read(),
+        );
 
         Ok(Some(hints))
     }
@@ -344,7 +383,11 @@ impl LanguageServer for Backend {
         let maybe_doc = workspace.internal_documents.get(&uri);
         if let Some(doc) = maybe_doc {
             let doc = doc.read();
-            let pos: Position = params.text_document_position_params.position.into();
+            let pos: Position = Position::from_lsp(
+                &params.text_document_position_params.position,
+                &doc.rope,
+                &self.position_encoding.read(),
+            );
 
             let leaf_node = doc
                 .tree
@@ -369,10 +412,13 @@ impl LanguageServer for Backend {
                             if l.range == Range::ZERO {
                                 u32::MAX // No range? Then put this at the end
                             } else {
-                                l.range.start.line
+                                l.range.start.line()
                             }
                         })
-                        .map(|l| l.clone().into())
+                        .map(|l| {
+                            l.clone()
+                                .into_lsp(&doc.rope, &__self.position_encoding.read())
+                        })
                         .collect_vec();
 
                     return Ok(Some(GotoDefinitionResponse::Array(locations)));
@@ -406,8 +452,8 @@ impl LanguageServer for Backend {
                     url,
                     vec![TextEdit {
                         range: lsp_types::Range {
-                            start: end.into(),
-                            end: end.into(),
+                            start: end.into_lsp(&doc.rope, &self.position_encoding.read()),
+                            end: end.into_lsp(&doc.rope, &self.position_encoding.read()),
                         },
                         new_text:
                             "\nClass: new_class\n    Annotations:\n        rdfs:label \"new class\""
@@ -423,16 +469,22 @@ impl LanguageServer for Backend {
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         debug!(
-            "completion at {}",
-            params.text_document_position.text_document.uri
+            "completion at {} {:?} {:?}",
+            params.text_document_position.text_document.uri,
+            params.text_document_position.position,
+            self.position_encoding.read()
         );
         let url = params.text_document_position.text_document.uri;
         let workspace = self.find_workspace(&url);
         let doc = workspace.internal_documents.get(&url);
-        let pos: Position = params.text_document_position.position.into();
 
         Ok(doc.map(|doc| {
             let doc = doc.read();
+            let pos: Position = Position::from_lsp(
+                &params.text_document_position.position,
+                &doc.rope,
+                &self.position_encoding.read(),
+            );
 
             let kws = timeit("try_keywords_at_position", || {
                 doc.try_keywords_at_position(pos)
@@ -440,10 +492,7 @@ impl LanguageServer for Backend {
 
             debug!("The resultingn kws are {kws:#?}");
 
-            let pos_one_left = Position {
-                line: pos.line,
-                character: pos.character.checked_sub(1).unwrap_or_default(),
-            };
+            let pos_one_left = pos.moved_left(1, &doc.rope);
 
             let keywords_completion_items = kws.into_iter().map(|keyword| CompletionItem {
                 label: keyword,
@@ -465,17 +514,21 @@ impl LanguageServer for Backend {
                 let iris: Vec<CompletionItem> = workspace
                     .search_frame(&partial_text)
                     .iter()
-                    .map(|(full_iri, frame)| {
+                    .filter_map(|(full_iri, frame)| {
                         let iri = doc
                             .full_iri_to_abbreviated_iri(full_iri.clone())
                             .unwrap_or(format!("<{full_iri}>"));
 
-                        CompletionItem {
-                            label: iri,
-                            kind: Some(CompletionItemKind::REFERENCE),
-                            detail: Some(frame.info_display(&workspace)),
-                            // TODO #29 add details from the frame
-                            ..Default::default()
+                        if iri == partial_text {
+                            None
+                        } else {
+                            Some(CompletionItem {
+                                label: iri,
+                                kind: Some(CompletionItemKind::REFERENCE),
+                                detail: Some(frame.info_display(&workspace)),
+                                // TODO #29 add details from the frame
+                                ..Default::default()
+                            })
                         }
                     })
                     // TODO #29 add items for simple iri, abbriviated iri and full iri
@@ -500,7 +553,7 @@ impl LanguageServer for Backend {
         if let Some(doc) = workspace.internal_documents.get(&uri) {
             let doc = doc.read();
 
-            let tokens = doc.sematic_tokens(None);
+            let tokens = doc.sematic_tokens(None, &self.position_encoding.read());
 
             return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
                 result_id: None,
@@ -519,8 +572,8 @@ impl LanguageServer for Backend {
         let workspace = self.find_workspace(&uri);
         if let Some(doc) = workspace.internal_documents.get(&uri) {
             let doc = doc.read();
-            let range: Range = params.range.into();
-            let tokens = doc.sematic_tokens(Some(range));
+            let range = Range::from_lsp(&params.range, &doc.rope, &self.position_encoding.read());
+            let tokens = doc.sematic_tokens(Some(range), &self.position_encoding.read());
 
             return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
                 result_id: None,
@@ -538,21 +591,24 @@ impl LanguageServer for Backend {
         let workspace = self.find_workspace(&url);
         if let Some(doc) = workspace.internal_documents.get(&url) {
             let infos = doc.read().get_all_frame_infos();
-            drop(doc);
             return Ok(Some(DocumentSymbolResponse::Flat(
                 #[allow(deprecated)] // All fields need to be specified
                 infos
                     .iter()
-                    .map(|info| SymbolInformation {
-                        name: info.iri.clone(),
-                        kind: info.frame_type.into(),
-                        tags: None,
-                        deprecated: None,
-                        location: Location {
-                            uri: url.clone(),
-                            range: info.definitions.first().unwrap().range.into(), //TODO remove unwrap
-                        },
-                        container_name: None,
+                    .flat_map(|info| {
+                        info.definitions.iter().map(|def| SymbolInformation {
+                            name: info.iri.clone(),
+                            kind: info.frame_type.into(),
+                            tags: None,
+                            deprecated: None,
+                            location: Location {
+                                uri: url.clone(),
+                                range: def
+                                    .range
+                                    .into_lsp(&doc.read().rope, &self.position_encoding.read()),
+                            },
+                            container_name: None,
+                        })
                     })
                     .collect_vec(),
             )));
@@ -584,13 +640,31 @@ impl LanguageServer for Backend {
             })
             .flat_map(|fi| {
                 #[allow(deprecated)] // All fields need to be specified
-                fi.definitions.iter().map(|definition| SymbolInformation {
-                    name: fi.iri.clone(),
-                    kind: fi.frame_type.into(),
-                    tags: None,
-                    deprecated: None,
-                    location: definition.clone().into(),
-                    container_name: None,
+                fi.definitions.iter().map(|definition| {
+                    let url = &definition.uri;
+                    let location = self
+                        .find_workspace(url)
+                        .internal_documents
+                        .get(url)
+                        .map(|doc| {
+                            let doc = doc.read();
+                            definition
+                                .clone()
+                                .into_lsp(&doc.rope, &self.position_encoding.read())
+                        })
+                        .unwrap_or(Location {
+                            uri: url.clone(),
+                            range: lsp_types::Range::default(),
+                        });
+
+                    SymbolInformation {
+                        name: fi.iri.clone(),
+                        kind: fi.frame_type.into(),
+                        tags: None,
+                        deprecated: None,
+                        location,
+                        container_name: None,
+                    }
                 })
             })
             .collect_vec();
@@ -600,15 +674,20 @@ impl LanguageServer for Backend {
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         let url = params.text_document_position.text_document.uri;
-        let position: Position = params.text_document_position.position.into();
 
         let workspace = self.find_workspace(&url);
         if let Some(doc) = workspace.internal_documents.get(&url) {
             let doc = doc.read();
+            let pos: Position = Position::from_lsp(
+                &params.text_document_position.position,
+                &doc.rope,
+                &self.position_encoding.read(),
+            );
+
             let node = doc
                 .tree
                 .root_node()
-                .named_descendant_for_point_range(position.into(), position.into())
+                .named_descendant_for_point_range(pos.into(), pos.into())
                 .unwrap();
 
             let full_iri_option = match node.kind() {
@@ -656,7 +735,8 @@ impl LanguageServer for Backend {
                                 if iri == full_iri {
                                     Some(Location {
                                         uri: doc.uri.clone(),
-                                        range: range.into(),
+                                        range: range
+                                            .into_lsp(&doc.rope, &self.position_encoding.read()),
                                     })
                                 } else {
                                     None
@@ -676,11 +756,12 @@ impl LanguageServer for Backend {
         params: TextDocumentPositionParams,
     ) -> Result<Option<PrepareRenameResponse>> {
         let url = params.text_document.uri;
-        let position: Position = params.position.into();
 
         let workspace = self.find_workspace(&url);
         let x = if let Some(doc) = workspace.internal_documents.get(&url) {
             let doc = doc.read();
+            let pos: Position =
+                Position::from_lsp(&params.position, &doc.rope, &self.position_encoding.read());
 
             fn node_range(position: Position, doc: &InternalDocument) -> Option<Range> {
                 debug!("prepare_rename try {position:?}");
@@ -705,9 +786,11 @@ impl LanguageServer for Backend {
 
                 match node.kind() {
                     "full_iri" => {
-                        let mut range: Range = node.range().into();
-                        range.start.character += 1;
-                        range.end.character -= 1;
+                        let range: Range = node.range().into();
+                        let range = Range {
+                            start: range.start.moved_right(1, &doc.rope),
+                            end: range.end.moved_left(1, &doc.rope),
+                        };
                         Some(range)
                     }
                     "simple_iri" => {
@@ -715,30 +798,34 @@ impl LanguageServer for Backend {
                         Some(range)
                     }
                     "abbreviated_iri" => {
-                        let mut range: Range = node.range().into();
+                        let range: Range = node.range().into();
                         let text = node_text(&node, &doc.rope).to_string();
                         let col_offset = text.find(':').unwrap() + 1;
-                        range.start.character += col_offset as u32;
+                        let range = Range {
+                            start: range.start.moved_right(col_offset as u32, &doc.rope),
+                            ..range
+                        };
                         Some(range)
                     }
                     _ => None,
                 }
             }
 
-            let range = node_range(position, &doc)
+            let range = node_range(pos, &doc)
                 .or_else(|| {
                     // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
                     // For example: ThisIsSomeIri| other text
                     //                           ^
                     //                       Cursor
                     debug!("prepare rename try one position left");
-                    let position = Position {
-                        line: position.line,
-                        character: position.character.saturating_sub(1),
-                    };
+                    let position = pos.moved_left(1, &doc.rope);
                     node_range(position, &doc)
                 })
-                .map(|range| PrepareRenameResponse::Range(range.into()));
+                .map(|range| {
+                    PrepareRenameResponse::Range(
+                        range.into_lsp(&doc.rope, &self.position_encoding.read()),
+                    )
+                });
             debug!("prepare rename found range {range:?}");
 
             Ok(range)
@@ -750,15 +837,27 @@ impl LanguageServer for Backend {
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        debug!("rename {params:?}");
         let url = params.text_document_position.text_document.uri;
-        let position: Position = params.text_document_position.position.into();
         let new_name = params.new_name;
-
-        debug!("rename {url}:{position:?} with {new_name}");
 
         let workspace = self.find_workspace(&url);
         if let Some(doc) = workspace.internal_documents.get(&url) {
-            let doc = doc.read();
+            debug!("is doc locked {}", doc.is_locked());
+
+            let doc = doc
+                .try_read_recursive_for(Duration::from_secs(1))
+                .expect("a read lock to work");
+            debug!("read doc");
+            let pos: Position = Position::from_lsp(
+                &params.text_document_position.position,
+                &doc.rope,
+                &self
+                    .position_encoding
+                    .try_read_recursive_for(Duration::from_secs(1))
+                    .expect("a read lock to work"),
+            );
+            debug!("rename {url}:{pos:?} with {new_name}");
 
             fn rename_helper(
                 position: Position,
@@ -804,16 +903,13 @@ impl LanguageServer for Backend {
                 }
             }
 
-            let old_and_new_iri = rename_helper(position, &doc, new_name.clone()).or_else(|| {
+            let old_and_new_iri = rename_helper(pos, &doc, new_name.clone()).or_else(|| {
                 // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
                 // For example: ThisIsSomeIri| other text
                 //                           ^
                 //                       Cursor
                 debug!("prepare rename try one position left");
-                let position = Position {
-                    line: position.line,
-                    character: position.character.saturating_sub(1),
-                };
+                let position = pos.moved_left(1, &doc.rope);
                 rename_helper(position, &doc, new_name)
             });
 
@@ -826,7 +922,10 @@ impl LanguageServer for Backend {
                     .internal_documents
                     .iter()
                     .map(|doc| {
-                        let doc = doc.value().read();
+                        let doc = doc
+                            .value()
+                            .try_read_recursive_for(Duration::from_secs(1))
+                            .expect("a read lock to work");
                         let edits = doc
                             .query(&ALL_QUERIES.iri_query)
                             .into_iter()
@@ -856,7 +955,10 @@ impl LanguageServer for Backend {
                                 };
                                 if iri == full_iri && iri_kind == parent_kind {
                                     Some(TextEdit {
-                                        range: range.into(),
+                                        range: range.into_lsp(
+                                            &doc.rope,
+                                            &self.position_encoding.read_recursive(),
+                                        ),
                                         new_text: new_iri
                                             .clone()
                                             .map(|new_iri| {
@@ -892,9 +994,13 @@ impl LanguageServer for Backend {
 
 impl Backend {
     /// This will find a workspace or create one for a given url
-    fn find_workspace<'a>(&'a self, url: &Url) -> MappedRwLockWriteGuard<'a, Workspace> {
-        let mut workspaces = self.workspaces.write();
-
+    fn find_workspace<'a>(&'a self, url: &Url) -> MappedRwLockReadGuard<'a, Workspace> {
+        debug!("find workspace");
+        let mut workspaces = self
+            .workspaces
+            .try_upgradable_read_for(Duration::from_secs(5))
+            .expect("a read in 5sec");
+        debug!("read locked workspace");
         // TODO there are problems when the workspace is changing
         // - A document could be in its own workspace
         // - Then a catalog file is created or modified that would place a document in that workspace
@@ -917,15 +1023,22 @@ impl Backend {
                     uri: Url::from_file_path(file_path).expect("Valid URL from filepath"),
                     name: "Single File".into(),
                 };
+                debug!("try workspaces write...");
+                // let mut workspaces = self.workspaces.write();
                 let workspace = Workspace::new(workspace_folder.clone());
-                workspaces.push(workspace);
+                workspaces.with_upgraded(|w| {
+                    debug!("locked workspace");
+                    w.push(workspace);
+                });
                 workspace_folder
             }
             Some(w) => w.workspace_folder.clone(),
         };
 
-        RwLockWriteGuard::map(workspaces, |ws| {
-            ws.iter_mut()
+        let workspaces = RwLockUpgradableReadGuard::downgrade(workspaces);
+
+        RwLockReadGuard::map(workspaces, |ws| {
+            ws.iter()
                 .find(|w| w.workspace_folder == folder)
                 .expect("The file to be located in a workspace, but it was not.")
         })

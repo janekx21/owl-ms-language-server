@@ -1,6 +1,6 @@
 use crate::catalog::CatalogUri;
 use crate::consts::{get_fixed_infos, keyword_hover_info};
-use crate::position::Position;
+use crate::pos::Position;
 use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type_index};
 use crate::web::HttpClient;
 use crate::{
@@ -36,8 +36,8 @@ use std::{
     sync::Arc,
 };
 use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
-    SemanticToken, SymbolKind, Url, WorkspaceFolder,
+    DidChangeTextDocumentParams, InlayHint, InlayHintLabel, PositionEncodingKind, SemanticToken,
+    SymbolKind, Url, WorkspaceFolder,
 };
 use tree_sitter_c2rust::{
     InputEdit, Node, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
@@ -352,7 +352,7 @@ pub struct InternalDocument {
     pub tree: Tree,
     pub rope: Rope,
     pub version: i32,
-    pub diagnostics: Vec<Diagnostic>,
+    pub diagnostics: Vec<(Range, String)>, // Not using the LSP type
 }
 
 impl core::hash::Hash for InternalDocument {
@@ -390,11 +390,11 @@ impl InternalDocument {
         }
     }
 
-    pub fn formatted(&self, tab_size: u32, ruler_with: usize) -> String {
+    pub fn formatted(&self, tab_size: u32, ruler_width: usize) -> String {
         let root = self.tree.root_node();
         let doc = to_doc(&root, &self.rope, tab_size);
         debug!("doc:\n{:#?}", doc);
-        doc.pretty(ruler_with).to_string()
+        doc.pretty(ruler_width).to_string()
     }
 
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
@@ -534,7 +534,7 @@ impl InternalDocument {
             .collect_vec()
     }
 
-    pub fn edit(&mut self, params: &DidChangeTextDocumentParams) {
+    pub fn edit(&mut self, params: &DidChangeTextDocumentParams, enconding: &PositionEncodingKind) {
         if self.version >= params.text_document.version {
             return; // no change needed
         }
@@ -551,28 +551,23 @@ impl InternalDocument {
         debug!("content changes {:#?}", params.content_changes);
 
         // This range is relative to the *old* document not the new one
-        let change_ranges = params
+        params
             .content_changes
             .iter()
             // First I thougt the order must be changed but the LSP defines it as "S -> S' -> S''"
             //  https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#didChangeTextDocumentParams
-            .map(|change| {
-                if let Some(range) = change.range {
-                    let old_range: Range = range.into();
-                    let start_char = self
-                        .rope
-                        .try_line_to_char(old_range.start.line as usize)
-                        .expect("line_idx out of bounds")
-                        + (old_range.start.character as usize);
-
-                    let old_end_char = self
-                        .rope
-                        .try_line_to_char(old_range.end.line as usize)
-                        .expect("line_idx out of bounds")
-                        + (old_range.end.character as usize); // exclusive
+            .for_each(|change| {
+                let range = change.range.expect("range to be defined"); 
+                    // LSP ranges are in bytes when encoding is utf-8!!!
+                    let old_range: Range = Range::from_lsp(&range, &self.rope, enconding);
+                    let start_byte = old_range.start.byte_index(&self.rope);
+                    let old_end_byte = old_range.end.byte_index(&self.rope);
 
                     // must come before the rope is changed!
-                    let old_end_byte = self.rope.char_to_byte(old_end_char);
+                    let start_char = self.rope.byte_to_char(start_byte);
+                    let old_end_char = self.rope.byte_to_char(old_end_byte);
+
+                    debug!("change range in chars {start_byte}..{old_end_byte} og range {range:?} and text {}", change.text);
 
                     // rope replace
                     timeit("rope operations", || {
@@ -587,38 +582,21 @@ impl InternalDocument {
                     });
 
                     // this must come after the rope was changed!
-                    let start_byte = self.rope.char_to_byte(start_char);
                     let new_end_byte = start_byte + change.text.len();
-                    let new_end_line = self.rope.byte_to_line(new_end_byte);
-                    let new_end_character =
-                        self.rope.byte_to_char(new_end_byte) - self.rope.line_to_char(new_end_line);
+                    let new_end_position = Position::new_from_byte_index(&self.rope, new_end_byte);
 
                     let edit = InputEdit {
                         start_byte,
                         old_end_byte,
-                        new_end_byte: start_byte + change.text.len(),
+                        new_end_byte,
                         start_position: old_range.start.into(),
                         old_end_position: old_range.end.into(),
-                        new_end_position: Point {
-                            row: new_end_line,
-                            column: new_end_character,
-                        },
+                        new_end_position: new_end_position.into(),
                     };
                     timeit("tree edit", || self.tree.edit(&edit));
 
                     self.version = params.text_document.version;
-
-                    let new_range = Range {
-                        start: edit.start_position.into(),
-                        end: edit.new_end_position.into(),
-                    };
-
-                    (old_range, edit, new_range)
-                } else {
-                    unreachable!("Change should have range {:#?}", change);
-                }
-            })
-            .collect::<Vec<(Range, InputEdit, Range)>>();
+            });
 
         // debug!("Change ranges {:#?}", change_ranges);
 
@@ -753,6 +731,7 @@ impl InternalDocument {
         range: Range,
         workspace: &Workspace,
         http_client: &dyn HttpClient,
+        enconding: &PositionEncodingKind,
     ) -> Vec<InlayHint> {
         self.query_range(&ALL_QUERIES.iri_query, range)
             .into_iter()
@@ -776,7 +755,7 @@ impl InternalDocument {
                     None
                 } else {
                     Some(InlayHint {
-                        position: capture.node.range.end.into(),
+                        position: capture.node.range.end.into_lsp(&self.rope, enconding),
                         label: InlayHintLabel::String(label),
                         kind: None,
                         text_edits: None,
@@ -806,10 +785,8 @@ impl InternalDocument {
         let rope = self.rope.clone();
         let tree = self.tree.clone();
 
-        let cursor_char_index = rope.line_to_char(cursor.line as usize) + cursor.character as usize;
-
-        let line = rope.line(cursor.line as usize).to_string();
-        let partial = word_before_character(cursor.character as usize, &line);
+        let line = rope.line(cursor.line() as usize).to_string();
+        let partial = word_before_character(cursor.character_byte() as usize, &line);
 
         debug!("Cursor node text is {:?}", partial);
 
@@ -830,28 +807,23 @@ impl InternalDocument {
                 let mut tree = tree.clone(); // This is fast
 
                 // Must come before the rope is changed!
-                let cursor_byte_index = rope_version.char_to_byte(cursor_char_index);
+                let cursor_byte_index = cursor.byte_index(&rope_version);
 
-                rope_version.insert(cursor_char_index, &change);
+                rope_version.insert(cursor.char_index(&rope_version), &change);
 
                 // Must come after rope changed!
                 let new_end_byte = cursor_byte_index + change.len();
-                let new_end_line = cursor.line as usize;
-                let new_end_character = rope_version.byte_to_char(new_end_byte)
-                    - rope_version.line_to_char(new_end_line);
+                let new_end_position = Position::new_from_byte_index(&rope_version, new_end_byte);
 
                 let edit = InputEdit {
                     // Old range is just a zero size range
-                    start_byte: cursor_char_index,
+                    start_byte: cursor_byte_index,
                     start_position: cursor.into(),
-                    old_end_byte: cursor_char_index,
+                    old_end_byte: cursor_byte_index,
                     old_end_position: cursor.into(),
 
                     new_end_byte,
-                    new_end_position: Point {
-                        row: new_end_line,
-                        column: new_end_character,
-                    },
+                    new_end_position: new_end_position.into(),
                 };
                 tree.edit(&edit);
 
@@ -867,8 +839,7 @@ impl InternalDocument {
                 // debug!(
                 // "A possible source code version for {kw} (change is {change}) with rope version {rope_version}\nNew tree {:?}", new_tree.root_node().to_sexp());
 
-                let mut cursor_one_left = cursor.to_owned();
-                cursor_one_left.character = cursor_one_left.character.saturating_sub(1);
+                let cursor_one_left = cursor.moved_left(1, &rope);
                 let cursor_node_version = new_tree
                     .root_node()
                     .named_descendant_for_point_range(
@@ -892,7 +863,11 @@ impl InternalDocument {
             .collect_vec()
     }
 
-    pub fn sematic_tokens(&self, range: Option<Range>) -> Vec<SemanticToken> {
+    pub fn sematic_tokens(
+        &self,
+        range: Option<Range>,
+        encoding: &PositionEncodingKind,
+    ) -> Vec<SemanticToken> {
         let doc = self;
         let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
 
@@ -905,7 +880,6 @@ impl InternalDocument {
             query_cursor.matches(&query, doc.tree.root_node(), RopeProvider::new(&doc.rope));
 
         let mut tokens = vec![];
-        let mut last_start = Point { row: 0, column: 0 };
 
         let mut nodes = matches
             .map_deref(|m| m.captures)
@@ -923,15 +897,25 @@ impl InternalDocument {
         // node start poins need to be stricly in order, because the delta might otherwise negativly overflow
         // TODO is this needed? are query matches in order?
         nodes.sort_unstable_by_key(|(n, _)| n.start_byte());
+
+        let mut last_line = 0;
+        let mut last_character = 0; // the indexing is encoding dependent
         for (node, type_index) in nodes {
-            let start = node.range().start_point;
-            let delta_line = (start.row - last_start.row) as u32;
+            let range: Range = node.range().into();
+            let range = range.into_lsp(&self.rope, encoding);
+            let start = range.start;
+
+            let delta_line = start.line - last_line;
             let delta_start = if delta_line == 0 {
-                (start.column - last_start.column) as u32 // same line
+                start.character - last_character // same line
             } else {
-                start.column as u32 // some other line
+                start.character // some other line
             };
-            let length = node_text(&node, &doc.rope).len_chars() as u32;
+
+            if range.start.line != range.end.line {
+                panic!("Highlights dont span multiple lines")
+            }
+            let length = range.end.character - range.start.character;
 
             let token = SemanticToken {
                 delta_line,
@@ -941,7 +925,8 @@ impl InternalDocument {
                 token_modifiers_bitset: 0,
             };
 
-            last_start = node.start_position();
+            last_line = start.line;
+            last_character = start.character;
             tokens.push(token);
         }
         tokens
@@ -949,8 +934,8 @@ impl InternalDocument {
 }
 
 /// Returns the word before the [`character`] position in the [`line`]
-pub fn word_before_character(character: usize, line: &str) -> String {
-    line[..character]
+pub fn word_before_character(byte_index: usize, line: &str) -> String {
+    line[..byte_index]
         .chars()
         .rev()
         .take_while(|c| c.is_alphabetic())
@@ -1340,24 +1325,36 @@ pub struct FrameInfo {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Location {
-    uri: Url,
+    pub uri: Url,
     pub range: Range,
 }
 
-impl From<Location> for tower_lsp::lsp_types::Location {
-    fn from(val: Location) -> Self {
-        tower_lsp::lsp_types::Location {
-            uri: val.uri,
-            range: val.range.into(),
-        }
-    }
-}
+// impl From<Location> for tower_lsp::lsp_types::Location {
+//     fn from(val: Location) -> Self {
+//         tower_lsp::lsp_types::Location {
+//             uri: val.uri,
+//             range: val.range.into(),
+//         }
+//     }
+// }
 
-impl From<tower_lsp::lsp_types::Location> for Location {
-    fn from(value: tower_lsp::lsp_types::Location) -> Self {
-        Location {
-            uri: value.uri,
-            range: value.range.into(),
+// impl From<tower_lsp::lsp_types::Location> for Location {
+//     fn from(value: tower_lsp::lsp_types::Location) -> Self {
+//         Location {
+//             uri: value.uri,
+//             range: value.range.into(),
+//         }
+//     }
+// }
+impl Location {
+    pub fn into_lsp(
+        &self,
+        rope: &Rope,
+        encoding: &PositionEncodingKind,
+    ) -> tower_lsp::lsp_types::Location {
+        tower_lsp::lsp_types::Location {
+            uri: self.uri.clone(),
+            range: self.range.into_lsp(rope, encoding),
         }
     }
 }
@@ -1464,9 +1461,9 @@ pub fn node_text<'a>(node: &Node, rope: &'a Rope) -> ropey::RopeSlice<'a> {
 }
 
 /// Generate the diagnostics for a single node, walking recusivly down to every child and every syntax error within
-pub fn gen_diagnostics(node: &Node) -> Vec<Diagnostic> {
+pub fn gen_diagnostics(node: &Node) -> Vec<(Range, String)> {
     let mut cursor = node.walk();
-    let mut diagnostics = Vec::<Diagnostic>::new();
+    let mut diagnostics = Vec::<(Range, String)>::new();
 
     loop {
         let node = cursor.node();
@@ -1492,17 +1489,7 @@ pub fn gen_diagnostics(node: &Node) -> Vec<Diagnostic> {
                 let parent = node_type_to_string(parent_kind);
                 let msg = format!("Syntax Error. expected {valid_children} inside {parent}");
 
-                diagnostics.push(Diagnostic {
-                    range: range.into(),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: None,
-                    code_description: None,
-                    source: Some("owl language server".to_string()),
-                    message: msg.to_string(),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                });
+                diagnostics.push((range, msg.to_string()));
             }
             // move along
             while !cursor.goto_next_sibling() {
@@ -1682,13 +1669,21 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
     );
     let mut cursor = node.walk();
 
+    // So if this node as an error child then the translation into RcDoc could exclude that error node.
+    // Therefore lets not translate it at all.
+    if node.children(&mut cursor).any(|child| child.is_error()) {
+        return RcDoc::text(text);
+    }
+
     match node.kind() {
         "source_file" => {
             let prefix_docs = node.children_by_field_name(
                 "prefix", &mut cursor)
             .map(|n| to_doc(&n, rope, tab_size)).collect_vec();
+
             let ontology_doc = node.child_by_field_name("ontology")
                 .map(|n| to_doc(&n, rope, tab_size)).unwrap_or(RcDoc::nil());
+
             if prefix_docs.is_empty() {
                 ontology_doc
             } else {
@@ -1842,6 +1837,20 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
         "primary"=>{
             RcDoc::intersperse(node.children(&mut cursor).map(|n|to_doc(&n, rope, tab_size)), RcDoc::space())
         },
+        "conjunction"
+         => {
+             let subs=node.children(&mut cursor).chunk_by(|n| n.kind()=="and").into_iter().map(|(is_or, chunks)|{
+                 if is_or {
+                     RcDoc::line().append(RcDoc::text("and").append(RcDoc::space()))
+                 } else {
+                     RcDoc::intersperse(chunks.map(|n| to_doc(&n, rope, tab_size)), RcDoc::space())
+                 }
+             }).collect_vec();
+            RcDoc::concat(subs)
+        },
+        "primary"=>{
+           RcDoc::intersperse(node.children(&mut cursor).map(|n|to_doc(&n, rope, tab_size)), RcDoc::space()) 
+        }
         "nested_description"
          => {
             RcDoc::text("(").append(RcDoc::line()).append(
@@ -1882,7 +1891,7 @@ fn to_doc<'a>(node: &Node, rope: &'a Rope, tab_size: u32) -> RcDoc<'a, ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::position::Position;
+    use crate::pos::Position;
     use indoc::indoc;
     use pretty_assertions::assert_eq;
     use test_log::test;
@@ -2128,14 +2137,8 @@ mod tests {
             vec![Location {
                 uri: "http://foo/14329076".parse().unwrap(),
                 range: Range {
-                    start: Position {
-                        line: 2,
-                        character: 20
-                    },
-                    end: Position {
-                        line: 5,
-                        character: 55
-                    },
+                    start: Position::new(2, 20),
+                    end: Position::new(5, 55),
                 }
             }]
         );

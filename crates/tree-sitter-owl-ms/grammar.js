@@ -15,7 +15,7 @@ module.exports = grammar({
 
     // 2.1 IRIs, Integers, Literals, and Entities
     _iri: $ => choice($.full_iri, $.abbreviated_iri, $.simple_iri),
-    full_iri: $ => seq('<', $._iri_rfc3987, '>'),
+    full_iri: $ => token(seq('<', iri_rfc3987(), '>')),
     abbreviated_iri: $ => $._pname_ln,
     simple_iri: $ => $._pn_local,
     prefix_name: $ => /([A-Za-z][A-Za-z0-9_\-\.]*)?:/,
@@ -555,31 +555,15 @@ module.exports = grammar({
 
     // IRI [RFC 3987]
     // TODO finish this rfc3987 URL rule
-    _iri_rfc3987: $ =>
-      token(
-        seq(
-          /[A-Za-z][A-Za-z0-9+\-\.]*/,
-          ':',
-          seq(
-            '//',
-            seq(
-              optional(seq(/[A-Za-z0-9_\-\.\~:%]*/, '@')),
-              /[A-Za-z0-9_\-\.\~:%]*/,
-              optional(seq(':', /[0-9]*/)),
-            ),
-            repeat1(seq('/', /[A-Za-z0-9_\-\.\~:%]*/)),
-          ),
-          optional(/\?[A-Za-z0-9_\-\.\~\/\?]*/),
-          optional(/\#[A-Za-z0-9_\-\.\~\/\?]*/),
-        ),
-      ),
 
     // https://www.w3.org/TR/2008/REC-rdf-sparql-query-20080115/
     // TODO make more strict
-    _pn_local: $ => /[A-Za-z0-9_\-\.]+/,
-    _pname_ln: $ => /[A-Za-z0-9_\-\.]*:[A-Za-z0-9_\-\.]+/,
+    // _pn_local: $ => /[A-Za-z0-9_\-\.]+/,
+    _pname_ln: $ => token(seq(pname_ns(), pn_local())), // old= /[A-Za-z0-9_\-\.]*:[A-Za-z0-9_\-\.]+/,
     // _pn_prefix: $ => /[A-Za-z0-9_\-\.]+/,
     // _pname_ln: $ => seq(optional($._pn_prefix), ':', $._pn_local),
+
+    _pn_local: $ => token(pn_local()),
 
     // Keywords
 
@@ -646,4 +630,87 @@ function sep1(rule, separator) {
 
 function annotated_list(annotations, nt) {
   return sep1(seq(optional(annotations), nt), ',')
+}
+
+function pn_chars_base() {
+  return choice(
+    /[A-Z]/,
+    /[a-z]/,
+    /[\u00C0-\u00D6]/,
+    /[\u00D8-\u00F6]/,
+    /[\u00F8-\u02FF]/,
+    /[\u0370-\u037D]/,
+    /[\u037F-\u1FFF]/,
+    /[\u200C-\u200D]/,
+    /[\u2070-\u218F]/,
+    /[\u2C00-\u2FEF]/,
+    /[\u3001-\uD7FF]/,
+    /[\uF900-\uFDCF]/,
+    /[\uFDF0-\uFFFD]/,
+    // /[\u10000-\uEFFFF]/,
+  )
+}
+
+///([A-Z])|([a-z])|([\u00C0-\u00D6])|([\u00D8-\u00F6])|([\u00F8-\u02FF])|([\u0370-\u037D])|([\u037F-\u1FFF])|([\u200C-\u200D])|([\u2070-\u218F])|([\u2C00-\u2FEF])|([\u3001-\uD7FF])|([\uF900-\uFDCF])|([\uFDF0-\uFFFD])|([\u10000-\uEFFFF])/
+
+function pn_chars_u() {
+  return choice(pn_chars_base(), '_')
+}
+
+function pn_chars() {
+  return choice(
+    pn_chars_u(),
+    '-',
+    /[0-9]/,
+    /\u00B7/,
+    /[\u0300-\u036F]/,
+    /[\u203F-\u2040]/,
+  )
+}
+
+function pn_local() {
+  return seq(
+    choice(pn_chars_u(), /[0-9]/),
+    optional(
+      seq(
+        repeat(
+          choice(
+            pn_chars(),
+
+            '.',
+          ),
+        ),
+        pn_chars(),
+      ),
+    ),
+  )
+}
+
+function pname_ns() {
+  return seq(optional(pn_prefix()), ':')
+}
+
+function pn_prefix() {
+  return seq(
+    pn_chars_base(),
+    optional(seq(repeat(choice(pn_chars(), '.')), pn_chars())),
+  )
+}
+
+function iri_rfc3987() {
+  return seq(
+    /[A-Za-z][A-Za-z0-9+\-\.]*/,
+    ':',
+    seq(
+      '//',
+      seq(
+        optional(seq(/[A-Za-z0-9_\-\.\~:%]*/, '@')),
+        /[A-Za-z0-9_\-\.\~:%]*/,
+        optional(seq(':', /[0-9]*/)),
+      ),
+      repeat1(seq('/', /[A-Za-z0-9_\-\.\~:%]*/)),
+    ),
+    optional(/\?[A-Za-z0-9_\-\.\~\/\?]*/),
+    optional(/\#[A-Za-z0-9_\-\.\~\/\?]*/),
+  )
 }
