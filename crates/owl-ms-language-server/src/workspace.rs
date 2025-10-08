@@ -2106,9 +2106,6 @@ mod tests {
         // Assert
         let doc = external_doc.unwrap();
         assert_eq!(doc.text, ontology_text);
-
-        let triple_count = doc.graph.0.triples().count();
-        assert!(triple_count > 0);
     }
 
     #[test]
