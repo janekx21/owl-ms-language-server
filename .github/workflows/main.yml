@@ -90,6 +90,8 @@ jobs:
         name: extension-${{ matrix.target }}
         path: editors/code/
 
+    - run: chmod a+x editors/code/server/*
+
     - name: Setup Node
       uses: actions/setup-node@v4
       with:
@@ -115,6 +117,8 @@ jobs:
       with:
         name: extension-${{ matrix.target }}
         path: editors/code/
+
+    - run: chmod a+x editors/code/server/*
 
     - name: Setup Node
       uses: actions/setup-node@v4
