@@ -51,14 +51,6 @@ pub static KEYWORDS: LazyLock<Vec<String>> = LazyLock::new(|| {
         .collect()
 });
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct StaticRule {
-    #[serde(rename = "type")]
-    pub type_: String,
-    pub value: String,
-}
-
 pub struct AllQueries {
     pub import_query: Query,
     pub iri_query: Query,

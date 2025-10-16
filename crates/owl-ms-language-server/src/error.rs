@@ -90,14 +90,14 @@ impl<T, I: Iterator<Item = Result<T>>> ResultIterator<T> for I {
 
 pub trait RwLockExt<T> {
     fn read_timeout(
-        &self,
-    ) -> Result<parking_lot::lock_api::RwLockReadGuard<parking_lot::RawRwLock, T>>;
+        &'_ self,
+    ) -> Result<parking_lot::lock_api::RwLockReadGuard<'_, parking_lot::RawRwLock, T>>;
 }
 
 impl<T> RwLockExt<T> for RwLock<T> {
     fn read_timeout(
-        &self,
-    ) -> Result<parking_lot::lock_api::RwLockReadGuard<parking_lot::RawRwLock, T>> {
+        &'_ self,
+    ) -> Result<parking_lot::lock_api::RwLockReadGuard<'_, parking_lot::RawRwLock, T>> {
         self.try_read_recursive_for(Duration::from_secs(5))
             .ok_or(Error::LockTimeout(5))
     }

@@ -142,7 +142,7 @@ impl Workspace {
             .iter()
             .flat_map(|dm| {
                 let dm = &*dm.value().read();
-                dm.get_all_frame_infos()
+                dm.all_frame_infos()
                     .iter()
                     .filter(|item| item.iri.contains(partial_text))
                     .map(|kv| (kv.iri.clone(), kv.clone()))
@@ -166,7 +166,7 @@ impl Workspace {
 
         let internal_infos = self.internal_documents.iter().filter_map(|dm| {
             let dm = dm.value().read();
-            dm.get_frame_info(iri)
+            dm.frame_info_by_iri(iri)
         });
 
         internal_infos
@@ -190,7 +190,7 @@ impl Workspace {
                     match &doc {
                         DocumentReference::Internal(rw_lock) => {
                             timeit("\t|-> get frame info internal", || {
-                                rw_lock.read().get_frame_info(iri)
+                                rw_lock.read().frame_info_by_iri(iri)
                             })
                         }
                         DocumentReference::External(rw_lock) => {
@@ -713,11 +713,11 @@ impl InternalDocument {
             .collect())
     }
 
-    pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
+    pub fn frame_info_by_iri(&self, iri: &Iri) -> Option<FrameInfo> {
         get_frame_info_helper(self, iri)
     }
 
-    pub fn get_all_frame_infos(&self) -> Vec<FrameInfo> {
+    pub fn all_frame_infos(&self) -> Vec<FrameInfo> {
         document_all_frame_infos(self)
             .values()
             .cloned()
@@ -926,25 +926,29 @@ fn imports_helper(doc: &InternalDocument) -> Vec<Url> {
      } "#
 )]
 fn document_all_frame_infos(doc: &InternalDocument) -> HashMap<Iri, FrameInfo> {
-    let mut infos: HashMap<String, FrameInfo> = HashMap::new();
+    let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
 
-    for ele in document_annotations(doc)
-        .into_iter()
-        .map(|(frame_iri, annoation_iri, literal)| FrameInfo {
-            iri: frame_iri.clone(),
-            annotations: HashMap::from([(annoation_iri, vec![literal])]),
-            frame_type: FrameType::Unknown,
-            definitions: Vec::new(),
-        })
+    // First we collect the annotations
+    for frame_info in
+        document_annotations(doc)
+            .into_iter()
+            .map(|(frame_iri, annoation_iri, literal)| FrameInfo {
+                iri: frame_iri.clone(),
+                annotations: HashMap::from([(annoation_iri, vec![literal])]),
+                frame_type: FrameType::Unknown,
+                definitions: Vec::new(),
+            })
     {
-        if let Some(fi) = infos.get_mut(&ele.iri) {
-            fi.extend(ele);
+        if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
+            // Merge the frame info for the same IRI
+            frame_info_mut.extend(frame_info);
         } else {
-            infos.insert(ele.iri.clone(), ele);
+            frame_infos.insert(frame_info.iri.clone(), frame_info);
         }
     }
 
-    for ele in document_definitions(doc)
+    // Second we collect the location and frame type (definitions)
+    for frame_info in document_definitions(doc)
         .into_iter()
         .map(|(frame_iri, range, kind)| FrameInfo {
             iri: frame_iri.clone(),
@@ -956,14 +960,15 @@ fn document_all_frame_infos(doc: &InternalDocument) -> HashMap<Iri, FrameInfo> {
             }],
         })
     {
-        if let Some(fi) = infos.get_mut(&ele.iri) {
-            fi.extend(ele);
+        if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
+            // Merge the frame info for the same IRI
+            frame_info_mut.extend(frame_info);
         } else {
-            infos.insert(ele.iri.clone(), ele);
+            frame_infos.insert(frame_info.iri.clone(), frame_info);
         }
     }
 
-    infos
+    frame_infos
 }
 
 #[cached(
@@ -2065,7 +2070,7 @@ mod tests {
         );
 
         // Act
-        let info = doc.get_frame_info(&"A".to_string());
+        let info = doc.frame_info_by_iri(&"A".to_string());
 
         // Assert
         info!("{doc:#?}");

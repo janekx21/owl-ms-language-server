@@ -591,7 +591,8 @@ impl LanguageServer for Backend {
     ) -> Result<Option<DocumentSymbolResponse>> {
         let url = params.text_document.uri;
         let doc = self.get_internal_document(&url)?;
-        let infos = doc.read().get_all_frame_infos();
+        let doc = doc.read();
+        let infos = doc.all_frame_infos();
         return Ok(Some(DocumentSymbolResponse::Flat(
             #[allow(deprecated)] // All fields need to be specified
             infos
@@ -599,7 +600,9 @@ impl LanguageServer for Backend {
                 .flat_map(|info| {
                     info.definitions.iter().map(|def| {
                         Ok(SymbolInformation {
-                            name: info.iri.clone(),
+                            name: doc
+                                .full_iri_to_abbreviated_iri(&info.iri)
+                                .unwrap_or(info.iri.clone()),
                             kind: info.frame_type.into(),
                             tags: None,
                             deprecated: None,
@@ -607,13 +610,14 @@ impl LanguageServer for Backend {
                                 uri: url.clone(),
                                 range: def
                                     .range
-                                    .into_lsp(&doc.read().rope, &self.position_encoding.read())?,
+                                    .into_lsp(&doc.rope, &self.position_encoding.read())?,
                             },
                             container_name: None,
                         })
                     })
                 })
                 .filter_and_log()
+                .sorted_by_cached_key(|s| format!("{:?}{}", s.kind, s.name))
                 .collect_vec(),
         )));
     }
@@ -632,7 +636,7 @@ impl LanguageServer for Backend {
                 let ws = workspace.read();
                 ws.internal_documents
                     .iter()
-                    .flat_map(|doc| doc.read().get_all_frame_infos())
+                    .flat_map(|doc| doc.read().all_frame_infos())
                     .collect_vec()
             })
             .collect_vec();
