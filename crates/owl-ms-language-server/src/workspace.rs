@@ -851,6 +851,9 @@ impl InternalDocument {
         let mut last_character = 0; // the indexing is encoding dependent
         for (node, type_index) in nodes {
             let range: Range = node.range().into();
+            // This will never happen tokens are never longer than u32
+            #[allow(clippy::cast_possible_truncation)]
+            let length = range.len_lsp(&self.rope, encoding) as u32;
             let range = range.into_lsp(&self.rope, encoding)?;
             let start = range.start;
 
@@ -860,11 +863,6 @@ impl InternalDocument {
             } else {
                 start.character // some other line
             };
-
-            if range.start.line != range.end.line {
-                return Err(Error::LspFeatureNotSupported("Multi line highlights"));
-            }
-            let length = range.end.character - range.start.character;
 
             let token = SemanticToken {
                 delta_line,
@@ -1092,8 +1090,12 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
                         let predicate = SimpleTerm::Iri(IriRef::new_unchecked(MownStr::from_ref(
                             "http://www.w3.org/2002/07/owl#imports",
                         )));
-                        let object = SimpleTerm::Iri(IriRef::new(MownStr::from_ref(iri)).unwrap());
-                        graph.insert(subject, predicate, object).unwrap();
+                        let object = SimpleTerm::Iri(
+                            IriRef::new(MownStr::from_ref(iri)).expect("valid IRI"),
+                        );
+                        graph
+                            .insert(subject, predicate, object)
+                            .expect("grapsh should not be full");
                     }
                 }
                 _ => (),
@@ -1260,23 +1262,32 @@ fn get_frame_info_helper_ex(doc: &mut ExternalDocument, iri: &Iri) -> Option<Fra
             Any,
         )
         .flatten()
-        .map(|[_, p, o]| {
-            let ps = p.iri().unwrap();
-            let os = o
-                .lexical_form()
-                .map_or_else(|| o.iri().unwrap().to_string(), |l| l.to_string());
-
-            FrameInfo {
-                iri: iri.clone(),
-                annotations: once((format!("{ps}"), vec![format!("{os}")])).collect(),
-                frame_type: FrameType::Unknown,
-                definitions: vec![Location {
-                    uri: doc.uri.clone(),
-                    range: Range::ZERO,
-                }],
-            }
+        .map(|[_, p, o]| FrameInfo {
+            iri: iri.clone(),
+            annotations: once((simple_term_to_string(p), vec![simple_term_to_string(o)])).collect(),
+            frame_type: FrameType::Unknown,
+            definitions: vec![Location {
+                uri: doc.uri.clone(),
+                range: Range::ZERO,
+            }],
         })
         .tree_reduce(FrameInfo::merge)
+}
+
+fn simple_term_to_string(simple_term: &SimpleTerm) -> String {
+    match simple_term {
+        SimpleTerm::Iri(iri_ref) => iri_ref.to_string(),
+        SimpleTerm::BlankNode(bnode_id) => bnode_id.to_string(),
+        SimpleTerm::LiteralDatatype(mown_str, iri_ref) => match iri_ref.as_str() {
+            "http://www.w3.org/2001/XMLSchema#string" => mown_str.to_string(),
+            _ => format!("\"{mown_str}\"^^{iri_ref}"),
+        },
+        SimpleTerm::LiteralLanguage(mown_str, language_tag) => {
+            format!("\"{mown_str}\"@{}", language_tag.borrowed())
+        }
+        SimpleTerm::Triple(_) => "TODO triple".into(),
+        SimpleTerm::Variable(var_name) => var_name.to_string(),
+    }
 }
 
 /// This is a version of a query match that has no reference to the tree or cursor
