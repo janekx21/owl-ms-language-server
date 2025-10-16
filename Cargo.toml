@@ -9,7 +9,7 @@ edition = "2021"
 authors = ["Janek Winkler"]
 repository = "https://github.com/janekx21/owl-ms-language-server"
 license = "Apache-2.0"
-version = "0.7.1"
+version = "0.7.2"
 
 [workspace.dependencies]
-tree-sitter-owl-ms = { path = "crates/tree-sitter-owl-ms", version="0.7.1" }
+tree-sitter-owl-ms = { path = "crates/tree-sitter-owl-ms", version="0.7.2" }
