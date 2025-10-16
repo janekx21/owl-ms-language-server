@@ -12,4 +12,4 @@ license = "Apache-2.0"
 version = "0.7.0"
 
 [workspace.dependencies]
-tree-sitter-owl-ms = { path = "crates/tree-sitter-owl-ms" }
+tree-sitter-owl-ms = { path = "crates/tree-sitter-owl-ms", version="0.7.0" }
