@@ -37,6 +37,21 @@ impl Range {
             end: self.end.into_lsp(rope, encoding)?,
         })
     }
+
+    pub fn len_lsp(
+        self,
+        rope: &Rope,
+        encoding: &tower_lsp::lsp_types::PositionEncodingKind,
+    ) -> usize {
+        let start_byte = self.start.byte_index(rope);
+        let end_byte = self.end.byte_index(rope);
+        let slice = rope.byte_slice(start_byte..end_byte);
+        match encoding.as_str() {
+            "utf-8" => slice.len_chars(),
+            "utf-16" => slice.len_utf16_cu(),
+            e => unimplemented!("encoding {e} not implemented"),
+        }
+    }
 }
 
 impl Display for Range {

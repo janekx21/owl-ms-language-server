@@ -617,6 +617,7 @@ impl LanguageServer for Backend {
                     })
                 })
                 .filter_and_log()
+                .filter(|s| !s.name.is_empty())
                 .sorted_by_cached_key(|s| format!("{:?}{}", s.kind, s.name))
                 .collect_vec(),
         )));
