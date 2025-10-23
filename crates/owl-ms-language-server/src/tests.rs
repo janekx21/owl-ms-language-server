@@ -2012,7 +2012,7 @@ async fn backend_document_symbols_in_multi_file_ontology_should_just_show_symbol
     match result.unwrap() {
         DocumentSymbolResponse::Flat(symbol_informations) => {
             let info = symbol_informations.iter().exactly_one().unwrap();
-            assert_eq!(info.name, "ClassA2");
+            assert_eq!(info.name, "Some class in A2"); // aka the label
         }
         DocumentSymbolResponse::Nested(_document_symbols) => todo!(),
     }

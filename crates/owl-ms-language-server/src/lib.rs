@@ -600,9 +600,10 @@ impl LanguageServer for Backend {
                 .flat_map(|info| {
                     info.definitions.iter().map(|def| {
                         Ok(SymbolInformation {
-                            name: doc
-                                .full_iri_to_abbreviated_iri(&info.iri)
-                                .unwrap_or(info.iri.clone()),
+                            name: info.label().unwrap_or_else(|| {
+                                doc.full_iri_to_abbreviated_iri(&info.iri)
+                                    .unwrap_or(info.iri.clone())
+                            }),
                             kind: info.frame_type.into(),
                             tags: None,
                             deprecated: None,
