@@ -3,7 +3,7 @@ use crate::consts::{get_fixed_infos, keyword_hover_info};
 use crate::error::{Error, Result, ResultExt, ResultIterator, RwLockExt};
 use crate::pos::Position;
 use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type_index};
-use crate::web::HttpClient;
+use crate::web::{global_http_client, HttpClient};
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
     rope_provider::RopeProvider, LANGUAGE, NODE_TYPES,
@@ -20,6 +20,7 @@ use parking_lot::{Mutex, MutexGuard, RwLock};
 use pretty::RcDoc;
 use ropey::Rope;
 use sophia::api::graph::{Graph, MutableGraph};
+use sophia::api::ns::Namespace;
 use sophia::api::prelude::Any;
 use sophia::api::source::TripleSource;
 use sophia::api::term::{BnodeId, LanguageTag, SimpleTerm, Term};
@@ -30,6 +31,7 @@ use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter::once;
 use std::path::Path;
+use std::sync::mpsc::Sender;
 use std::sync::{LazyLock, Weak};
 use std::{
     collections::{HashMap, HashSet},
@@ -77,6 +79,7 @@ pub struct Workspace {
     pub external_documents: DashMap<Url, Arc<RwLock<ExternalDocument>>>,
     pub folder: WorkspaceFolder,
     pub catalogs: Vec<Catalog>,
+    pub index_sender: Option<Sender<Url>>,
 }
 
 impl Workspace {
@@ -91,6 +94,7 @@ impl Workspace {
             external_documents: DashMap::new(),
             folder: workspace_folder,
             catalogs,
+            index_sender: None,
         }
     }
 
@@ -179,13 +183,12 @@ impl Workspace {
         workspace: &Arc<RwLock<Workspace>>,
         iri: &Iri,
         doc: &InternalDocument,
-        http_client: &dyn HttpClient,
     ) -> Option<FrameInfo> {
-        timeit("rechable docs", || doc.reachable_docs_recusive(http_client))
+        timeit("rechable docs", || doc.reachable_docs_recusive())
             .iter()
             .filter_map(|url| {
                 if let Ok(doc) = timeit("\tresolve document", || {
-                    Workspace::resolve_url_to_document(workspace, url, http_client)
+                    Workspace::resolve_url_to_document(workspace, url)
                 }) {
                     match &doc {
                         DocumentReference::Internal(rw_lock) => {
@@ -251,7 +254,8 @@ impl Workspace {
         None
     }
 
-    pub fn get_document_by_url(&self, url: &Url) -> Option<DocumentReference> {
+    /// Does not load anything. Just returns the document when found.
+    pub fn document_by_url(&self, url: &Url) -> Option<DocumentReference> {
         if let Some(doc) = self.internal_documents.get(url) {
             // Document is loaded already
             return Some(DocumentReference::Internal(doc.clone()));
@@ -267,26 +271,22 @@ impl Workspace {
     pub fn resolve_url_to_document(
         workspace: &Arc<RwLock<Workspace>>,
         url: &Url,
-        client: &dyn HttpClient,
     ) -> Result<DocumentReference> {
-        let w = workspace.read();
-        if let Some(doc) = w.get_document_by_url(url) {
+        let workspace_read = workspace.read();
+        if let Some(doc) = workspace_read.document_by_url(url) {
             return Ok(doc);
         }
 
-        let ws = workspace.read();
-        let Some((catalog, catalog_uri)) = ws.find_catalog_uri(url) else {
+        let Some((catalog, catalog_uri)) = workspace_read.find_catalog_uri(url) else {
             warn!("Url {url} could not be found in any catalog");
-            let document_text = client.get(url.as_str())?;
+            let document_text = global_http_client().get(url.as_str())?;
             let document = ExternalDocument::new(document_text, url.clone())?;
-            let doc = workspace.read().insert_external_document(document);
+            let doc = workspace_read.insert_external_document(document);
             return Ok(DocumentReference::External(doc));
         };
 
-        let url_from_catalog = Url::parse(&catalog_uri.uri);
-
-        if let Ok(url) = url_from_catalog {
-            if let Some(doc) = workspace.read().get_document_by_url(&url) {
+        if let Ok(url) = Url::parse(&catalog_uri.uri) {
+            if let Some(doc) = workspace_read.document_by_url(&url) {
                 return Ok(doc);
             }
 
@@ -295,17 +295,17 @@ impl Workspace {
                 Workspace::resolve_path_to_document(workspace, &path)
             } else {
                 // This is an external url
-                let document_text = client.get(url.as_str())?;
+                let document_text = global_http_client().get(url.as_str())?;
                 let document = ExternalDocument::new(document_text, url)?;
-                let doc = workspace.read().insert_external_document(document);
+                let doc = workspace_read.insert_external_document(document);
                 Ok(DocumentReference::External(doc))
             }
         } else {
-            // This is a relative file path
+            // The catalog uri is most likley a relative file path, so lets try that
             let path = catalog.parent_folder().join(&catalog_uri.uri);
             let url =
                 Url::from_file_path(&path).map_err(|()| Error::InvalidFilePath(path.clone()))?;
-            if let Some(doc) = workspace.read().get_document_by_url(&url) {
+            if let Some(doc) = workspace_read.document_by_url(&url) {
                 return Ok(doc);
             }
 
@@ -319,14 +319,14 @@ impl Workspace {
         url: &Url,
         client: &dyn HttpClient,
     ) -> Result<DocumentReference> {
-        let w = workspace.read();
-        if let Some(doc) = w.get_document_by_url(url) {
+        let workspace_read = workspace.read();
+        if let Some(doc) = workspace_read.document_by_url(url) {
             return Ok(doc);
         }
 
         let document_text = client.get(url.as_str())?;
         let document = ExternalDocument::new(document_text, url.clone())?;
-        let document = w.insert_external_document(document);
+        let document = workspace_read.insert_external_document(document);
         Ok(DocumentReference::External(document))
     }
 
@@ -454,18 +454,15 @@ impl InternalDocument {
         }
     }
 
-    fn reachable_docs_recusive(&self, http_client: &dyn HttpClient) -> Vec<Url> {
+    /// Loads and returns all document URL's that can be reached from this internal document
+    fn reachable_docs_recusive(&self) -> Vec<Url> {
         let mut set: HashSet<Url> = HashSet::new();
-        self.reachable_docs_recursive_helper(&mut set, http_client)
+        self.reachable_docs_recursive_helper(&mut set)
             .log_if_error();
         set.into_iter().collect_vec()
     }
 
-    fn reachable_docs_recursive_helper(
-        &self,
-        result: &mut HashSet<Url>,
-        http_client: &dyn HttpClient,
-    ) -> Result<()> {
+    fn reachable_docs_recursive_helper(&self, result: &mut HashSet<Url>) -> Result<()> {
         if result.contains(&self.uri) {
             // Do nothing
             return Ok(());
@@ -473,11 +470,24 @@ impl InternalDocument {
 
         result.insert(self.uri.clone());
 
-        let docs = timeit("\timports query", || self.imports())
-            .iter()
+        // Load both imports and prefixes of this internal document
+        let imports = timeit("\timports query", || self.imports());
+        let prefixes = self
+            .prefixes()
+            .into_iter()
+            // Filter out the empty prefix ":"
+            .filter_map(|(prefix, url)| if prefix.is_empty() { None } else { Some(url) })
+            .filter_map(|url| Url::parse(&url).ok())
+            // Filter out the current document as a prefix (most likely the empty prefix ":")
+            .filter(|url| url != &self.uri);
+
+        let docs = imports
+            .into_iter()
+            .chain(prefixes)
+            .unique()
             .filter_map(|url| {
                 timeit("\t resolve url to doc", || {
-                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, url, http_client)
+                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
                 })
                 .inspect_log()
                 .ok()
@@ -488,11 +498,11 @@ impl InternalDocument {
             match doc {
                 DocumentReference::Internal(internal_document) => internal_document
                     .read()
-                    .reachable_docs_recursive_helper(result, http_client)?,
+                    .reachable_docs_recursive_helper(result)?,
                 DocumentReference::External(e) => e.read().reachable_docs_recursive_helper(
                     &self.try_get_workspace()?,
                     result,
-                    http_client,
+                    0,
                 )?,
             }
         }
@@ -670,7 +680,6 @@ impl InternalDocument {
     pub fn inlay_hint(
         &self,
         range: Range,
-        http_client: &dyn HttpClient,
         enconding: &PositionEncodingKind,
     ) -> Result<Vec<InlayHint>> {
         let workspace = self.try_get_workspace()?;
@@ -683,7 +692,7 @@ impl InternalDocument {
                 let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
                 let label = timeit("get frame info recursive", || {
-                    Workspace::get_frame_info_recursive(&workspace, &iri, self, http_client)
+                    Workspace::get_frame_info_recursive(&workspace, &iri, self)
                 })
                 .and_then(|frame_info| frame_info.label())
                 .unwrap_or_default();
@@ -878,6 +887,14 @@ impl InternalDocument {
         }
         Ok(tokens)
     }
+
+    /// Loads all documents that can be reached by this document
+    pub fn load_dependencies(document: &Arc<RwLock<InternalDocument>>) -> Result<()> {
+        // TODO fill func
+        // let document = document.read();
+        //document.reachable_docs_recusive(http_client);
+        Ok(())
+    }
 }
 
 /// Returns the word before the [`character`] position in the [`line`]
@@ -1025,7 +1042,9 @@ pub struct ExternalDocument {
 }
 
 #[derive(Debug)]
-pub struct InfoGraph(LightGraph);
+pub struct InfoGraph(LightGraph, GraphName);
+
+type GraphName = String;
 
 impl From<SetOntology<ArcStr>> for InfoGraph {
     fn from(value: SetOntology<ArcStr>) -> Self {
@@ -1102,7 +1121,12 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
             }
         }
 
-        Self(graph)
+        let graph_name = ontology_iri
+            .as_ref()
+            .and_then(|s| s.iri().clone())
+            .map_or("???".into(), |i| i.to_string()); //TODO what default graph name?
+
+        Self(graph, graph_name)
     }
 }
 
@@ -1115,16 +1139,61 @@ impl Hash for ExternalDocument {
 impl ExternalDocument {
     /// The ontology type is currently determent by the url extention
     pub fn new(text: String, url: Url) -> Result<ExternalDocument> {
-        debug!("try creating external document {url}\n{text}");
-        let builder = lock_global_build_arc();
+        debug!("try creating external document... {url}");
 
         // Try parsing different styles
-        // - first owx then rdf
         // This could try more styles in the future
 
-        debug!("try owx...");
+        debug!("try rdf...");
+        let doc = ExternalDocument::try_parse_rdf(&text)
+            .or_else(|e| {
+                warn!("rdf failed with {e}");
+                debug!("try rdf...");
+                ExternalDocument::try_parse_owx(&text)
+            })
+            .map(|graph| ExternalDocument {
+                graph,
+                text,
+                uri: url,
+            });
+
+        if let Ok(doc) = &doc {
+            debug!("parsing worked! {} turtle:\n{}", doc.uri, {
+                use sophia::api::serializer::Stringifier;
+                use sophia::api::serializer::TripleSerializer;
+                use sophia::turtle::serializer::nt::NtSerializer;
+                let mut nt_stringifier = NtSerializer::new_stringifier();
+                let graph = &doc.graph.0;
+                let str = nt_stringifier.serialize_graph(&graph).unwrap().as_str();
+                str.to_string()
+            });
+        }
+        doc
+    }
+
+    fn try_parse_rdf(text: &str) -> Result<InfoGraph> {
+        sophia::xml::parser::parse_str(text)
+            .collect_triples::<LightGraph>()
+            .map_err(|e| Error::Sophia(format!("{e}")))
+            .map(|g| {
+                // Find Match for: x <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2002/07/owl#Ontology>.
+                let owl = Namespace::new_unchecked("http://www.w3.org/2002/07/owl#");
+                let owl_ontology = owl.get("Ontology").unwrap();
+                let ontology_id = &g
+                    .triples_matching(Any, [sophia::api::ns::rdf::type_], [owl_ontology])
+                    .flatten()
+                    .next()
+                    .and_then(|[s, _, _]| s.iri())
+                    .map_or("???".into(), |i| i.to_string()); //TODO default case
+
+                InfoGraph(g, ontology_id.clone())
+            })
+    }
+
+    fn try_parse_owx(text: &str) -> Result<InfoGraph> {
+        let builder = lock_global_build_arc();
         let mut buffer = text.as_bytes();
-        let doc = horned_owl::io::owx::reader::read_with_build::<ArcStr, SetOntology<ArcStr>, _>(
+        horned_owl::io::owx::reader::read_with_build::<ArcStr, SetOntology<ArcStr>, _>(
             &mut buffer,
             &builder,
         )
@@ -1132,46 +1201,8 @@ impl ExternalDocument {
         .map(|(ontology, _)| {
             let graph: InfoGraph = ontology.into();
 
-            // TODO maybe try the other parser...
-            // if graph.0.triples().count() == 0 {
-            //     return Err(Error::DocumentEmpty(url.clone()));
-            // }
-
-            ExternalDocument {
-                uri: url.clone(),
-                text: text.clone(),
-                graph,
-            }
-        })
-        .or_else(|e| {
-            warn!("owx failed with {e}");
-            debug!("try rdf...");
-
-            let graph = sophia::xml::parser::parse_str(&text)
-                .collect_triples::<LightGraph>()
-                .map_err(|e| Error::Sophia(format!("{e}")))
-                .map(|g| ExternalDocument {
-                    uri: url,
-                    text,
-                    graph: InfoGraph(g),
-                });
             graph
-        });
-
-        debug!(
-            "parsing worked! {} turtle:\n{}",
-            doc.as_ref().unwrap().uri,
-            {
-                use sophia::api::serializer::Stringifier;
-                use sophia::api::serializer::TripleSerializer;
-                use sophia::turtle::serializer::nt::NtSerializer;
-                let mut nt_stringifier = NtSerializer::new_stringifier();
-                let graph = &doc.as_ref().unwrap().graph.0;
-                let str = nt_stringifier.serialize_graph(&graph).unwrap().as_str();
-                str.to_string()
-            }
-        );
-        doc
+        })
     }
 
     fn imports(&self) -> Vec<Url> {
@@ -1197,12 +1228,17 @@ impl ExternalDocument {
         iris
     }
 
+    // Because external documents most likley relate to other external ones and because there are many of them in a graph the depth should be limited
     fn reachable_docs_recursive_helper(
         &self,
         workspace: &Arc<RwLock<Workspace>>,
         result: &mut HashSet<Url>,
-        http_client: &dyn HttpClient,
+        depth: u32,
     ) -> Result<()> {
+        if depth >= 1 {
+            // Do nothing max depth reached
+            return Ok(());
+        }
         if result.contains(&self.uri) {
             // Do nothing
             return Ok(());
@@ -1210,11 +1246,44 @@ impl ExternalDocument {
 
         result.insert(self.uri.clone());
 
-        let docs = self
-            .imports()
-            .iter()
+        debug!("graph name {}", self.graph.1);
+
+        // TODO shitty shild urls :<
+
+        let child_urls = self
+            .graph
+            .0
+            .iris()
+            .filter_map(std::result::Result::ok)
+            .filter_map(|term| term.iri())
+            .unique()
+            .filter_map(|iri| Url::parse(&iri).ok())
+            .inspect(|url| debug!("Found iri {url} in {}", self.uri))
+            // Filter out IRI's that point to this ontology
+            .filter(|url| {
+                !url.make_relative(&self.uri)
+                    .inspect(|v| debug!("relative {v}"))
+                    .is_some_and(|s| s.trim_end_matches('#').is_empty())
+            })
+            .inspect(|url| debug!("after make relative {url} in "))
+            // TODO  hmmmmm this cound be better
+            .filter(|url| !url.to_string().contains(&self.graph.1))
+            .map(|u| {
+                // This trim operation is not very stable
+                let mut tmp = u.clone();
+                if tmp.fragment().is_some() {
+                    tmp.set_fragment(Some(""));
+                } else if let Ok(mut seg) = tmp.path_segments_mut() {
+                    seg.pop();
+                }
+                tmp
+            })
+            .unique()
+            .inspect(|url| debug!("Child url {url}"));
+
+        let docs = child_urls
             .filter_map(|url| {
-                Workspace::resolve_url_to_document(workspace, url, http_client)
+                Workspace::resolve_url_to_document(workspace, &url)
                     .inspect_log()
                     .ok()
             })
@@ -1224,10 +1293,10 @@ impl ExternalDocument {
             match doc {
                 DocumentReference::Internal(internal_document) => internal_document
                     .read()
-                    .reachable_docs_recursive_helper(result, http_client)?,
+                    .reachable_docs_recursive_helper(result)?,
                 DocumentReference::External(e) => {
                     e.read()
-                        .reachable_docs_recursive_helper(workspace, result, http_client)?;
+                        .reachable_docs_recursive_helper(workspace, result, depth + 1)?;
                 }
             }
         }

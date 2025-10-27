@@ -9,7 +9,7 @@ pub mod rope_provider;
 #[cfg(test)]
 #[allow(clippy::pedantic)]
 mod tests;
-mod web;
+pub mod web;
 mod workspace;
 
 use debugging::timeit;
@@ -21,7 +21,10 @@ use pos::Position;
 use queries::{ALL_QUERIES, NODE_TYPES};
 use range::Range;
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
+use std::sync::{mpsc, Arc, LazyLock};
+use std::thread;
 use std::time::Duration;
 use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
@@ -30,7 +33,6 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
 use tree_sitter_c2rust::Language;
-use web::{HttpClient, UreqClient};
 use workspace::{node_text, trim_full_iri, InternalDocument, Workspace};
 
 // Constants
@@ -43,7 +45,7 @@ pub struct Backend {
     pub client: Client,
     position_encoding: RwLock<PositionEncodingKind>,
     workspaces: RwLock<Vec<Arc<RwLock<Workspace>>>>,
-    pub http_client: Arc<dyn HttpClient>,
+    busy_indexing: Arc<AtomicBool>,
 }
 
 impl Backend {
@@ -55,7 +57,7 @@ impl Backend {
             client,
             position_encoding: PositionEncodingKind::UTF16.into(),
             workspaces: RwLock::new(vec![]),
-            http_client: Arc::new(UreqClient),
+            busy_indexing: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -92,6 +94,12 @@ impl LanguageServer for Backend {
             .iter()
             .map(|wf| Arc::new(RwLock::new(Workspace::new(wf.clone()))))
             .collect();
+
+        for workspace in workspaces.iter() {
+            let sender = self.start_indexing(workspace);
+            let mut ws = workspace.write();
+            ws.index_sender = Some(sender);
+        }
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -238,20 +246,29 @@ impl LanguageServer for Backend {
                 .collect_vec();
 
             let client = self.client.clone();
-            let a = tokio::spawn(async move {
-                client
-                    .publish_diagnostics(url.clone(), diagnostics, Some(internal_document.version))
-                    .await;
-            });
+            let url_cloned = url.clone();
+            // let a = tokio::spawn(async move {
+            client
+                .publish_diagnostics(url_cloned, diagnostics, Some(internal_document.version))
+                .await;
+            // });
 
             let document = Workspace::insert_internal_document(&workspace, internal_document);
 
-            let http_client = self.http_client.clone();
-            let b = tokio::spawn(async move {
-                resolve_imports(&document, &*http_client).log_if_error();
-            });
+            // TODO remove?
+            let ws = workspace.clone();
+            // let b = tokio::spawn(async move {
+            //     // InternalDocument::load_dependencies(&document).log_if_error();
+            //     {}
+            // });
+            if let Some(sender) = &ws.read_recursive().index_sender {
+                debug!("Send into index channel");
+                self.busy_indexing.store(true, Ordering::Relaxed);
+                sender.send(url.clone()).unwrap();
+            }
 
-            tokio::try_join!(a, b)?;
+            // tokio::try_join!(a)?;
+            debug!("here");
 
             Ok(())
         }
@@ -382,8 +399,7 @@ impl LanguageServer for Backend {
                 .ok_or(Error::InvalidUrl(url.clone()))?
         );
 
-        let hints =
-            document.inlay_hint(range, &*self.http_client, &self.position_encoding.read())?;
+        let hints = document.inlay_hint(range, &self.position_encoding.read())?;
 
         Ok(Some(hints))
     }
@@ -415,12 +431,8 @@ impl LanguageServer for Backend {
 
             debug!("Try goto definition of {iri}");
 
-            let frame_info = Workspace::get_frame_info_recursive(
-                &doc.try_get_workspace()?,
-                &iri,
-                &doc,
-                &*self.http_client,
-            );
+            let frame_info =
+                Workspace::get_frame_info_recursive(&doc.try_get_workspace()?, &iri, &doc);
 
             if let Some(frame_info) = frame_info {
                 let locations = frame_info
@@ -950,6 +962,9 @@ impl LanguageServer for Backend {
 
     async fn shutdown(&self) -> Result<()> {
         info!("Shutdown");
+        // TODO
+        // let mut workspaces = self.workspaces.write();
+        // workspaces.clear();
         Ok(())
     }
 }
@@ -1060,13 +1075,10 @@ impl Backend {
                     uri: Url::from_file_path(file_path).expect("Valid URL from filepath"),
                     name: "Single File".into(),
                 };
-                debug!("try workspaces write...");
                 let workspace = Workspace::new(workspace_folder.clone());
 
                 // workspace_folder
                 workspaces.with_upgraded(|w| {
-                    debug!("locked workspace");
-
                     let ws = Arc::new(RwLock::new(workspace));
                     w.push(ws.clone());
                     ws
@@ -1082,38 +1094,27 @@ impl Backend {
         let workspace = workspace.read_timeout()?;
         workspace.get_internal_document(url)
     }
-}
 
-// TODO maybe move this into document or workspace
-/// This will try to fetch the imports of a document
-fn resolve_imports(
-    document: &Arc<RwLock<InternalDocument>>,
-    http_client: &dyn HttpClient,
-) -> MyResult<()> {
-    let document = document.read();
-    debug!("Resolve imports for {}", document.uri);
+    fn start_indexing(&self, workspace: &Arc<RwLock<Workspace>>) -> Sender<Url> {
+        let (sender, receiver) = mpsc::channel::<Url>();
+        let workspace = workspace.clone();
 
-    let import_urls = document.imports();
-    let prefix_urls = document
-        .prefixes()
-        .into_values()
-        .filter_map(|url| Url::parse(&url).ok())
-        // Filter out the current document as a prefix (most likely the empty prefix ":")
-        .filter(|url| url != &document.uri);
-
-    for url in import_urls {
-        Workspace::resolve_url_to_document(&document.try_get_workspace()?, &url, http_client)
-            .log_if_error();
+        let bi = self.busy_indexing.clone();
+        bi.store(true, Ordering::Relaxed);
+        thread::spawn(move || {
+            debug!("Start indexing...");
+            bi.store(false, Ordering::Relaxed);
+            while let Ok(url) = receiver.recv() {
+                bi.store(true, Ordering::Relaxed);
+                Backend::index_url(&url, &workspace);
+                bi.store(false, Ordering::Relaxed);
+            }
+        });
+        sender
     }
 
-    for url in prefix_urls {
-        Workspace::resolve_prefix_url_to_document(
-            &document.try_get_workspace()?,
-            &url,
-            http_client,
-        )
-        .log_if_error();
+    fn index_url(url: &Url, workspace: &Arc<RwLock<Workspace>>) {
+        info!("Indexing URL {url}");
+        Workspace::resolve_url_to_document(workspace, url).log_if_error();
     }
-
-    Ok(())
 }

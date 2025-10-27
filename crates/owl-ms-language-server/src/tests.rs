@@ -1,4 +1,8 @@
-use crate::{catalog::Catalog, *};
+use crate::{
+    catalog::Catalog,
+    web::{set_global_http_client, HttpClient},
+    *,
+};
 use dashmap::DashMap;
 use horned_owl::{
     io::{OWXParserConfiguration, ParserConfiguration, RDFParserConfiguration},
@@ -9,7 +13,7 @@ use pos::Position;
 use pretty_assertions::assert_eq;
 use ropey::Rope;
 use sophia::api::term::SimpleTerm;
-use std::{fs, path::Path};
+use std::{fs, path::Path, thread};
 use tempdir::{self, TempDir};
 use test_log::test;
 use tower_lsp::LspService;
@@ -401,7 +405,9 @@ async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
             uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
             name: "test wosrkpace".into(),
         }),
-        vec![],
+        vec![
+            ("http://www.w3.org/2000/01/rdf-schema#", ""), //dummy
+        ],
     )
     .await;
 
@@ -986,9 +992,10 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
             uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
             name: "test wosrkpace".into(),
         }),
-        vec![(
-            "http://ontology-a.org/a2.owx",
-            r##"
+        vec![
+            (
+                "http://ontology-a.org/a2.owx",
+                r##"
                 <?xml version="1.0"?>
                 <Ontology xmlns="http://www.w3.org/2002/07/owl#"
                      xml:base="http://foo.org/a"
@@ -1013,7 +1020,9 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
 
                 </Ontology>
             "##,
-        )],
+            ),
+            ("http://www.w3.org/2000/01/rdf-schema#", ""), // dummy
+        ],
     )
     .await;
 
@@ -1460,7 +1469,17 @@ async fn backend_did_open_should_load_external_rdf_via_http() {
 
     // Assert
 
+    while service.inner().busy_indexing.load(Ordering::Relaxed) {
+        thread::sleep(Duration::from_millis(10));
+        debug!("Waiting to exit");
+    }
+
+    service.inner().shutdown().await.unwrap();
+
     assert_empty_diagnostics(&service);
+
+    warn!("{:#?}", service.inner().busy_indexing);
+
     let workspaces = service.inner().workspaces.read();
     info!("{workspaces:#?}");
     let workspace = workspaces
@@ -2296,6 +2315,99 @@ async fn lock_test() {
     info!("{r:?}");
 }
 
+#[test(tokio::test)]
+async fn backend_did_open_should_load_external_documents_recursivly() {
+    // Arrange
+    let service = arrange_backend(
+        None,
+        vec![
+            (
+                "http://a/depth-1#",
+                indoc! {r#"
+                    <?xml version="1.0"?>
+                    <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                     xml:base="http://a/depth-1#"
+                     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+                     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+                     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+                     ontologyIRI="http://a/depth-1#">
+                        <Prefix name="" IRI="http://a/depth-1#"/>
+                        <Prefix name="owl" IRI="http://www.w3.org/2002/07/owl#"/>
+                        <Prefix name="rdf" IRI="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+                        <Prefix name="xml" IRI="http://www.w3.org/XML/1998/namespace"/>
+                        <Prefix name="xsd" IRI="http://www.w3.org/2001/XMLSchema#"/>
+                        <Prefix name="rdfs" IRI="http://www.w3.org/2000/01/rdf-schema#"/>
+                        <Prefix name="d-2" IRI="http://a/depth-2#"/>
+
+                        <Declaration>
+                            <Class IRI="Depth1Class"/>
+                        </Declaration>
+
+                        <AnnotationAssertion>
+                            <AnnotationProperty abbreviatedIRI="d-2:Depth2Annotation"/>
+                            <IRI>Depth1Class</IRI>
+                            <Literal xml:lang="en">Tutor</Literal>
+                        </AnnotationAssertion>
+
+                    </Ontology>
+                "#},
+            ),
+            (
+                "http://a/depth-2#",
+                indoc! {r#"
+                    <?xml version="1.0"?>
+                    <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                     xml:base="http://a/depth-2"
+                     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+                     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+                     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+                     ontologyIRI="http://a/depth-2">
+                        <Prefix name="" IRI="http://a/depth-2#"/>
+                        <Prefix name="owl" IRI="http://www.w3.org/2002/07/owl#"/>
+                        <Prefix name="rdf" IRI="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+                        <Prefix name="xml" IRI="http://www.w3.org/XML/1998/namespace"/>
+                        <Prefix name="xsd" IRI="http://www.w3.org/2001/XMLSchema#"/>
+                        <Prefix name="rdfs" IRI="http://www.w3.org/2000/01/rdf-schema#"/>
+                    </Ontology>
+                "#},
+            ),
+        ],
+    )
+    .await;
+
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let url = Url::from_file_path(dir.path().join("foo.omn")).unwrap();
+
+    let ontology = "
+        Prefix: d-1: <http://a/depth-1#>
+        Ontology: depth-0
+    ";
+
+    // Act
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.into(),
+            },
+        })
+        .await;
+
+    // Assert
+    assert_empty_diagnostics(&service);
+
+    let workspaces = service.inner().workspaces.read();
+    let workspace = workspaces.iter().exactly_one().unwrap().read();
+
+    assert_eq!(workspace.external_documents.len(), 2);
+}
+
 //////////////////////////
 // Setup & Arrange
 //////////////////////////
@@ -2435,16 +2547,15 @@ async fn arrange_backend(
     workspace_folder: Option<WorkspaceFolder>,
     data: Vec<(&str, &str)>,
 ) -> LspService<Backend> {
-    let (service, _) = LspService::new(|client| {
-        let mut backend = Backend::new(client);
-        backend.http_client = Arc::new(StaticClient {
-            data: data
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-        });
-        backend
-    });
+    let (service, _) = LspService::new(|client| Backend::new(client));
+
+    set_global_http_client(Box::new(StaticClient {
+        data: data
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+    }));
+
     arrange_init_backend(&service, workspace_folder).await;
     service
 }
@@ -2460,6 +2571,7 @@ fn assert_empty_diagnostics(service: &LspService<Backend>) {
     }
 }
 
+#[derive(Debug)]
 pub struct StaticClient {
     pub data: DashMap<String, String>,
 }
