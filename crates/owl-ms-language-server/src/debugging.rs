@@ -1,5 +1,4 @@
 use log::{debug, error, LevelFilter};
-use parking_lot::deadlock;
 use std::io::Write;
 use std::thread;
 use std::time::Duration;
@@ -99,20 +98,22 @@ pub fn init_logging(service: &LspService<Backend>) {
 }
 
 pub fn init_deadlock_detection() {
-    thread::spawn(move || loop {
-        thread::sleep(Duration::from_secs(10));
-        let deadlocks = deadlock::check_deadlock();
-        if deadlocks.is_empty() {
-            continue;
-        }
+    // do nothing :<
+    // TODO remove
+    // thread::spawn(move || loop {
+    //     thread::sleep(Duration::from_secs(10));
+    //     let deadlocks = deadlock::check_deadlock();
+    //     if deadlocks.is_empty() {
+    //         continue;
+    //     }
 
-        error!("{} deadlocks detected", deadlocks.len());
-        for (i, threads) in deadlocks.iter().enumerate() {
-            error!("Deadlock #{i}");
-            for t in threads {
-                error!("Thread Id {:#?}", t.thread_id());
-                error!("{:#?}", t.backtrace());
-            }
-        }
-    });
+    //     error!("{} deadlocks detected", deadlocks.len());
+    //     for (i, threads) in deadlocks.iter().enumerate() {
+    //         error!("Deadlock #{i}");
+    //         for t in threads {
+    //             error!("Thread Id {:#?}", t.thread_id());
+    //             error!("{:#?}", t.backtrace());
+    //         }
+    //     }
+    // });
 }

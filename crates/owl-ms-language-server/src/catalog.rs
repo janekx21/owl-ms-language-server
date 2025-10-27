@@ -45,6 +45,7 @@ impl Catalog {
     }
 }
 
+/// This is a kind of mapping between a ontology URL and a relative file path
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct CatalogUri {

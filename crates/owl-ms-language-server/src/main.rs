@@ -2,6 +2,7 @@ use clap::Parser as ClapParser;
 use log::error;
 use owl_ms_language_server::{
     debugging::{init_deadlock_detection, init_logging},
+    web::UreqClient,
     Backend,
 };
 use std::backtrace::Backtrace;
@@ -27,7 +28,9 @@ async fn main() {
 
     init_deadlock_detection();
 
-    let (service, socket) = LspService::new(Backend::new);
+    let http_client = Box::new(UreqClient);
+
+    let (service, socket) = LspService::new(|client| Backend::new(client, http_client));
 
     // This logs also to the service client
     init_logging(&service);
