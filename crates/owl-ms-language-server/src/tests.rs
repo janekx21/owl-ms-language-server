@@ -13,7 +13,7 @@ use pos::Position;
 use pretty_assertions::assert_eq;
 use ropey::Rope;
 use sophia::api::term::SimpleTerm;
-use std::{fs, path::Path, thread};
+use std::{fs, path::Path};
 use tempdir::{self, TempDir};
 use test_log::test;
 use tower_lsp::LspService;
@@ -1469,25 +1469,20 @@ async fn backend_did_open_should_load_external_rdf_via_http() {
 
     // Assert
 
-    while service.inner().busy_indexing.load(Ordering::Relaxed) {
-        thread::sleep(Duration::from_millis(10));
-        debug!("Waiting to exit");
-    }
-
-    service.inner().shutdown().await.unwrap();
-
     assert_empty_diagnostics(&service);
 
-    warn!("{:#?}", service.inner().busy_indexing);
-
     let workspaces = service.inner().workspaces.read();
-    info!("{workspaces:#?}");
     let workspace = workspaces
         .iter()
         .exactly_one()
         .expect("Only one workspace should be crated");
 
-    let workspace = workspace.read();
+    let mut workspace = workspace.write();
+
+    // TODO move to own function
+    while let Some(handle) = workspace.indexing_thread_handle.pop() {
+        handle.join().unwrap();
+    }
 
     assert_eq!(
         workspace.internal_documents.len(),
@@ -1495,7 +1490,7 @@ async fn backend_did_open_should_load_external_rdf_via_http() {
         "One internal document should be loaded. It was given"
     );
 
-    info!("{:#?}", workspace.external_documents);
+    info!("External Documents: {:#?}", workspace.external_documents);
     assert_eq!(
         workspace.external_documents.len(),
         1,

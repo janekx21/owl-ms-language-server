@@ -12,6 +12,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("The provided document can not be found {0}")]
     DocumentNotFound(Url),
+    #[error("The provided document was not loaded but requested {0}")]
+    DocumentNotLoaded(Url),
     #[error("The provided document type is not supported extention: {0}")]
     DocumentNotSupported(String),
     #[error("The provided document was empty: {0}")]

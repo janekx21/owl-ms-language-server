@@ -45,7 +45,6 @@ pub struct Backend {
     pub client: Client,
     position_encoding: RwLock<PositionEncodingKind>,
     workspaces: RwLock<Vec<Arc<RwLock<Workspace>>>>,
-    busy_indexing: Arc<AtomicBool>,
 }
 
 impl Backend {
@@ -57,7 +56,6 @@ impl Backend {
             client,
             position_encoding: PositionEncodingKind::UTF16.into(),
             workspaces: RwLock::new(vec![]),
-            busy_indexing: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -70,9 +68,8 @@ impl LanguageServer for Backend {
     /// Does not load or index the files inside the workspaces.
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         info!("Initialize language server -----------------------------");
+        info!("Client info:\n{:#?}", params.client_info);
         debug!("Client capabilities:\n{:#?}", params.capabilities);
-        debug!("Client locale:\n{:#?}", params.locale);
-        debug!("Client info:\n{:#?}", params.client_info);
 
         let encodings = params
             .capabilities
@@ -94,12 +91,6 @@ impl LanguageServer for Backend {
             .iter()
             .map(|wf| Arc::new(RwLock::new(Workspace::new(wf.clone()))))
             .collect();
-
-        for workspace in workspaces.iter() {
-            let sender = self.start_indexing(workspace);
-            let mut ws = workspace.write();
-            ws.index_sender = Some(sender);
-        }
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -247,28 +238,19 @@ impl LanguageServer for Backend {
 
             let client = self.client.clone();
             let url_cloned = url.clone();
-            // let a = tokio::spawn(async move {
+
             client
                 .publish_diagnostics(url_cloned, diagnostics, Some(internal_document.version))
                 .await;
-            // });
 
             let document = Workspace::insert_internal_document(&workspace, internal_document);
 
-            // TODO remove?
-            let ws = workspace.clone();
-            // let b = tokio::spawn(async move {
-            //     // InternalDocument::load_dependencies(&document).log_if_error();
-            //     {}
-            // });
-            if let Some(sender) = &ws.read_recursive().index_sender {
-                debug!("Send into index channel");
-                self.busy_indexing.store(true, Ordering::Relaxed);
-                sender.send(url.clone()).unwrap();
-            }
-
-            // tokio::try_join!(a)?;
-            debug!("here");
+            workspace
+                .write()
+                .indexing_thread_handle
+                .push(thread::spawn(move || {
+                    InternalDocument::load_dependencies(&document).log_if_error();
+                }));
 
             Ok(())
         }
@@ -1093,28 +1075,5 @@ impl Backend {
         let workspace = self.find_workspace(url)?;
         let workspace = workspace.read_timeout()?;
         workspace.get_internal_document(url)
-    }
-
-    fn start_indexing(&self, workspace: &Arc<RwLock<Workspace>>) -> Sender<Url> {
-        let (sender, receiver) = mpsc::channel::<Url>();
-        let workspace = workspace.clone();
-
-        let bi = self.busy_indexing.clone();
-        bi.store(true, Ordering::Relaxed);
-        thread::spawn(move || {
-            debug!("Start indexing...");
-            bi.store(false, Ordering::Relaxed);
-            while let Ok(url) = receiver.recv() {
-                bi.store(true, Ordering::Relaxed);
-                Backend::index_url(&url, &workspace);
-                bi.store(false, Ordering::Relaxed);
-            }
-        });
-        sender
-    }
-
-    fn index_url(url: &Url, workspace: &Arc<RwLock<Workspace>>) {
-        info!("Indexing URL {url}");
-        Workspace::resolve_url_to_document(workspace, url).log_if_error();
     }
 }

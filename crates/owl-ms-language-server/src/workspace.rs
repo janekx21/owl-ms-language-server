@@ -31,8 +31,8 @@ use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter::once;
 use std::path::Path;
-use std::sync::mpsc::Sender;
 use std::sync::{LazyLock, Weak};
+use std::thread::{self, JoinHandle};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Display,
@@ -79,7 +79,7 @@ pub struct Workspace {
     pub external_documents: DashMap<Url, Arc<RwLock<ExternalDocument>>>,
     pub folder: WorkspaceFolder,
     pub catalogs: Vec<Catalog>,
-    pub index_sender: Option<Sender<Url>>,
+    pub indexing_thread_handle: Vec<JoinHandle<()>>,
 }
 
 impl Workspace {
@@ -94,7 +94,7 @@ impl Workspace {
             external_documents: DashMap::new(),
             folder: workspace_folder,
             catalogs,
-            index_sender: None,
+            indexing_thread_handle: Vec::new(),
         }
     }
 
@@ -187,8 +187,8 @@ impl Workspace {
         timeit("rechable docs", || doc.reachable_docs_recusive())
             .iter()
             .filter_map(|url| {
-                if let Ok(doc) = timeit("\tresolve document", || {
-                    Workspace::resolve_url_to_document(workspace, url)
+                if let Some(doc) = timeit("\tresolve document", || {
+                    workspace.read().document_by_url(url)
                 }) {
                     match &doc {
                         DocumentReference::Internal(rw_lock) => {
@@ -355,6 +355,17 @@ impl Workspace {
             ext => Err(Error::DocumentNotSupported(ext.to_string())),
         }
     }
+
+    pub fn index_url(workspace: &Arc<RwLock<Workspace>>, url: &Url) {
+        let ws = workspace.clone();
+        let url = url.clone();
+        let handle = thread::spawn(move || {
+            debug!("Start indexing of {url}...");
+            Workspace::resolve_url_to_document(&ws, &url).log_if_error();
+            debug!("End indexing of {url}");
+        });
+        workspace.write().indexing_thread_handle.push(handle);
+    }
 }
 
 fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
@@ -454,7 +465,7 @@ impl InternalDocument {
         }
     }
 
-    /// Loads and returns all document URL's that can be reached from this internal document
+    /// Returns all document URL's that can be reached from this internal document
     fn reachable_docs_recusive(&self) -> Vec<Url> {
         let mut set: HashSet<Url> = HashSet::new();
         self.reachable_docs_recursive_helper(&mut set)
@@ -470,6 +481,7 @@ impl InternalDocument {
 
         result.insert(self.uri.clone());
 
+        let urls=self.reachable_urls();
         // Load both imports and prefixes of this internal document
         let imports = timeit("\timports query", || self.imports());
         let prefixes = self
@@ -487,7 +499,10 @@ impl InternalDocument {
             .unique()
             .filter_map(|url| {
                 timeit("\t resolve url to doc", || {
-                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
+                    self.try_get_workspace()?
+                        .read_recursive()
+                        .document_by_url(&url)
+                        .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
                 })
                 .inspect_log()
                 .ok()
@@ -507,6 +522,25 @@ impl InternalDocument {
             }
         }
         Ok(())
+    }
+
+    fn reachable_urls(&self) -> Vec<Url> {
+        let imports = self.imports();
+
+        let prefixes = self
+            .prefixes()
+            .into_iter()
+            // Filter out the empty prefix ":"
+            .filter_map(|(prefix, url)| if prefix.is_empty() { None } else { Some(url) })
+            .filter_map(|url| Url::parse(&url).ok())
+            // Filter out the current document as a prefix (most likely the empty prefix ":")
+            .filter(|url| url != &self.uri);
+
+         imports
+            .into_iter()
+            .chain(prefixes)
+            .unique()
+            .collect_vec()
     }
 
     pub fn imports(&self) -> Vec<Url> {
@@ -891,8 +925,11 @@ impl InternalDocument {
     /// Loads all documents that can be reached by this document
     pub fn load_dependencies(document: &Arc<RwLock<InternalDocument>>) -> Result<()> {
         // TODO fill func
-        // let document = document.read();
+        let document = document.read_recursive();
+        document.reachable_docs_recusive()
         //document.reachable_docs_recusive(http_client);
+        info!("TODO loading dependencies here!");
+
         Ok(())
     }
 }
