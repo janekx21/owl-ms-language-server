@@ -208,7 +208,7 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         async {
             let url = params.text_document.uri;
-            info!("Opend file {url}",);
+            info!("Did open {url} ...",);
             let workspace = self.find_workspace(&url)?;
             let internal_document = InternalDocument::new(
                 url.clone(),
@@ -245,12 +245,13 @@ impl LanguageServer for Backend {
 
             let document = Workspace::insert_internal_document(&workspace, internal_document);
 
-            workspace
-                .write()
-                .indexing_thread_handle
-                .push(thread::spawn(move || {
-                    InternalDocument::load_dependencies(&document).log_if_error();
-                }));
+            let handle = thread::spawn(move || {
+                InternalDocument::load_dependencies(&document).log_if_error();
+            });
+
+            workspace.write().indexing_thread_handle.push(handle);
+
+            debug!("Did open!");
 
             Ok(())
         }
@@ -261,7 +262,7 @@ impl LanguageServer for Backend {
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         (|| {
             debug!(
-                "did_change at {} with version {}",
+                "Did change at {} with version {}",
                 params
                     .text_document
                     .uri
@@ -309,7 +310,7 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         (|| {
             debug!(
-                "did_close at {}",
+                "Did close at {}",
                 params
                     .text_document
                     .uri
@@ -363,16 +364,14 @@ impl LanguageServer for Backend {
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        let encoding = self.position_encoding.read();
         let url = params.text_document.uri;
+        info!("Inlay hint at {url}");
 
         let document = self.get_internal_document(&url)?;
 
-        let document = document.read();
-        let range = Range::from_lsp(
-            &params.range,
-            &document.rope,
-            &self.position_encoding.read(),
-        )?;
+        let document = document.read_timeout()?;
+        let range = Range::from_lsp(&params.range, &document.rope, &encoding)?;
         debug!(
             "inlay_hint at {}:{range}",
             url.path_segments()
@@ -381,7 +380,7 @@ impl LanguageServer for Backend {
                 .ok_or(Error::InvalidUrl(url.clone()))?
         );
 
-        let hints = document.inlay_hint(range, &self.position_encoding.read())?;
+        let hints = document.inlay_hint(range, &encoding)?;
 
         Ok(Some(hints))
     }

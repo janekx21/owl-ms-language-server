@@ -267,12 +267,13 @@ impl Workspace {
         None
     }
 
-    /// Resolves a URL (file or http/https protocol) to a document that is inserted into this workspace
+    /// Resolves/Loads a URL (file or http/https protocol) to a document that is inserted into this workspace
+    /// Locks workspace for read
     pub fn resolve_url_to_document(
         workspace: &Arc<RwLock<Workspace>>,
         url: &Url,
     ) -> Result<DocumentReference> {
-        let workspace_read = workspace.read();
+        let workspace_read = workspace.read_recursive();
         if let Some(doc) = workspace_read.document_by_url(url) {
             return Ok(doc);
         }
@@ -466,6 +467,7 @@ impl InternalDocument {
     }
 
     /// Returns all document URL's that can be reached from this internal document
+    /// Does not load anything
     fn reachable_docs_recusive(&self) -> Vec<Url> {
         let mut set: HashSet<Url> = HashSet::new();
         self.reachable_docs_recursive_helper(&mut set)
@@ -481,27 +483,16 @@ impl InternalDocument {
 
         result.insert(self.uri.clone());
 
-        let urls=self.reachable_urls();
+        let urls = self.reachable_urls();
         // Load both imports and prefixes of this internal document
-        let imports = timeit("\timports query", || self.imports());
-        let prefixes = self
-            .prefixes()
-            .into_iter()
-            // Filter out the empty prefix ":"
-            .filter_map(|(prefix, url)| if prefix.is_empty() { None } else { Some(url) })
-            .filter_map(|url| Url::parse(&url).ok())
-            // Filter out the current document as a prefix (most likely the empty prefix ":")
-            .filter(|url| url != &self.uri);
 
-        let docs = imports
-            .into_iter()
-            .chain(prefixes)
-            .unique()
+        let docs = urls
+            .iter()
             .filter_map(|url| {
                 timeit("\t resolve url to doc", || {
                     self.try_get_workspace()?
                         .read_recursive()
-                        .document_by_url(&url)
+                        .document_by_url(url)
                         .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
                 })
                 .inspect_log()
@@ -536,11 +527,7 @@ impl InternalDocument {
             // Filter out the current document as a prefix (most likely the empty prefix ":")
             .filter(|url| url != &self.uri);
 
-         imports
-            .into_iter()
-            .chain(prefixes)
-            .unique()
-            .collect_vec()
+        imports.into_iter().chain(prefixes).unique().collect_vec()
     }
 
     pub fn imports(&self) -> Vec<Url> {
@@ -923,12 +910,26 @@ impl InternalDocument {
     }
 
     /// Loads all documents that can be reached by this document
+    /// Locks document
     pub fn load_dependencies(document: &Arc<RwLock<InternalDocument>>) -> Result<()> {
-        // TODO fill func
-        let document = document.read_recursive();
-        document.reachable_docs_recusive()
-        //document.reachable_docs_recusive(http_client);
-        info!("TODO loading dependencies here!");
+        let document = document.read_timeout()?;
+        let urls = document.reachable_urls();
+        debug!("WTF");
+        debug!(
+            "Loading dependencies of {} len = {}",
+            document.uri,
+            urls.len()
+        );
+        debug!("here -1");
+        let workspace = document.try_get_workspace()?;
+        debug!("here");
+        drop(document);
+        debug!("here 2");
+
+        for url in urls {
+            debug!("Load dependency {url}");
+            Workspace::resolve_url_to_document(&workspace, &url).log_if_error();
+        }
 
         Ok(())
     }
