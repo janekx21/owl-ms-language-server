@@ -1,7 +1,5 @@
-use log::{debug, error, LevelFilter};
+use log::{debug, LevelFilter};
 use std::io::Write;
-use std::thread;
-use std::time::Duration;
 use std::{env, fs::File};
 use tokio::task;
 use tower_lsp::{lsp_types::MessageType, Client, LspService};

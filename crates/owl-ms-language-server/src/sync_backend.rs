@@ -1,7 +1,5 @@
-use horned_owl::model::ArcStr;
 use log::{debug, warn};
 use tower_lsp::lsp_types::{Url, WorkspaceFolder};
-use tree_sitter_c2rust::Parser;
 
 use crate::{
     error::{Error, Result as MyResult},
@@ -87,12 +85,6 @@ impl SyncBackend {
             .ok_or(Error::DocumentNotFound(url.clone()))?;
         let path = url.to_file_path().unwrap(); // TODO
         Ok((workspace.get_internal_document(&path)?, workspace))
-    }
-    /// Convinience function to fetch internal document
-    pub fn get_or_insert_internal_document(&mut self, url: &Url) -> MyResult<&InternalDocument> {
-        let workspace = self.get_or_insert_workspace_mut(url);
-        let path = url.to_file_path().unwrap(); // TODO
-        workspace.get_internal_document(&path)
     }
     /// Convinience function to fetch internal document
     pub fn take_internal_document(

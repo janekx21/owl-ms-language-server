@@ -460,8 +460,8 @@ impl LanguageServer for Backend {
                     url,
                     vec![TextEdit {
                         range: lsp_types::Range {
-                            start: end.into_lsp(&doc.rope, &self.encoding())?,
-                            end: end.into_lsp(&doc.rope, &self.encoding())?,
+                            start: end.into_lsp(&doc.rope, self.encoding())?,
+                            end: end.into_lsp(&doc.rope, self.encoding())?,
                         },
                         new_text:
                             "\nClass: new_class\n    Annotations:\n        rdfs:label \"new class\""
@@ -488,13 +488,12 @@ impl LanguageServer for Backend {
         let pos: Position = Position::from_lsp(
             params.text_document_position.position,
             &doc.rope,
-            &self.encoding(),
+            self.encoding(),
         )?;
 
         let kws = timeit("try_keywords_at_position", || {
             doc.try_keywords_at_position(pos)
-        })
-        .await;
+        });
 
         debug!("The resultingn kws are {kws:#?}");
 
@@ -532,7 +531,7 @@ impl LanguageServer for Backend {
                         Some(CompletionItem {
                             label: iri,
                             kind: Some(CompletionItemKind::REFERENCE),
-                            detail: Some(frame.info_display(&workspace)),
+                            detail: Some(frame.info_display(workspace)),
                             // TODO #29 add details from the frame
                             ..Default::default()
                         })
@@ -558,7 +557,7 @@ impl LanguageServer for Backend {
         let sync = self.read_sync().await;
         let (doc, _) = sync.get_internal_document(&url)?;
 
-        let tokens = doc.sematic_tokens(None, &self.encoding())?;
+        let tokens = doc.sematic_tokens(None, self.encoding())?;
 
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
@@ -634,7 +633,7 @@ impl LanguageServer for Backend {
             .flat_map(|workspace| {
                 let ws = workspace;
                 ws.internal_documents()
-                    .flat_map(|doc| doc.all_frame_infos())
+                    .flat_map(workspace::InternalDocument::all_frame_infos)
                     .collect_vec()
             })
             .collect_vec();
@@ -654,7 +653,7 @@ impl LanguageServer for Backend {
                     let url = &definition.uri;
                     let location = sync
                         .get_internal_document(url)
-                        .map(|(doc, _)| definition.clone().into_lsp(&doc.rope, &self.encoding()))
+                        .map(|(doc, _)| definition.clone().into_lsp(&doc.rope, self.encoding()))
                         .and_then(|r| r.inspect_err(|e| error!("{e}")))
                         .unwrap_or(Location {
                             uri: url.clone(),
@@ -780,7 +779,7 @@ impl LanguageServer for Backend {
 
         let sync = self.read_sync().await;
         let (doc, _) = sync.get_internal_document(&url)?;
-        let pos: Position = Position::from_lsp(params.position, &doc.rope, &self.encoding())?;
+        let pos: Position = Position::from_lsp(params.position, &doc.rope, self.encoding())?;
 
         fn node_range(position: Position, doc: &InternalDocument) -> Option<Range> {
             debug!("prepare_rename try {position:?}");
@@ -835,7 +834,7 @@ impl LanguageServer for Backend {
             }
         }
 
-        let range = node_range(pos, &doc)
+        let range = node_range(pos, doc)
             .or_else(|| {
                 // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
                 // For example: ThisIsSomeIri| other text
@@ -843,11 +842,11 @@ impl LanguageServer for Backend {
                 //                       Cursor
                 debug!("prepare rename try one position left");
                 let position = pos.moved_left(1, &doc.rope);
-                node_range(position, &doc)
+                node_range(position, doc)
             })
             .map(|range| {
                 Ok(PrepareRenameResponse::Range(
-                    range.into_lsp(&doc.rope, &self.encoding())?,
+                    range.into_lsp(&doc.rope, self.encoding())?,
                 ))
             })
             .and_then(|r| r.inspect_err(|e: &Error| error!("{e}")).ok());
@@ -870,7 +869,7 @@ impl LanguageServer for Backend {
             self.encoding(),
         )?;
 
-        let old_and_new_iri = if let Some(x) = rename_helper(pos, &doc, new_name.clone())? {
+        let old_and_new_iri = if let Some(x) = rename_helper(pos, doc, new_name.clone())? {
             Some(x)
         } else {
             // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
@@ -879,11 +878,8 @@ impl LanguageServer for Backend {
             //                       Cursor
             debug!("prepare rename try one position left");
             let position = pos.moved_left(1, &doc.rope);
-            rename_helper(position, &doc, new_name)?
+            rename_helper(position, doc, new_name)?
         };
-
-        drop(doc);
-        drop(url);
 
         if let Some((full_iri, new_iri, iri_kind, original)) = old_and_new_iri {
             debug!("renaming resolved iris from {full_iri:?} to {new_iri:?}");

@@ -153,6 +153,7 @@ impl Workspace {
             .expect("external document should exsist")
     }
 
+    #[cfg(test)]
     pub fn external_documents(
         &self,
     ) -> std::collections::hash_map::Values<'_, Url, ExternalDocument> {
@@ -426,19 +427,6 @@ impl Workspace {
             ext => Err(Error::DocumentNotSupported(ext.to_string())),
         }
     }
-
-    pub fn index_url(workspace: &Workspace, url: &Url) {
-        // let ws = workspace.clone();
-        // let url = url.clone();
-        // let handle = thread::spawn(move || {
-        //     debug!("Start indexing of {url}...");
-        //     Workspace::resolve_url_to_document(&ws, &url).log_if_error();
-        //     debug!("End indexing of {url}");
-        // });
-        // workspace.write().indexing_thread_handle.push(handle);
-        // TODO
-        debug!("TODO");
-    }
 }
 
 fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
@@ -455,13 +443,6 @@ pub enum DocumentReference<'a> {
     // Not boxing this is fine because the size ratio is just about 1.6
     Internal(&'a InternalDocument),
     External(&'a ExternalDocument),
-}
-
-#[derive(Debug)]
-pub enum Document {
-    // Not boxing this is fine because the size ratio is just about 1.6
-    Internal(InternalDocument),
-    External(ExternalDocument),
 }
 
 /// Internal documents are OMN files on disk.
@@ -873,7 +854,7 @@ impl InternalDocument {
             .collect_vec()
     }
 
-    pub async fn try_keywords_at_position(&self, cursor: Position) -> Vec<String> {
+    pub fn try_keywords_at_position(&self, cursor: Position) -> Vec<String> {
         let mut parser = lock_global_parser();
         let rope = self.rope.clone();
         let tree = self.tree.clone();
@@ -1369,7 +1350,7 @@ impl ExternalDocument {
         let mut buffer = text.as_bytes();
         horned_owl::io::owx::reader::read_with_build::<ArcStr, SetOntology<ArcStr>, _>(
             &mut buffer,
-            &builder,
+            builder,
         )
         .map_err(Error::HornedOwl)
         .map(|(ontology, _)| {
@@ -2339,6 +2320,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn internal_document_get_frame_info_should_show_definitions() {
         // Arrange
         let doc = InternalDocument::new(
@@ -2365,7 +2347,7 @@ mod tests {
         assert_eq!(
             info.definitions,
             vec![Location {
-                uri: "http://foo/14329076".parse().unwrap(),
+                uri: "file:///foo/14329076".parse().unwrap(),
                 range: Range {
                     start: Position::new(2, 20),
                     end: Position::new(5, 55),

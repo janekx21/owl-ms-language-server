@@ -28,7 +28,7 @@ async fn main() {
 
     init_deadlock_detection();
 
-    let http_client = Box::new(UreqClient);
+    let http_client = Box::new(UreqClient::default());
 
     let (service, socket) = LspService::new(|client| Backend::new(client, http_client));
 
