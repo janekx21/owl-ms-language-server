@@ -1027,9 +1027,8 @@ impl InternalDocument {
         let sync_ref_clone = sync_ref.to_owned();
         let path = path.to_owned();
         let http_client = http_client.to_owned();
-        // TODO return handle?
         tokio::spawn(async move {
-            let mut todo: LinkedList<Url> = {
+            let mut todo: LinkedList<(Url, u32)> = {
                 let sync = sync_ref_clone.read().await;
                 let workspace = sync
                     .get_workspace(
@@ -1039,7 +1038,11 @@ impl InternalDocument {
                     .expect("Workspace for document should exsist");
 
                 let document = workspace.get_internal_document(&path).unwrap();
-                document.reachable_urls().into_iter().collect()
+                document
+                    .reachable_urls()
+                    .into_iter()
+                    .map(|u| (u, 1))
+                    .collect()
             };
 
             let mut done = HashSet::<Url>::new();
@@ -1050,10 +1053,14 @@ impl InternalDocument {
                 todo.len()
             );
 
-            while let Some(url) = todo.pop_front() {
+            while let Some((url, depth)) = todo.pop_front() {
                 debug!("Indexing {url} ...");
                 if done.contains(&url) {
                     debug!("URL {url} was indexed. Skip");
+                    continue;
+                }
+                if depth > 2 {
+                    debug!("Depth {depth} exceeded 2 for {url}. Skip");
                     continue;
                 }
 
@@ -1077,11 +1084,11 @@ impl InternalDocument {
                     None
                 };
 
-                match resolved_doc {
-                    Some(doc) => match doc {
+                if let Some(doc) = resolved_doc {
+                    match doc {
                         Document::Internal(internal_document) => {
                             for ele in internal_document.reachable_urls() {
-                                todo.push_back(ele);
+                                todo.push_back((ele, 1));
                             }
                             {
                                 let mut sync = sync_ref_clone.write().await;
@@ -1093,8 +1100,10 @@ impl InternalDocument {
                             }
                         }
                         Document::External(external_document) => {
+                            // TODO maybe remove this?
+                            // Lets not do that yet
                             for ele in external_document.reachable_urls() {
-                                todo.push_back(ele);
+                                todo.push_back((ele, depth + 1));
                             }
                             {
                                 let mut sync = sync_ref_clone.write().await;
@@ -1105,11 +1114,9 @@ impl InternalDocument {
                                 workspace.insert_external_document(external_document);
                             }
                         }
-                    },
-                    None => {
-                        // TODO do not warn here :>
-                        warn!("Resolving {url} was not needed. Already loaded");
                     }
+                } else {
+                    // The doc is already resolved
                 }
 
                 done.insert(url);
@@ -1380,15 +1387,17 @@ impl ExternalDocument {
             });
 
         if let Ok(doc) = &doc {
-            debug!("parsing worked! {} turtle:\n{}", doc.uri, {
-                use sophia::api::serializer::Stringifier;
-                use sophia::api::serializer::TripleSerializer;
-                use sophia::turtle::serializer::nt::NtSerializer;
-                let mut nt_stringifier = NtSerializer::new_stringifier();
-                let graph = &doc.graph.0;
-                let str = nt_stringifier.serialize_graph(&graph).unwrap().as_str();
-                str.to_string()
-            });
+            debug!("parsing worked! {}", doc.uri);
+            // debug!("parsing worked! {} turtle:\n{}", doc.uri,
+            //     {
+            //     use sophia::api::serializer::Stringifier;
+            //     use sophia::api::serializer::TripleSerializer;
+            //     use sophia::turtle::serializer::nt::NtSerializer;
+            //     let mut nt_stringifier = NtSerializer::new_stringifier();
+            //     let graph = &doc.graph.0;
+            //     let str = nt_stringifier.serialize_graph(&graph).unwrap().as_str();
+            //     str.to_string()
+            // });
         }
         doc
     }
@@ -1427,27 +1436,22 @@ impl ExternalDocument {
         })
     }
 
-    fn imports(&self) -> Vec<Url> {
+    fn imports(&self) -> Box<dyn Iterator<Item = Url> + '_> {
         let graph = &self.graph.0;
+
+        // `graph.triples_matching` will exeed the stack size (Stack Overflow) on large graphs
         let iris = graph
-            .triples_matching(
-                Any,
-                |p: SimpleTerm<'_>| {
-                    p.iri()
-                        .is_some_and(|iri| iri.as_str() == "http://www.w3.org/2002/07/owl#imports")
-                },
-                Any,
-            )
-            // .inspect(|a| debug!("inspect={a:?}"))
+            .triples()
             .flatten()
+            .filter(|[_, p, _]| {
+                p.iri()
+                    .is_some_and(|iri| iri.as_str() == "http://www.w3.org/2002/07/owl#imports")
+            })
             .filter_map(|[_, _, o]| o.iri())
             .flat_map(|iri| Url::parse(&iri))
-            .unique()
-            .collect_vec();
+            .unique();
 
-        // debug!("iris={iris:#?}");
-
-        iris
+        Box::new(iris)
     }
 
     // Because external documents most likley relate to other external ones and because there are many of them in a graph the depth should be limited
@@ -1473,8 +1477,8 @@ impl ExternalDocument {
         // debug!("graph name {}", self.graph.1);
 
         // TODO shitty shild urls :<
-        let docs = urls.iter().filter_map(|url| {
-            workspace.document_by_url(url)
+        let docs = urls.filter_map(|url| {
+            workspace.document_by_url(&url)
             // TODO maybe reactivate but for now lets not log here
             // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
             // .inspect_log()
@@ -1515,7 +1519,7 @@ impl ExternalDocument {
         Ok(())
     }
 
-    pub fn reachable_urls(&self) -> Vec<Url> {
+    pub fn reachable_urls(&self) -> Box<dyn Iterator<Item = Url> + '_> {
         let imports = self.imports();
 
         // TODO this is not that stable yet
@@ -1550,7 +1554,7 @@ impl ExternalDocument {
             .unique();
         // .inspect(|url| debug!("Child url {url}"));
 
-        imports.into_iter().chain(child_urls).unique().collect_vec()
+        Box::new(imports.into_iter().chain(child_urls).unique())
     }
 
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
@@ -2477,7 +2481,7 @@ mod tests {
         .unwrap();
 
         // Act
-        let urls = external_doc.imports();
+        let urls = external_doc.imports().collect_vec();
 
         // Assert
         assert!(urls.contains(&Url::parse("http://www.example.com/other-property").unwrap()));
