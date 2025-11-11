@@ -225,18 +225,27 @@ impl Workspace {
         iri: &Iri,
         doc: &InternalDocument,
     ) -> Option<FrameInfo> {
-        timeit("rechable docs", || doc.reachable_docs_recusive(workspace))
+        // timeit("rechable docs", ||
+        doc.reachable_docs_recusive(workspace)
+            // )
             .iter()
             .filter_map(|url| {
-                if let Some(doc) = timeit("\tresolve document", || workspace.document_by_url(url)) {
+                if let Some(doc) =
+                    // timeit("\tresolve document", ||
+                    workspace.document_by_url(url)
+                // )
+                {
                     match &doc {
                         DocumentReference::Internal(doc) => {
-                            timeit("\t|-> get frame info internal", || {
-                                doc.frame_info_by_iri(iri)
-                            })
+                            // timeit("\t|-> get frame info internal", || {
+                            doc.frame_info_by_iri(iri)
+                            // })
                         }
                         DocumentReference::External(doc) => {
-                            timeit("\t|-> get frame info external", || doc.get_frame_info(iri))
+                            // timeit("\t|-> get frame info external", ||
+
+                            doc.get_frame_info(iri)
+                            // )
                         }
                     }
                 } else {
@@ -553,6 +562,7 @@ impl InternalDocument {
 
     /// Returns all document URL's that can be reached from this internal document
     /// Does not load anything
+    // TODO  maybe cache this for some time 1sec or so
     fn reachable_docs_recusive(&self, workspace: &Workspace) -> Vec<Url> {
         let mut set: HashSet<Url> = HashSet::new();
         self.reachable_docs_recursive_helper(&mut set, workspace)
@@ -577,11 +587,11 @@ impl InternalDocument {
         let docs = urls
             .iter()
             .filter_map(|url| {
-                workspace
-                    .document_by_url(url)
-                    .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
-                    .inspect_log()
-                    .ok()
+                workspace.document_by_url(url)
+                // TODO maybe reactivate but for now lets not log here
+                // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
+                // .inspect_log()
+                // .ok()
             })
             .collect_vec();
 
@@ -816,9 +826,10 @@ impl InternalDocument {
                 let iri = trim_full_iri(capture.node.text);
                 let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
-                let label = timeit("get frame info recursive", || {
+                let label =
+                // timeit("get frame info recursive", || {
                     Workspace::get_frame_info_recursive(workspace, &iri, self)
-                })
+                // })
                 .and_then(|frame_info| frame_info.label())
                 .unwrap_or_default();
 
@@ -1203,7 +1214,7 @@ fn document_all_frame_infos(doc: &InternalDocument) -> HashMap<Iri, FrameInfo> {
 }
 
 #[cached(
-    size = 200,
+    size = 2000,
     key = "u64",
     convert = r#"{
         let mut hasher = DefaultHasher::new();
@@ -1471,11 +1482,11 @@ impl ExternalDocument {
         let docs = urls
             .iter()
             .filter_map(|url| {
-                workspace
-                    .document_by_url(url)
-                    .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
-                    .inspect_log()
-                    .ok()
+                workspace.document_by_url(url)
+                // TODO maybe reactivate but for now lets not log here
+                // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
+                // .inspect_log()
+                // .ok()
             })
             .collect_vec();
 
@@ -1557,7 +1568,7 @@ impl ExternalDocument {
 }
 
 #[cached(
-    size = 200,
+    size = 2000,
     key = "u64",
     convert = r#"{
             let mut hasher = DefaultHasher::new();
