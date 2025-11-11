@@ -67,10 +67,11 @@ impl SyncBackend {
     pub fn get_workspace(&self, url: &Url) -> Option<&Workspace> {
         debug!("get workspace");
         let path = url.to_file_path().unwrap(); // TODO
-                                                // TODO there are problems when the workspace is changing
-                                                // - A document could be in its own workspace
-                                                // - Then a catalog file is created or modified that would place a document in that workspace
-                                                // - Because of the early return the document can never move to the new workspace
+
+        // TODO there are problems when the workspace is changing
+        // - A document could be in its own workspace
+        // - Then a catalog file is created or modified that would place a document in that workspace
+        // - Because of the early return the document can never move to the new workspace
         self.workspaces.iter().find(|workspace| {
             workspace.contains_internal_document(&path)
                 || workspace.catalog_contains_url(url)

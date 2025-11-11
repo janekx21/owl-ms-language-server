@@ -43,10 +43,12 @@ pub static LANGUAGE: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_ms::L
 
 pub struct Backend {
     pub client: Client,
-    pub http_client: Box<dyn HttpClient>,
+    pub http_client: Arc<dyn HttpClient>,
     position_encoding: OnceCell<PositionEncodingKind>,
-    sync: Arc<RwLock<SyncBackend>>,
+    sync: SyncRef,
 }
+
+pub type SyncRef = Arc<RwLock<SyncBackend>>;
 
 impl Backend {
     /// Creates a new [`Backend`] with a Ureq http client and UTF16 encoding.
@@ -55,7 +57,7 @@ impl Backend {
     pub fn new(client: Client, http_client: Box<dyn HttpClient>) -> Self {
         Backend {
             client,
-            http_client,
+            http_client: http_client.into(),
             position_encoding: OnceCell::new(),
             sync: Arc::new(RwLock::new(SyncBackend::default())),
         }
@@ -226,15 +228,18 @@ impl LanguageServer for Backend {
             let doc = workspace.insert_internal_document(internal_document);
             let path = doc.path.clone();
 
-            // drop(document);
-            // drop(workspace);
+            let handle = InternalDocument::load_dependencies(&path, &self.sync, &self.http_client);
 
-            // let (document, workspace) = sync.get_internal_document(&url).unwrap();
-            // TODO
-            // let sync_arc = self.sync.clone();
-            // let handle = tokio::spawn(async {
-            InternalDocument::load_dependencies(&path, workspace, &*self.http_client);
-            // });
+            #[cfg(test)]
+            {
+                // TODO is this fine?
+                drop(sync);
+                handle.await.unwrap();
+            }
+            #[cfg(not(test))]
+            {
+                workspace.index_handles.push(handle);
+            }
 
             debug!("Did open!");
 

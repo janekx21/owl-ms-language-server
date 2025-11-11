@@ -6,6 +6,7 @@ use crate::queries::{
     self, treesitter_highlight_capture_into_semantic_token_type_index, NODE_TYPES,
 };
 use crate::web::HttpClient;
+use crate::SyncRef;
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
     rope_provider::RopeProvider, LANGUAGE,
@@ -32,13 +33,14 @@ use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter::once;
 use std::path::Path;
-use std::sync::{LazyLock, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Display,
     fs,
     path::PathBuf,
 };
+use tokio::task::JoinHandle;
 use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, InlayHint, InlayHintLabel, PositionEncodingKind, SemanticToken,
     SymbolKind, Url, WorkspaceFolder,
@@ -83,6 +85,8 @@ pub struct Workspace {
     external_documents: HashMap<Url, ExternalDocument>,
     folder: WorkspaceFolder,
     catalogs: Vec<Catalog>,
+    // TODO remove pub
+    pub index_handles: Vec<JoinHandle<()>>,
 }
 
 impl Display for Workspace {
@@ -103,6 +107,7 @@ impl Workspace {
             external_documents: HashMap::new(),
             folder: workspace_folder,
             catalogs,
+            index_handles: Vec::new(),
         }
     }
 
@@ -310,13 +315,13 @@ impl Workspace {
     // TODO can this be done without two calls?
     /// Resolves/Loads a URL (file or http/https protocol) to a document that is inserted into this workspace
     /// Locks workspace for read
-    pub fn resolve_url_to_document<'a>(
-        workspace: &'a mut Workspace,
+    pub fn resolve_url_to_document(
+        workspace: &Workspace,
         url: &Url,
         http_client: &dyn HttpClient,
-    ) -> Result<DocumentReference<'a>> {
+    ) -> Result<Option<Document>> {
         if workspace.document_by_url(url).is_some() {
-            return Ok(workspace.document_by_url(url).unwrap());
+            return Ok(None);
         }
 
         // TODO mybe use workspace.url_to_path_with_catalog(url)
@@ -325,29 +330,27 @@ impl Workspace {
             warn!("Url {url} could not be found in any catalog");
             let document_text = http_client.get(url.as_str())?;
             let document = ExternalDocument::new(document_text, url.clone())?;
-            // TODO cannot borrow `*workspace` as mutable because it is also borrowed as immutable
-            let doc = workspace.insert_external_document(document);
-            return Ok(DocumentReference::External(doc));
+            return Ok(Some(Document::External(document)));
         };
 
         if let Ok(real_url) = Url::parse(&catalog_uri.uri) {
             if workspace.document_by_url(&real_url).is_some() {
-                return Ok(workspace.document_by_url(&real_url).unwrap());
+                return Ok(None);
             }
 
             if let Ok(path) = real_url.to_file_path() {
                 // This is an abolute file path url
-                // TODO cannot borrow `*workspace` as mutable because it is also borrowed as immutable
-                Workspace::resolve_path_to_document(workspace, &path, url.clone())
+                Ok(Some(Workspace::resolve_path_to_document(
+                    &path,
+                    url.clone(),
+                )?))
             } else {
                 // This is an external url
                 let document_text = http_client.get(real_url.as_str())?;
                 // TODO maybe use url or just the requested url
                 // let document = ExternalDocument::new(document_text, url)?;
                 let document = ExternalDocument::new(document_text, url.clone())?;
-                // TODO cannot borrow `*workspace` as mutable because it is also borrowed as immutable
-                let doc = workspace.insert_external_document(document);
-                Ok(DocumentReference::External(doc))
+                Ok(Some(Document::External(document)))
             }
         } else {
             // The catalog uri is most likley a relative file path, so lets try that
@@ -355,11 +358,13 @@ impl Workspace {
             let path_url =
                 Url::from_file_path(&path).map_err(|()| Error::InvalidFilePath(path.clone()))?;
             if workspace.document_by_url(&path_url).is_some() {
-                return Ok(workspace.document_by_url(&path_url).unwrap());
+                return Ok(None);
             }
 
-            // TODO cannot borrow `*workspace` as mutable because it is also borrowed as immutable
-            Workspace::resolve_path_to_document(workspace, &path, url.clone())
+            Ok(Some(Workspace::resolve_path_to_document(
+                &path,
+                url.clone(),
+            )?))
         }
     }
 
@@ -395,11 +400,7 @@ impl Workspace {
     //     }
     // }
 
-    fn resolve_path_to_document<'a>(
-        workspace: &'a mut Workspace,
-        path: &Path,
-        orignial_url: Url,
-    ) -> Result<DocumentReference<'a>> {
+    fn resolve_path_to_document(path: &Path, orignial_url: Url) -> Result<Document> {
         // I think I dont care about the URL that is the path to the file.
         // Lets ignore it and use the original URL instead.
         let (document_text, path_url) = load_file_from_disk(path.to_path_buf())?;
@@ -416,13 +417,11 @@ impl Workspace {
                     document_text,
                     path.to_path_buf(),
                 );
-                let doc = Workspace::insert_internal_document(workspace, document);
-                Ok(DocumentReference::Internal(doc))
+                Ok(Document::Internal(document))
             }
             "owl" | "owx" => {
                 let document = ExternalDocument::new(document_text, path_url)?;
-                let doc = workspace.insert_external_document(document);
-                Ok(DocumentReference::External(doc))
+                Ok(Document::External(document))
             }
             ext => Err(Error::DocumentNotSupported(ext.to_string())),
         }
@@ -443,6 +442,13 @@ pub enum DocumentReference<'a> {
     // Not boxing this is fine because the size ratio is just about 1.6
     Internal(&'a InternalDocument),
     External(&'a ExternalDocument),
+}
+
+#[derive(Debug)]
+pub enum Document {
+    // Not boxing this is fine because the size ratio is just about 1.6
+    Internal(InternalDocument),
+    External(ExternalDocument),
 }
 
 /// Internal documents are OMN files on disk.
@@ -571,13 +577,11 @@ impl InternalDocument {
         let docs = urls
             .iter()
             .filter_map(|url| {
-                timeit("\t resolve url to doc", || {
-                    workspace
-                        .document_by_url(url)
-                        .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
-                })
-                .inspect_log()
-                .ok()
+                workspace
+                    .document_by_url(url)
+                    .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
+                    .inspect_log()
+                    .ok()
             })
             .collect_vec();
 
@@ -1010,44 +1014,102 @@ impl InternalDocument {
     }
 
     /// Loads all documents that can be reached by this internal document path
-    pub fn load_dependencies(path: &Path, workspace: &mut Workspace, http_client: &dyn HttpClient) {
-        let document = workspace.get_internal_document(path).unwrap();
-        let mut todo: LinkedList<Url> = document.reachable_urls().into_iter().collect();
-        let mut done = HashSet::<Url>::new();
+    pub fn load_dependencies(
+        path: &Path,
+        sync_ref: &SyncRef,
+        http_client: &Arc<dyn HttpClient>,
+    ) -> tokio::task::JoinHandle<()> {
+        let sync_ref_clone = sync_ref.to_owned();
+        let path = path.to_owned();
+        let http_client = http_client.to_owned();
+        // TODO return handle?
+        tokio::spawn(async move {
+            let mut todo: LinkedList<Url> = {
+                let sync = sync_ref_clone.read().await;
+                let workspace = sync
+                    .get_workspace(
+                        &Url::from_file_path(&path)
+                            .expect("File path should be convertable to URL"),
+                    )
+                    .expect("Workspace for document should exsist");
 
-        debug!(
-            "Loading dependencies of {} len = {}",
-            path.display(),
-            todo.len()
-        );
+                let document = workspace.get_internal_document(&path).unwrap();
+                document.reachable_urls().into_iter().collect()
+            };
 
-        // TODO async this
-        while let Some(url) = todo.pop_front() {
-            debug!("Indexing {url} ...");
-            if done.contains(&url) {
-                debug!("URL {url} was indexed. Skip");
-                continue;
-            }
+            let mut done = HashSet::<Url>::new();
 
-            match Workspace::resolve_url_to_document(workspace, &url, http_client) {
-                Ok(doc) => match doc {
-                    DocumentReference::Internal(internal_document) => {
-                        for ele in internal_document.reachable_urls() {
-                            todo.push_back(ele);
-                        }
-                    }
-                    DocumentReference::External(external_document) => {
-                        for ele in external_document.reachable_urls() {
-                            todo.push_back(ele);
-                        }
-                    }
-                },
-                Err(_) => {
-                    warn!("Resolving {url} did not work");
+            debug!(
+                "Loading dependencies of {} len = {}",
+                path.display(),
+                todo.len()
+            );
+
+            while let Some(url) = todo.pop_front() {
+                debug!("Indexing {url} ...");
+                if done.contains(&url) {
+                    debug!("URL {url} was indexed. Skip");
+                    continue;
                 }
+
+                let resolved_doc = {
+                    let sync = sync_ref_clone.read().await;
+                    let workspace = sync
+                        .get_workspace(
+                            &Url::from_file_path(&path)
+                                .expect("File path should be convertable to URL"),
+                        )
+                        .expect("Workspace for document should exsist");
+
+                    // TODO well the Error is not Send. Thats why we convert to Option
+                    Workspace::resolve_url_to_document(workspace, &url, http_client.as_ref()).ok()
+                };
+
+                let resolved_doc = if let Some(resolved_doc) = resolved_doc {
+                    resolved_doc
+                } else {
+                    warn!("Resolving {url} did not work");
+                    None
+                };
+
+                match resolved_doc {
+                    Some(doc) => match doc {
+                        Document::Internal(internal_document) => {
+                            for ele in internal_document.reachable_urls() {
+                                todo.push_back(ele);
+                            }
+                            {
+                                let mut sync = sync_ref_clone.write().await;
+                                let workspace = sync.get_or_insert_workspace_mut(
+                                    &Url::from_file_path(&path)
+                                        .expect("File path should be convertable to URL"),
+                                );
+                                workspace.insert_internal_document(internal_document);
+                            }
+                        }
+                        Document::External(external_document) => {
+                            for ele in external_document.reachable_urls() {
+                                todo.push_back(ele);
+                            }
+                            {
+                                let mut sync = sync_ref_clone.write().await;
+                                let workspace = sync.get_or_insert_workspace_mut(
+                                    &Url::from_file_path(&path)
+                                        .expect("File path should be convertable to URL"),
+                                );
+                                workspace.insert_external_document(external_document);
+                            }
+                        }
+                    },
+                    None => {
+                        // TODO do not warn here :>
+                        warn!("Resolving {url} was not needed. Already loaded");
+                    }
+                }
+
+                done.insert(url);
             }
-            done.insert(url);
-        }
+        })
     }
 }
 
@@ -1371,14 +1433,14 @@ impl ExternalDocument {
                 },
                 Any,
             )
-            .inspect(|a| debug!("inspect={a:?}"))
+            // .inspect(|a| debug!("inspect={a:?}"))
             .flatten()
             .filter_map(|[_, _, o]| o.iri())
             .flat_map(|iri| Url::parse(&iri))
             .unique()
             .collect_vec();
 
-        debug!("iris={iris:#?}");
+        // debug!("iris={iris:#?}");
 
         iris
     }
@@ -1409,13 +1471,11 @@ impl ExternalDocument {
         let docs = urls
             .iter()
             .filter_map(|url| {
-                timeit("\t resolve url to doc", || {
-                    workspace
-                        .document_by_url(url)
-                        .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
-                })
-                .inspect_log()
-                .ok()
+                workspace
+                    .document_by_url(url)
+                    .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
+                    .inspect_log()
+                    .ok()
             })
             .collect_vec();
 
@@ -1465,14 +1525,14 @@ impl ExternalDocument {
             .filter_map(|term| term.iri())
             .unique()
             .filter_map(|iri| Url::parse(&iri).ok())
-            .inspect(|url| debug!("Found iri {url} in {}", self.uri))
+            // .inspect(|url| debug!("Found iri {url} in {}", self.uri))
             // Filter out IRI's that point to this ontology
             .filter(|url| {
                 !url.make_relative(&self.uri)
-                    .inspect(|v| debug!("relative {v}"))
+                    // .inspect(|v| debug!("relative {v}"))
                     .is_some_and(|s| s.trim_end_matches('#').is_empty())
             })
-            .inspect(|url| debug!("after make relative {url} in "))
+            // .inspect(|url| debug!("after make relative {url} in "))
             // TODO  hmmmmm this cound be better
             .filter(|url| !url.to_string().contains(&self.graph.1))
             .map(|mut url| {
@@ -1482,19 +1542,17 @@ impl ExternalDocument {
                 } else if let Ok(mut seg) = url.path_segments_mut() {
                     seg.pop();
                 }
+                // TODO what about the URL's that do not end in fragments
                 url
             })
-            .unique()
-            .inspect(|url| debug!("Child url {url}"));
+            .unique();
+        // .inspect(|url| debug!("Child url {url}"));
 
         imports.into_iter().chain(child_urls).unique().collect_vec()
     }
 
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
-        debug!("getting frame info for {iri} on {}", self.uri);
-        let o = get_frame_info_helper_ex(self, iri);
-        debug!("found {o:#?}");
-        o
+        get_frame_info_helper_ex(self, iri)
     }
 }
 

@@ -51,7 +51,7 @@ impl Catalog {
 pub struct CatalogUri {
     /// Non unique name of item
     #[serde(rename = "@id")]
-    pub _id: String,
+    _id: String,
 
     /// Full URL of the ontology. This will be used in OMN import statements
     #[serde(rename = "@name")]

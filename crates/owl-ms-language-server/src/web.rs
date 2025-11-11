@@ -6,11 +6,10 @@ use ureq::{http::StatusCode, Agent};
 use crate::error::{Error, Result};
 
 /// Trait for simple http get requests. It can be mocked with the static client.
-///
-/// # Errors
-///
-/// This function will return an error if the get request is not successfull.
 pub trait HttpClient: Send + Sync + std::fmt::Debug {
+    /// # Errors
+    ///
+    /// This function will return an error if the get request is not successfull.
     fn get(&self, url: &str) -> Result<String>;
 }
 
