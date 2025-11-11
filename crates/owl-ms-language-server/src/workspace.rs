@@ -564,10 +564,7 @@ impl InternalDocument {
     /// Does not load anything
     // TODO  maybe cache this for some time 1sec or so
     fn reachable_docs_recusive(&self, workspace: &Workspace) -> Vec<Url> {
-        let mut set: HashSet<Url> = HashSet::new();
-        self.reachable_docs_recursive_helper(&mut set, workspace)
-            .log_if_error();
-        set.into_iter().collect_vec()
+        reachable_docs_recursive_cached(self, workspace)
     }
 
     fn reachable_docs_recursive_helper(
@@ -584,16 +581,13 @@ impl InternalDocument {
 
         let urls = self.reachable_urls();
 
-        let docs = urls
-            .iter()
-            .filter_map(|url| {
-                workspace.document_by_url(url)
-                // TODO maybe reactivate but for now lets not log here
-                // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
-                // .inspect_log()
-                // .ok()
-            })
-            .collect_vec();
+        let docs = urls.iter().filter_map(|url| {
+            workspace.document_by_url(url)
+            // TODO maybe reactivate but for now lets not log here
+            // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
+            // .inspect_log()
+            // .ok()
+        });
 
         for doc in docs {
             match doc {
@@ -1479,16 +1473,13 @@ impl ExternalDocument {
         // debug!("graph name {}", self.graph.1);
 
         // TODO shitty shild urls :<
-        let docs = urls
-            .iter()
-            .filter_map(|url| {
-                workspace.document_by_url(url)
-                // TODO maybe reactivate but for now lets not log here
-                // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
-                // .inspect_log()
-                // .ok()
-            })
-            .collect_vec();
+        let docs = urls.iter().filter_map(|url| {
+            workspace.document_by_url(url)
+            // TODO maybe reactivate but for now lets not log here
+            // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
+            // .inspect_log()
+            // .ok()
+        });
 
         for doc in docs {
             match doc {
@@ -2193,6 +2184,22 @@ fn frame_to_doc(node: &Node, rope: &Rope, tab_size: u32, nest_depth: isize) -> R
         ))
         .nest(nest_depth)
         .group()
+}
+
+#[cached(
+    time = 5,
+    key = "u64",
+    convert = r#"{
+        let mut hasher = DefaultHasher::new();
+        doc.hash(&mut hasher);
+        hasher.finish()
+     } "#
+)]
+fn reachable_docs_recursive_cached(doc: &InternalDocument, workspace: &Workspace) -> Vec<Url> {
+    let mut set: HashSet<Url> = HashSet::new();
+    doc.reachable_docs_recursive_helper(&mut set, workspace)
+        .log_if_error();
+    set.into_iter().collect_vec()
 }
 
 #[cfg(test)]
