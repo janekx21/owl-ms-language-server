@@ -2074,7 +2074,6 @@ async fn backend_document_symbols_in_multi_file_ontology_should_just_show_symbol
 
     {
         let sync = service.inner().read_sync().await;
-        // TODO hier
         debug!("Sync Backend: \n{sync:#?}");
     }
 
@@ -2467,38 +2466,7 @@ async fn backend_did_open_should_load_external_documents_recursivly() {
 
 /// The setup is for setting up test fixture stuff. No test data or otherwise test dependent stuff is set up here.
 fn setup() {
-    setup_deadlock_detection();
-}
-
-fn setup_deadlock_detection() {
-    // do nothing
-    //
-    // TODO remove
-    // use parking_lot::deadlock;
-    // use std::thread;
-    // use std::time::Duration;
-
-    // thread::spawn(|| {
-    //     // Create a background thread which checks for deadlocks every 1s
-    //     loop {
-    //         thread::sleep(Duration::from_secs(10));
-    //         let deadlocks = deadlock::check_deadlock();
-    //         if deadlocks.is_empty() {
-    //             continue;
-    //         }
-
-    //         error!("{} deadlocks detected", deadlocks.len());
-    //         for (i, threads) in deadlocks.iter().enumerate() {
-    //             error!("Deadlock #{}", i);
-    //             for t in threads {
-    //                 error!("Thread Id {:#?}", t.thread_id());
-    //                 error!("{:#?}", t.backtrace());
-    //             }
-    //         }
-    //         // panic sadly does not stop the test BECAUSE it is deadlocked :<
-    //         std::process::abort();
-    //     }
-    // });
+    // Do nothing for now
 }
 
 #[derive(Debug, Clone)]

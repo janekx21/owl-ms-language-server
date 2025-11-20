@@ -392,23 +392,6 @@ impl Workspace {
         }
     }
 
-    // TODO
-    // /// Resolves a URL (file or http/https protocol) to a document that is inserted into this workspace
-    // pub async fn resolve_prefix_url_to_document<'a>(
-    //     workspace: &'a mut Workspace,
-    //     url: &'a Url,
-    //     client: &'a dyn HttpClient,
-    // ) -> Result<DocumentReference<'a>> {
-    //     if let Some(doc) = workspace.document_by_url(url) {
-    //         Ok(doc)
-    //     } else {
-    //         let document_text = client.get(url.as_str())?;
-    //         let document = ExternalDocument::new(document_text, url.clone())?;
-    //         let document = workspace.insert_external_document(document);
-    //         Ok(DocumentReference::External(document))
-    //     }
-    // }
-
     fn resolve_path_to_document(path: &Path, orignial_url: Url) -> Result<Document> {
         // I think I dont care about the URL that is the path to the file.
         // Lets ignore it and use the original URL instead.
@@ -799,13 +782,6 @@ impl InternalDocument {
     pub fn prefixes(&self) -> HashMap<String, String> {
         prefixes_helper(self)
     }
-
-    // TODO remove
-    // pub fn try_get_workspace(&self) -> Result<Workspace> {
-    //     self.workspace
-    //         .upgrade()
-    //         .ok_or(Error::WorkspaceNotFound(self.uri.clone()))
-    // }
 
     pub fn inlay_hint(
         &self,
@@ -1365,7 +1341,7 @@ impl Hash for ExternalDocument {
 }
 
 impl ExternalDocument {
-    /// The ontology type is currently determent by the url extention
+    /// The ontology type is currently determent by tial and error
     pub fn new(text: String, url: Url) -> Result<ExternalDocument> {
         debug!("try creating external document... {url}");
 
@@ -1388,16 +1364,6 @@ impl ExternalDocument {
 
         if let Ok(doc) = &doc {
             debug!("parsing worked! {}", doc.uri);
-            // debug!("parsing worked! {} turtle:\n{}", doc.uri,
-            //     {
-            //     use sophia::api::serializer::Stringifier;
-            //     use sophia::api::serializer::TripleSerializer;
-            //     use sophia::turtle::serializer::nt::NtSerializer;
-            //     let mut nt_stringifier = NtSerializer::new_stringifier();
-            //     let graph = &doc.graph.0;
-            //     let str = nt_stringifier.serialize_graph(&graph).unwrap().as_str();
-            //     str.to_string()
-            // });
         }
         doc
     }
@@ -1474,13 +1440,12 @@ impl ExternalDocument {
 
         result.insert(self.uri.clone());
 
-        // debug!("graph name {}", self.graph.1);
-
         // TODO shitty shild urls :<
         let docs = urls.filter_map(|url| {
             workspace.document_by_url(&url)
             // TODO maybe reactivate but for now lets not log here
-            // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
+            // .ok_or(Error::DocumentNotLoaded(url.clone()))
+            // Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
             // .inspect_log()
             // .ok()
         });
@@ -1495,26 +1460,6 @@ impl ExternalDocument {
                 }
             }
         }
-
-        // let docs = urls
-        //     .map(|url| {
-        //         Workspace::resolve_url_to_document(workspace, &url)
-        //             .inspect_log()
-        //             .ok()
-        //     })
-        //     .collect_vec();
-
-        // for doc in docs {
-        //     match doc {
-        //         DocumentReference::Internal(internal_document) => internal_document
-        //             .read()
-        //             .reachable_docs_recursive_helper(result)?,
-        //         DocumentReference::External(e) => {
-        //             e.read()
-        //                 .reachable_docs_recursive_helper(workspace, result, depth + 1)?;
-        //         }
-        //     }
-        // }
 
         Ok(())
     }
@@ -1531,28 +1476,15 @@ impl ExternalDocument {
             .filter_map(|term| term.iri())
             .unique()
             .filter_map(|iri| Url::parse(&iri).ok())
-            // .inspect(|url| debug!("Found iri {url} in {}", self.uri))
             // Filter out IRI's that point to this ontology
             .filter(|url| {
-                !url.make_relative(&self.uri)
-                    // .inspect(|v| debug!("relative {v}"))
-                    .is_some_and(|s| s.trim_end_matches('#').is_empty())
+                // This should be faster then url.make_relative, because url contains a serialized version
+                !url.to_string()
+                    .starts_with(self.uri.to_string().trim_end_matches('#'))
             })
-            // .inspect(|url| debug!("after make relative {url} in "))
-            // TODO  hmmmmm this cound be better
             .filter(|url| !url.to_string().contains(&self.graph.1))
-            .map(|mut url| {
-                // This trim operation is not very stable
-                if url.fragment().is_some() {
-                    url.set_fragment(Some(""));
-                } else if let Ok(mut seg) = url.path_segments_mut() {
-                    seg.pop();
-                }
-                // TODO what about the URL's that do not end in fragments
-                url
-            })
+            .map(iri_to_onology_url)
             .unique();
-        // .inspect(|url| debug!("Child url {url}"));
 
         Box::new(imports.into_iter().chain(child_urls).unique())
     }
@@ -1560,6 +1492,19 @@ impl ExternalDocument {
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
         get_frame_info_helper_ex(self, iri)
     }
+}
+
+/// Convert some IRI (here in URL type) into an URL where the IRI can be fetched from
+pub fn iri_to_onology_url(mut url: Url) -> Url {
+    if url.fragment().is_some() {
+        url.set_fragment(Some(""));
+    } else if let Ok(mut seg) = url.path_segments_mut() {
+        // TODO check for obo ontology
+        // See https://obofoundry.org/principles/fp-003-uris.html
+
+        seg.pop();
+    }
+    url
 }
 
 #[cached(
@@ -2212,12 +2157,35 @@ mod tests {
     use crate::pos::Position;
     use indoc::indoc;
     use pretty_assertions::assert_eq;
+    use tempdir::TempDir;
     use test_log::test;
+
+    /// Well the file:/// syntax is not valid for all OS's, thats why generating a random file URL is easyer.
+    struct TmpUrl {
+        url: Url,
+        _tmp_dir: TempDir,
+    }
+
+    impl TmpUrl {
+        fn new() -> Self {
+            let tmp_dir = tempdir::TempDir::new("owl-ms-test").unwrap();
+            let url = Url::from_file_path(tmp_dir.path().join("file.omn")).unwrap();
+            Self {
+                url,
+                _tmp_dir: tmp_dir,
+            }
+        }
+
+        fn url(&self) -> Url {
+            self.url.clone()
+        }
+    }
 
     #[test(tokio::test)]
     async fn internal_document_formatted_should_format_correctly() {
+        let tmp_url = TmpUrl::new();
         let doc = InternalDocument::new(
-            Url::parse("file:///tmp/formatted").unwrap(),
+            tmp_url.url(),
             -1,
             indoc! {"
                 Prefix:  a:  <http://a/a>  Prefix:  a:  <http://a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa>    Ontology:   a   v   Import:    <http://a/a>    Import:    <http://a/a> Annotations:    rdfs:label     \"a\"    Class:   a   SubClassOf:   b,e,f SubClassOf:   cccccccccccccccccccccccc,ddddddddddddddddddddd,eeeeeeeeeee   Class:   a     SubClassOf: a    Annotations:   rdfs:label    \"Y\"    EquivalentTo:    a   ,   a DisjointWith:    a  ,  a   DisjointUnionOf:  Annotations: y 12, a 2    a,a    HasKey:    a
@@ -2266,8 +2234,9 @@ mod tests {
 
     #[test(tokio::test)]
     async fn internal_document_formatted_with_description_should_format_correctly() {
+        let tmp_url = TmpUrl::new();
         let doc = InternalDocument::new(
-            Url::parse("file:///tmp/formatted").unwrap(),
+            tmp_url.url(),
             -1,
             indoc! {r"
                 Ontology:a
@@ -2307,8 +2276,9 @@ mod tests {
 
     #[test(tokio::test)]
     async fn internal_document_abbreviated_iri_to_full_iri_should_convert_abbriviated_iri() {
+        let tmp_url = TmpUrl::new();
         let doc = InternalDocument::new(
-            Url::parse("file:///this/is/not/relevant/1").unwrap(),
+            tmp_url.url(),
             -1,
             "
                 Prefix: owl: <http://www.w3.org/2002/07/owl#>
@@ -2335,8 +2305,9 @@ mod tests {
 
     #[test]
     fn internal_document_abbreviated_iri_to_full_iri_should_convert_simple_iri() {
+        let tmp_url = TmpUrl::new();
         let doc = InternalDocument::new(
-            Url::parse("file:///this/is/not/relevant/2").unwrap(),
+            tmp_url.url(),
             -1,
             "
                 Prefix: : <http://www.w3.org/2002/07/owl#>
@@ -2359,8 +2330,9 @@ mod tests {
 
     #[test]
     fn internal_document_prefix_should_return_all_prefixes() {
+        let tmp_url = TmpUrl::new();
         let doc = InternalDocument::new(
-            Url::parse("file:///www_w3_org/2002/07/owl").unwrap(),
+            tmp_url.url(),
             -1,
             "
                 Prefix: : <http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3/>
@@ -2403,8 +2375,9 @@ mod tests {
     #[test]
     fn internal_document_get_frame_info_should_show_definitions() {
         // Arrange
+        let tmp_url = TmpUrl::new();
         let doc = InternalDocument::new(
-            Url::parse("file:///foo/14329076").unwrap(),
+            tmp_url.url(),
             -1,
             r#"
                 Ontology:
@@ -2427,7 +2400,7 @@ mod tests {
         assert_eq!(
             info.definitions,
             vec![Location {
-                uri: "file:///foo/14329076".parse().unwrap(),
+                uri: tmp_url.url(),
                 range: Range {
                     start: Position::new(2, 20),
                     end: Position::new(5, 55),
@@ -2463,17 +2436,21 @@ mod tests {
     #[test]
     fn external_document_reachable_documents_given_imports_does_return_imports() {
         // Arrange
-        let owl_ontology_text = r#"
+        let tmp_url = TmpUrl::new();
+        let owl_ontology_text = format!(
+            r#"
             <?xml version="1.0"?>
             <Ontology xmlns="http://www.w3.org/2002/07/owl#" xml:base="http://www.example.com/iri" ontologyIRI="http://www.example.com/iri">
-                <Import>file:///abosulte/file</Import>
+                <Import>{}</Import>
                 <Import>http://www.example.com/other-property</Import>
                 <Declaration>
                     <Class IRI="https://www.example.com/o9"/>
                 </Declaration>
             </Ontology>
-        "#
-    .to_string();
+        "#,
+            tmp_url.url()
+        );
+
         let external_doc = ExternalDocument::new(
             owl_ontology_text.clone(),
             Url::parse("https://example.com/onto.owx").unwrap(),
@@ -2485,7 +2462,7 @@ mod tests {
 
         // Assert
         assert!(urls.contains(&Url::parse("http://www.example.com/other-property").unwrap()));
-        assert!(urls.contains(&Url::parse("file:///abosulte/file").unwrap()));
+        assert!(urls.contains(&tmp_url.url()));
     }
 
     #[test]
@@ -2496,8 +2473,9 @@ mod tests {
 
     #[test]
     fn full_iri_to_abbreviated_iri_should_work_for_simple_iris() {
+        let tmp_url = TmpUrl::new();
         let doc = InternalDocument::new(
-            Url::parse("file:///this/is/not/relevant/3").unwrap(),
+            tmp_url.url(),
             -1,
             "
                 Prefix: owl: <http://www.w3.org/2002/07/owl#>
@@ -2512,8 +2490,9 @@ mod tests {
 
     #[test]
     fn full_iri_to_abbreviated_iri_should_work_for_simple_iris_with_empty_prefix() {
+        let tmp_url = TmpUrl::new();
         let doc = InternalDocument::new(
-            Url::parse("file:///this/is/not/relevant/4").unwrap(),
+            tmp_url.url(),
             -1,
             "
                 Prefix: : <http://www.w3.org/2002/07/owl#>

@@ -1,10 +1,6 @@
 use clap::Parser as ClapParser;
 use log::error;
-use owl_ms_language_server::{
-    debugging::{init_deadlock_detection, init_logging},
-    web::UreqClient,
-    Backend,
-};
+use owl_ms_language_server::{debugging::init_logging, web::UreqClient, Backend};
 use std::backtrace::Backtrace;
 use tower_lsp::{LspService, Server};
 
@@ -25,8 +21,6 @@ async fn main() {
         let backtrace = Backtrace::force_capture();
         error!("paniced with backtrace:\n{backtrace}\n{info}");
     }));
-
-    init_deadlock_detection();
 
     let http_client = Box::new(UreqClient::default());
 

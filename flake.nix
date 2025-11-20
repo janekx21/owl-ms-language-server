@@ -55,6 +55,9 @@
             # Scripts of this repository
             tree-sitter-watch
           ];
+          shellHook = ''
+            export PATH=$PATH:/home/janek/Git/owl-ms-language-server/target/debug 
+          '';
         };
       }
     );

@@ -83,7 +83,9 @@ impl SyncBackend {
         let workspace = self
             .get_workspace(url)
             .ok_or(Error::DocumentNotFound(url.clone()))?;
-        let path = url.to_file_path().unwrap(); // TODO
+        let path = url
+            .to_file_path()
+            .map_err(|()| Error::InvalidUrl(url.clone()))?;
         Ok((workspace.get_internal_document(&path)?, workspace))
     }
     /// Convinience function to fetch internal document
