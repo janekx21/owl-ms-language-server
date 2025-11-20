@@ -2016,7 +2016,7 @@ async fn backend_references_without_def_should_not_show_def() {
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     let result = result.unwrap();
     info!("{result:#?}");
     assert_eq!(result.len(), 1);
