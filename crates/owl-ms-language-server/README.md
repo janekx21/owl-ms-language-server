@@ -1,6 +1,3 @@
-This folder contains the rust based language server. The binary build from this is used as the OWL Manchester syntax language server.
+This crate contains the rust based language server for OWL Manchester syntax language server. The binary build from this crate is the language server.
 
-These crates could help in the future
-- curie
-- oxilangtag
-- oxiri
+See https://github.com/janekx21/owl-ms-language-server
