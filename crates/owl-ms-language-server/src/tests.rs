@@ -1944,6 +1944,43 @@ async fn backend_references_in_multi_file_ontology_should_work() {
 }
 
 #[test(tokio::test)]
+async fn backend_references_without_def_should_not_show_def() {
+    setup();
+    // Arrange
+    let (service, tmp_dir) = arrange_multi_file_ontology().await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
+
+    // Act
+    let result = service
+        .inner()
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url.clone() },
+                position: lsp_types::Position::new(7, 31), // This is on "ClassA2" -> not a definition
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    assert_empty_diagnostics(&service);
+    let result = result.unwrap();
+    info!("{result:#?}");
+    assert_eq!(result.len(), 1);
+    assert!(result.iter().any(|l| l.uri == url));
+}
+
+#[test(tokio::test)]
 async fn backend_goto_definition_in_multi_file_ontology_should_work() {
     setup();
     // Arrange

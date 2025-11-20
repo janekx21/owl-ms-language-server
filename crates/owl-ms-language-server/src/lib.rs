@@ -686,6 +686,14 @@ impl LanguageServer for Backend {
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        info!(
+            "references {}:{}:{} {:?}",
+            params.text_document_position.text_document.uri,
+            params.text_document_position.position.line,
+            params.text_document_position.position.character,
+            params.context
+        );
+
         let (full_iri_option, workspace) = {
             let url = params.text_document_position.text_document.uri;
 
@@ -728,7 +736,7 @@ impl LanguageServer for Backend {
                     doc.query(&ALL_QUERIES.iri_query)
                         .into_iter()
                         .map(|m| {
-                            let (iri, range) = match &m.captures[..] {
+                            let (iri, range, node_id) = match &m.captures[..] {
                                 [iri_capture] => (
                                     match iri_capture.node.kind.as_str() {
                                         "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
@@ -739,10 +747,27 @@ impl LanguageServer for Backend {
                                         _ => unreachable!(),
                                     },
                                     iri_capture.node.range,
+                                    iri_capture.node.id,
                                 ),
                                 _ => unreachable!(),
                             };
+
                             if iri == full_iri {
+                                if !params.context.include_declaration {
+                                    if let Some(node) = doc.node_by_id(node_id) {
+                                        let iri_context_kind = node
+                                            .parent()
+                                            .expect("IRIs should have parent nodes")
+                                            .parent()
+                                            .expect("IRI supertype should have a parent")
+                                            .kind();
+                                        if iri_context_kind.ends_with("frame") {
+                                            // This is a definition we want to filter out
+                                            return Ok(None);
+                                        }
+                                    }
+                                }
+
                                 Ok(Some(Location {
                                     uri: doc.uri.clone(),
                                     range: range
