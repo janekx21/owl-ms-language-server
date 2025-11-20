@@ -6,23 +6,23 @@ mod pos;
 mod queries;
 mod range;
 pub mod rope_provider;
+mod sync_backend;
 #[cfg(test)]
 #[allow(clippy::pedantic)]
 mod tests;
-mod web;
+pub mod web;
 mod workspace;
 
 use debugging::timeit;
-use error::{Error, Result as MyResult, ResultExt, ResultIterator, RwLockExt};
+use error::{Error, ResultExt, ResultIterator};
 use itertools::Itertools;
-use log::{debug, error, info, warn};
-use parking_lot::RwLock;
+use log::{debug, error, info};
 use pos::Position;
-use queries::{ALL_QUERIES, NODE_TYPES};
+use queries::ALL_QUERIES;
 use range::Range;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
-use std::time::Duration;
+use tokio::sync::{OnceCell, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
 // There are too many LSP types
@@ -30,8 +30,10 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
 use tree_sitter_c2rust::Language;
-use web::{HttpClient, UreqClient};
 use workspace::{node_text, trim_full_iri, InternalDocument, Workspace};
+
+use crate::sync_backend::SyncBackend;
+use crate::web::HttpClient;
 
 // Constants
 
@@ -41,21 +43,23 @@ pub static LANGUAGE: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_ms::L
 
 pub struct Backend {
     pub client: Client,
-    position_encoding: RwLock<PositionEncodingKind>,
-    workspaces: RwLock<Vec<Arc<RwLock<Workspace>>>>,
     pub http_client: Arc<dyn HttpClient>,
+    position_encoding: OnceCell<PositionEncodingKind>,
+    sync: SyncRef,
 }
+
+pub type SyncRef = Arc<RwLock<SyncBackend>>;
 
 impl Backend {
     /// Creates a new [`Backend`] with a Ureq http client and UTF16 encoding.
     /// The workspaces are created empty.
     #[must_use]
-    pub fn new(client: Client) -> Self {
+    pub fn new(client: Client, http_client: Box<dyn HttpClient>) -> Self {
         Backend {
             client,
-            position_encoding: PositionEncodingKind::UTF16.into(),
-            workspaces: RwLock::new(vec![]),
-            http_client: Arc::new(UreqClient),
+            http_client: http_client.into(),
+            position_encoding: OnceCell::new(),
+            sync: Arc::new(RwLock::new(SyncBackend::default())),
         }
     }
 }
@@ -68,9 +72,8 @@ impl LanguageServer for Backend {
     /// Does not load or index the files inside the workspaces.
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         info!("Initialize language server -----------------------------");
+        info!("Client info:\n{:#?}", params.client_info);
         debug!("Client capabilities:\n{:#?}", params.capabilities);
-        debug!("Client locale:\n{:#?}", params.locale);
-        debug!("Client info:\n{:#?}", params.client_info);
 
         let encodings = params
             .capabilities
@@ -78,20 +81,19 @@ impl LanguageServer for Backend {
             .and_then(|g| g.position_encodings)
             .unwrap_or_default();
 
-        let mut position_encoding = self.position_encoding.write();
-        *position_encoding = if encodings.contains(&PositionEncodingKind::UTF8) {
-            PositionEncodingKind::UTF8
-        } else {
-            PositionEncodingKind::UTF16
-        };
+        self.position_encoding
+            .set(if encodings.contains(&PositionEncodingKind::UTF8) {
+                PositionEncodingKind::UTF8
+            } else {
+                PositionEncodingKind::UTF16
+            })
+            .expect("the encoding to be unset");
 
-        let mut workspaces = self.workspaces.write();
-        *workspaces = params
-            .workspace_folders
-            .unwrap_or_default()
-            .iter()
-            .map(|wf| Arc::new(RwLock::new(Workspace::new(wf.clone()))))
-            .collect();
+        let mut sync = self.write_sync().await;
+
+        for wf in params.workspace_folders.iter().flatten() {
+            sync.push_workspace(Workspace::new(wf.clone()));
+        }
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -104,7 +106,12 @@ impl LanguageServer for Backend {
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
-                position_encoding: Some(position_encoding.clone()),
+                position_encoding: Some(
+                    self.position_encoding
+                        .get()
+                        .expect("encoding should be set")
+                        .clone(),
+                ),
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
@@ -168,49 +175,24 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _params: InitializedParams) {
-        let workspace_paths = self
-            .workspaces
-            .read()
+        let sync = self.read_sync().await;
+        let workspace_paths = sync
+            .workspaces()
             .iter()
-            .map(|w| {
-                let w = w.read();
-                w.folder
-                    .uri
-                    .to_file_path()
-                    .expect("Valid filepath")
-                    .display()
-                    .to_string()
-            })
+            .map(|w| format!("{w}"))
             .collect_vec();
 
         info!("Initialized languag server with workspaces: {workspace_paths:?}");
     }
 
-    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        info!("formatting {params:#?}");
-        let url = params.text_document.uri;
-
-        let tab_size = params.options.tab_size;
-
-        let doc = self.get_internal_document(&url)?;
-        let doc = doc.read();
-
-        // TODO just send the diff
-        let text = doc.formatted(if tab_size == 0 { 4 } else { tab_size }, 80);
-
-        let range: Range = doc.tree.root_node().range().into();
-
-        return Ok(Some(vec![TextEdit {
-            range: range.into_lsp(&doc.rope, &self.position_encoding.read())?,
-            new_text: text,
-        }]));
-    }
-
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         async {
             let url = params.text_document.uri;
-            info!("Opend file {url}",);
-            let workspace = self.find_workspace(&url)?;
+            info!("Did open {url} ...",);
+
+            let mut sync = self.write_sync().await;
+
+            let workspace = sync.get_or_insert_workspace_mut(&url);
             let internal_document = InternalDocument::new(
                 url.clone(),
                 params.text_document.version,
@@ -222,8 +204,7 @@ impl LanguageServer for Backend {
                 .iter()
                 .map(|(range, msg)| {
                     Ok(Diagnostic {
-                        range: range
-                            .into_lsp(&internal_document.rope, &self.position_encoding.read())?,
+                        range: range.into_lsp(&internal_document.rope, self.encoding())?,
                         severity: Some(DiagnosticSeverity::ERROR),
                         code: None,
                         code_description: None,
@@ -238,20 +219,29 @@ impl LanguageServer for Backend {
                 .collect_vec();
 
             let client = self.client.clone();
-            let a = tokio::spawn(async move {
-                client
-                    .publish_diagnostics(url.clone(), diagnostics, Some(internal_document.version))
-                    .await;
-            });
+            let url_cloned = url.clone();
 
-            let document = Workspace::insert_internal_document(&workspace, internal_document);
+            client
+                .publish_diagnostics(url_cloned, diagnostics, Some(internal_document.version))
+                .await;
 
-            let http_client = self.http_client.clone();
-            let b = tokio::spawn(async move {
-                resolve_imports(&document, &*http_client).log_if_error();
-            });
+            let doc = workspace.insert_internal_document(internal_document);
+            let path = doc.path.clone();
 
-            tokio::try_join!(a, b)?;
+            let handle = InternalDocument::load_dependencies(&path, &self.sync, &self.http_client);
+
+            #[cfg(test)]
+            {
+                // TODO is this fine?
+                drop(sync);
+                handle.await.unwrap();
+            }
+            #[cfg(not(test))]
+            {
+                workspace.index_handles.push(handle);
+            }
+
+            debug!("Did open!");
 
             Ok(())
         }
@@ -260,9 +250,9 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        (|| {
+        async {
             debug!(
-                "did_change at {} with version {}",
+                "Did change at {} with version {}",
                 params
                     .text_document
                     .uri
@@ -274,17 +264,20 @@ impl LanguageServer for Backend {
             );
 
             let url = params.text_document.uri.clone();
-            let document = self.get_internal_document(&url)?;
 
-            let mut document = document.write();
-            document.edit(&params, &self.position_encoding.read())?;
+            let mut sync = self.write_sync().await;
+            let (document, workspace) = sync.take_internal_document(&url)?;
+
+            let new_document = document.edit(&params, self.encoding())?;
+
+            let document = workspace.insert_internal_document(new_document);
 
             let diagnostics = document
                 .diagnostics
                 .iter()
                 .map(|(range, msg)| {
                     Ok(Diagnostic {
-                        range: range.into_lsp(&document.rope, &self.position_encoding.read())?,
+                        range: range.into_lsp(&document.rope, self.encoding())?,
                         severity: Some(DiagnosticSeverity::ERROR),
                         code: None,
                         code_description: None,
@@ -303,14 +296,15 @@ impl LanguageServer for Backend {
                 client.publish_diagnostics(url, diagnostics, version).await;
             });
             Ok(())
-        })()
+        }
+        .await
         .log_if_error();
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         (|| {
             debug!(
-                "did_close at {}",
+                "Did close at {}",
                 params
                     .text_document
                     .uri
@@ -328,6 +322,26 @@ impl LanguageServer for Backend {
         // TODO should data be deleted if a file is closed?
     }
 
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        info!("formatting {params:#?}");
+        let url = params.text_document.uri;
+
+        let tab_size = params.options.tab_size;
+
+        let sync = self.read_sync().await;
+        let (doc, _) = sync.get_internal_document(&url)?;
+
+        // TODO just send the diff
+        let text = doc.formatted(if tab_size == 0 { 4 } else { tab_size }, 80);
+
+        let range: Range = doc.tree.root_node().range().into();
+
+        return Ok(Some(vec![TextEdit {
+            range: range.into_lsp(&doc.rope, self.encoding())?,
+            new_text: text,
+        }]));
+    }
+
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let url = params.text_document_position_params.text_document.uri;
         info!(
@@ -335,13 +349,13 @@ impl LanguageServer for Backend {
             params.text_document_position_params.position
         );
 
-        let document = self.get_internal_document(&url)?;
+        let sync = self.read_sync().await;
+        let (doc, ws) = sync.get_internal_document(&url)?;
 
-        let doc = document.read();
         let pos: Position = Position::from_lsp(
             params.text_document_position_params.position,
             &doc.rope,
-            &self.position_encoding.read(),
+            self.encoding(),
         )?;
         let node = doc
             .tree
@@ -349,7 +363,7 @@ impl LanguageServer for Backend {
             .named_descendant_for_point_range(pos.into(), pos.into())
             .ok_or(Error::PositionOutOfBounds(pos))?;
 
-        let info = doc.try_get_workspace()?.read().node_info(&node, &doc);
+        let info = ws.node_info(&node, doc);
 
         Ok(if info.is_empty() {
             None
@@ -358,22 +372,20 @@ impl LanguageServer for Backend {
             let range: Range = node.range().into();
             Some(Hover {
                 contents: HoverContents::Scalar(MarkedString::String(info)),
-                range: Some(range.into_lsp(&doc.rope, &self.position_encoding.read())?),
+                range: Some(range.into_lsp(&doc.rope, self.encoding())?),
             })
         })
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         let url = params.text_document.uri;
+        info!("Inlay hint at {url}");
 
-        let document = self.get_internal_document(&url)?;
+        let sync = self.read_sync().await;
+        let (document, workspace) = sync.get_internal_document(&url)?;
 
-        let document = document.read();
-        let range = Range::from_lsp(
-            &params.range,
-            &document.rope,
-            &self.position_encoding.read(),
-        )?;
+        let range = Range::from_lsp(&params.range, &document.rope, self.encoding())?;
+
         debug!(
             "inlay_hint at {}:{range}",
             url.path_segments()
@@ -382,8 +394,7 @@ impl LanguageServer for Backend {
                 .ok_or(Error::InvalidUrl(url.clone()))?
         );
 
-        let hints =
-            document.inlay_hint(range, &*self.http_client, &self.position_encoding.read())?;
+        let hints = document.inlay_hint(range, self.encoding(), workspace);
 
         Ok(Some(hints))
     }
@@ -395,12 +406,12 @@ impl LanguageServer for Backend {
         let url = params.text_document_position_params.text_document.uri;
         debug!("goto_definition at {url}");
 
-        let doc = self.get_internal_document(&url)?;
-        let doc = doc.read();
+        let sync = self.read_sync().await;
+        let (doc, workspace) = sync.get_internal_document(&url)?;
         let pos: Position = Position::from_lsp(
             params.text_document_position_params.position,
             &doc.rope,
-            &self.position_encoding.read(),
+            self.encoding(),
         )?;
 
         let leaf_node = doc
@@ -415,12 +426,7 @@ impl LanguageServer for Backend {
 
             debug!("Try goto definition of {iri}");
 
-            let frame_info = Workspace::get_frame_info_recursive(
-                &doc.try_get_workspace()?,
-                &iri,
-                &doc,
-                &*self.http_client,
-            );
+            let frame_info = Workspace::get_frame_info_recursive(workspace, &iri, doc);
 
             if let Some(frame_info) = frame_info {
                 let locations = frame_info
@@ -433,10 +439,7 @@ impl LanguageServer for Backend {
                             l.range.start.line()
                         }
                     })
-                    .map(|l| {
-                        l.clone()
-                            .into_lsp(&doc.rope, &__self.position_encoding.read())
-                    })
+                    .map(|l| l.clone().into_lsp(&doc.rope, self.encoding()))
                     .filter_and_log()
                     .collect_vec();
 
@@ -450,8 +453,9 @@ impl LanguageServer for Backend {
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         debug!("code_action at {}", params.text_document.uri);
         let url = params.text_document.uri;
-        let doc = self.get_internal_document(&url)?;
-        let doc = doc.read();
+        let sync = self.read_sync().await;
+        let (doc, _) = sync.get_internal_document(&url)?;
+        // let doc = doc.read();
         let end: Position = doc.tree.root_node().range().end_point.into();
 
         Ok(Some(vec![CodeActionOrCommand::CodeAction(CodeAction {
@@ -461,8 +465,8 @@ impl LanguageServer for Backend {
                     url,
                     vec![TextEdit {
                         range: lsp_types::Range {
-                            start: end.into_lsp(&doc.rope, &self.position_encoding.read())?,
-                            end: end.into_lsp(&doc.rope, &self.position_encoding.read())?,
+                            start: end.into_lsp(&doc.rope, self.encoding())?,
+                            end: end.into_lsp(&doc.rope, self.encoding())?,
                         },
                         new_text:
                             "\nClass: new_class\n    Annotations:\n        rdfs:label \"new class\""
@@ -481,15 +485,15 @@ impl LanguageServer for Backend {
             "completion at {} {:?} {:?}",
             params.text_document_position.text_document.uri,
             params.text_document_position.position,
-            self.position_encoding.read()
+            self.encoding()
         );
         let url = params.text_document_position.text_document.uri;
-        let doc = self.get_internal_document(&url)?;
-        let doc = doc.read();
+        let sync = self.read_sync().await;
+        let (doc, workspace) = sync.get_internal_document(&url)?;
         let pos: Position = Position::from_lsp(
             params.text_document_position.position,
             &doc.rope,
-            &self.position_encoding.read(),
+            self.encoding(),
         )?;
 
         let kws = timeit("try_keywords_at_position", || {
@@ -518,8 +522,6 @@ impl LanguageServer for Backend {
         let partial_text = node_text(&node, &doc.rope).to_string();
 
         if node.kind() == "simple_iri" {
-            let workspace = doc.try_get_workspace()?;
-            let workspace = workspace.read();
             let iris: Vec<CompletionItem> = workspace
                 .search_frame(&partial_text)
                 .iter()
@@ -534,7 +536,7 @@ impl LanguageServer for Backend {
                         Some(CompletionItem {
                             label: iri,
                             kind: Some(CompletionItemKind::REFERENCE),
-                            detail: Some(frame.info_display(&workspace)),
+                            detail: Some(frame.info_display(workspace)),
                             // TODO #29 add details from the frame
                             ..Default::default()
                         })
@@ -557,10 +559,10 @@ impl LanguageServer for Backend {
     ) -> Result<Option<SemanticTokensResult>> {
         debug!("semantic_tokens_full at {}", params.text_document.uri);
         let url = params.text_document.uri;
-        let doc = self.get_internal_document(&url)?;
-        let doc = doc.read();
+        let sync = self.read_sync().await;
+        let (doc, _) = sync.get_internal_document(&url)?;
 
-        let tokens = doc.sematic_tokens(None, &self.position_encoding.read())?;
+        let tokens = doc.sematic_tokens(None, self.encoding())?;
 
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
@@ -574,10 +576,10 @@ impl LanguageServer for Backend {
     ) -> Result<Option<SemanticTokensRangeResult>> {
         debug!("semantic_tokens_range at {}", params.text_document.uri);
         let url = params.text_document.uri;
-        let doc = self.get_internal_document(&url)?;
-        let doc = doc.read();
-        let range = Range::from_lsp(&params.range, &doc.rope, &self.position_encoding.read())?;
-        let tokens = doc.sematic_tokens(Some(range), &self.position_encoding.read())?;
+        let sync = self.read_sync().await;
+        let (doc, _) = sync.get_internal_document(&url)?;
+        let range = Range::from_lsp(&params.range, &doc.rope, self.encoding())?;
+        let tokens = doc.sematic_tokens(Some(range), self.encoding())?;
 
         return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
             result_id: None,
@@ -590,8 +592,8 @@ impl LanguageServer for Backend {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
         let url = params.text_document.uri;
-        let doc = self.get_internal_document(&url)?;
-        let doc = doc.read();
+        let sync = self.read_sync().await;
+        let (doc, _) = sync.get_internal_document(&url)?;
         let infos = doc.all_frame_infos();
         return Ok(Some(DocumentSymbolResponse::Flat(
             #[allow(deprecated)] // All fields need to be specified
@@ -609,9 +611,7 @@ impl LanguageServer for Backend {
                             deprecated: None,
                             location: Location {
                                 uri: url.clone(),
-                                range: def
-                                    .range
-                                    .into_lsp(&doc.rope, &self.position_encoding.read())?,
+                                range: def.range.into_lsp(&doc.rope, self.encoding())?,
                             },
                             container_name: None,
                         })
@@ -631,14 +631,14 @@ impl LanguageServer for Backend {
         let query = params.query;
         info!("symbol with query: {query}");
 
-        let workspaces = self.workspaces.read();
+        let sync = self.read_sync().await;
+        let workspaces = sync.workspaces();
         let all_frame_infos = workspaces
             .iter()
             .flat_map(|workspace| {
-                let ws = workspace.read();
-                ws.internal_documents
-                    .iter()
-                    .flat_map(|doc| doc.read().all_frame_infos())
+                let ws = workspace;
+                ws.internal_documents()
+                    .flat_map(workspace::InternalDocument::all_frame_infos)
                     .collect_vec()
             })
             .collect_vec();
@@ -656,14 +656,9 @@ impl LanguageServer for Backend {
                 #[allow(deprecated)] // All fields need to be specified
                 fi.definitions.iter().map(|definition| {
                     let url = &definition.uri;
-                    let location = self
+                    let location = sync
                         .get_internal_document(url)
-                        .map(|doc| {
-                            let doc = doc.read();
-                            definition
-                                .clone()
-                                .into_lsp(&doc.rope, &self.position_encoding.read())
-                        })
+                        .map(|(doc, _)| definition.clone().into_lsp(&doc.rope, self.encoding()))
                         .and_then(|r| r.inspect_err(|e| error!("{e}")))
                         .unwrap_or(Location {
                             uri: url.clone(),
@@ -694,45 +689,38 @@ impl LanguageServer for Backend {
             params.context
         );
 
-        let (full_iri_option, workspace) = {
-            let url = params.text_document_position.text_document.uri;
+        let url = params.text_document_position.text_document.uri;
+        let sync = self.read_sync().await;
+        let (doc, workspace) = sync.get_internal_document(&url)?;
 
-            let doc = self.get_internal_document(&url)?;
-            let doc = doc.read();
-            let pos: Position = Position::from_lsp(
-                params.text_document_position.position,
-                &doc.rope,
-                &self.position_encoding.read(),
-            )?;
+        let pos: Position = Position::from_lsp(
+            params.text_document_position.position,
+            &doc.rope,
+            self.encoding(),
+        )?;
 
-            let node = doc
-                .tree
-                .root_node()
-                .named_descendant_for_point_range(pos.into(), pos.into())
-                .ok_or(Error::PositionOutOfBounds(pos))?;
+        let node = doc
+            .tree
+            .root_node()
+            .named_descendant_for_point_range(pos.into(), pos.into())
+            .ok_or(Error::PositionOutOfBounds(pos))?;
 
-            let full_iri_option = match node.kind() {
-                "full_iri" => Some(trim_full_iri(node_text(&node, &doc.rope))),
-                "simple_iri" | "abbreviated_iri" => {
-                    let iri = node_text(&node, &doc.rope);
-                    Some(
-                        doc.abbreviated_iri_to_full_iri(&iri)
-                            .unwrap_or(iri.to_string()),
-                    )
-                }
-                _ => None,
-            };
-            let workspace = doc.try_get_workspace()?;
-            (full_iri_option, workspace)
+        let full_iri_option = match node.kind() {
+            "full_iri" => Some(trim_full_iri(node_text(&node, &doc.rope))),
+            "simple_iri" | "abbreviated_iri" => {
+                let iri = node_text(&node, &doc.rope);
+                Some(
+                    doc.abbreviated_iri_to_full_iri(&iri)
+                        .unwrap_or(iri.to_string()),
+                )
+            }
+            _ => None,
         };
 
         Ok(if let Some(full_iri) = full_iri_option {
-            let workspace = workspace.read();
             let locations = workspace
-                .internal_documents
-                .iter()
+                .internal_documents()
                 .flat_map(|doc| {
-                    let doc = doc.value().read();
                     doc.query(&ALL_QUERIES.iri_query)
                         .into_iter()
                         .map(|m| {
@@ -769,9 +757,9 @@ impl LanguageServer for Backend {
                                 }
 
                                 Ok(Some(Location {
-                                    uri: doc.uri.clone(),
-                                    range: range
-                                        .into_lsp(&doc.rope, &self.position_encoding.read())?,
+                                    uri: Url::from_file_path(&doc.path)
+                                        .expect("File path should be a valid URL"),
+                                    range: range.into_lsp(&doc.rope, self.encoding())?,
                                 }))
                             } else {
                                 Ok(None)
@@ -794,10 +782,9 @@ impl LanguageServer for Backend {
     ) -> Result<Option<PrepareRenameResponse>> {
         let url = params.text_document.uri;
 
-        let doc = self.get_internal_document(&url)?;
-        let doc = doc.read();
-        let pos: Position =
-            Position::from_lsp(params.position, &doc.rope, &self.position_encoding.read())?;
+        let sync = self.read_sync().await;
+        let (doc, _) = sync.get_internal_document(&url)?;
+        let pos: Position = Position::from_lsp(params.position, &doc.rope, self.encoding())?;
 
         fn node_range(position: Position, doc: &InternalDocument) -> Option<Range> {
             debug!("prepare_rename try {position:?}");
@@ -852,7 +839,7 @@ impl LanguageServer for Backend {
             }
         }
 
-        let range = node_range(pos, &doc)
+        let range = node_range(pos, doc)
             .or_else(|| {
                 // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
                 // For example: ThisIsSomeIri| other text
@@ -860,11 +847,11 @@ impl LanguageServer for Backend {
                 //                       Cursor
                 debug!("prepare rename try one position left");
                 let position = pos.moved_left(1, &doc.rope);
-                node_range(position, &doc)
+                node_range(position, doc)
             })
             .map(|range| {
                 Ok(PrepareRenameResponse::Range(
-                    range.into_lsp(&doc.rope, &self.position_encoding.read())?,
+                    range.into_lsp(&doc.rope, self.encoding())?,
                 ))
             })
             .and_then(|r| r.inspect_err(|e: &Error| error!("{e}")).ok());
@@ -878,17 +865,16 @@ impl LanguageServer for Backend {
         let url = params.text_document_position.text_document.uri;
         let new_name = params.new_name;
 
-        let doc = self.get_internal_document(&url)?;
-
-        let doc = doc.read_timeout()?;
+        let sync = self.read_sync().await;
+        let (doc, workspace) = sync.get_internal_document(&url)?;
 
         let pos: Position = Position::from_lsp(
             params.text_document_position.position,
             &doc.rope,
-            &self.position_encoding.read_recursive(),
+            self.encoding(),
         )?;
 
-        let old_and_new_iri = if let Some(x) = rename_helper(pos, &doc, new_name.clone())? {
+        let old_and_new_iri = if let Some(x) = rename_helper(pos, doc, new_name.clone())? {
             Some(x)
         } else {
             // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
@@ -897,24 +883,14 @@ impl LanguageServer for Backend {
             //                       Cursor
             debug!("prepare rename try one position left");
             let position = pos.moved_left(1, &doc.rope);
-            rename_helper(position, &doc, new_name)?
+            rename_helper(position, doc, new_name)?
         };
-
-        let workspace = doc.try_get_workspace()?;
-        let workspace = workspace.read_timeout()?;
-        drop(doc);
-        drop(url);
 
         if let Some((full_iri, new_iri, iri_kind, original)) = old_and_new_iri {
             debug!("renaming resolved iris from {full_iri:?} to {new_iri:?}");
             let changes = workspace
-                .internal_documents
-                .iter()
+                .internal_documents()
                 .map(|doc| {
-                    let doc = doc
-                        .value()
-                        .try_read_recursive_for(Duration::from_secs(1))
-                        .expect("a read lock to work");
                     let edits = doc
                         .query(&ALL_QUERIES.iri_query)
                         .into_iter()
@@ -942,10 +918,7 @@ impl LanguageServer for Backend {
                             };
                             if iri == full_iri && iri_kind == parent_kind {
                                 Ok(Some(TextEdit {
-                                    range: range.into_lsp(
-                                        &doc.rope,
-                                        &self.position_encoding.read_recursive(),
-                                    )?,
+                                    range: range.into_lsp(&doc.rope, self.encoding())?,
                                     new_text: new_iri
                                         .clone()
                                         .map(|new_iri| {
@@ -976,6 +949,9 @@ impl LanguageServer for Backend {
 
     async fn shutdown(&self) -> Result<()> {
         info!("Shutdown");
+        // TODO
+        // let mut workspaces = self.workspaces.write();
+        // workspaces.clear();
         Ok(())
     }
 }
@@ -1045,101 +1021,16 @@ fn rename_helper(
 }
 
 impl Backend {
-    /// This will find a workspace or create one for a given url
-    fn find_workspace(&self, url: &Url) -> MyResult<Arc<RwLock<Workspace>>> {
-        debug!("find workspace");
-        let mut workspaces = self
-            .workspaces
-            .try_upgradable_read_for(Duration::from_secs(5))
-            .ok_or(Error::LockTimeout(5))?;
-
-        // TODO there are problems when the workspace is changing
-        // - A document could be in its own workspace
-        // - Then a catalog file is created or modified that would place a document in that workspace
-        // - Because of the early return the document can never move to the new workspace
-        let maybe_workspace = workspaces.iter().find(|workspace| {
-            let workspace = workspace.read();
-            workspace.internal_documents.contains_key(url)
-                || workspace.catalogs.iter().any(|catalog| {
-                    match &url
-                        .to_file_path()
-                        .inspect_err(|()| error!("Url is not a filepath {url}"))
-                    {
-                        Ok(path) => catalog.contains(path),
-                        Err(()) => false,
-                    }
-                })
-                // Check if the provided URL is a subset of a workspace URL.
-                // 
-                // Like how    file:///path/to/workspace              is a
-                // superset of file:///path/to/workspace/ontology.omn
-                || workspace.folder.uri.make_relative(url).is_some()
-        });
-
-        Ok(match maybe_workspace {
-            None => {
-                let mut file_path = url.to_file_path().expect("URL should be a filepath");
-                file_path.pop();
-                warn!("Workspace for {url} could not be found. Could the entry in catalog-v001.xml be missing? Creating a new one at {}", file_path.display());
-                let workspace_folder = WorkspaceFolder {
-                    // The workspace folder IS the single file. This is not ideal but should work for now.
-                    uri: Url::from_file_path(file_path).expect("Valid URL from filepath"),
-                    name: "Single File".into(),
-                };
-                debug!("try workspaces write...");
-                let workspace = Workspace::new(workspace_folder.clone());
-
-                // workspace_folder
-                workspaces.with_upgraded(|w| {
-                    debug!("locked workspace");
-
-                    let ws = Arc::new(RwLock::new(workspace));
-                    w.push(ws.clone());
-                    ws
-                })
-            }
-            Some(w) => w.clone(),
-        })
+    async fn read_sync(&self) -> RwLockReadGuard<'_, SyncBackend> {
+        self.sync.read().await
+    }
+    async fn write_sync(&self) -> RwLockWriteGuard<'_, SyncBackend> {
+        self.sync.write().await
     }
 
-    /// Convinience function to fetch internal document
-    fn get_internal_document(&self, url: &Url) -> MyResult<Arc<RwLock<InternalDocument>>> {
-        let workspace = self.find_workspace(url)?;
-        let workspace = workspace.read_timeout()?;
-        workspace.get_internal_document(url)
+    fn encoding(&self) -> &PositionEncodingKind {
+        self.position_encoding
+            .get()
+            .expect("position should be set")
     }
-}
-
-// TODO maybe move this into document or workspace
-/// This will try to fetch the imports of a document
-fn resolve_imports(
-    document: &Arc<RwLock<InternalDocument>>,
-    http_client: &dyn HttpClient,
-) -> MyResult<()> {
-    let document = document.read();
-    debug!("Resolve imports for {}", document.uri);
-
-    let import_urls = document.imports();
-    let prefix_urls = document
-        .prefixes()
-        .into_values()
-        .filter_map(|url| Url::parse(&url).ok())
-        // Filter out the current document as a prefix (most likely the empty prefix ":")
-        .filter(|url| url != &document.uri);
-
-    for url in import_urls {
-        Workspace::resolve_url_to_document(&document.try_get_workspace()?, &url, http_client)
-            .log_if_error();
-    }
-
-    for url in prefix_urls {
-        Workspace::resolve_prefix_url_to_document(
-            &document.try_get_workspace()?,
-            &url,
-            http_client,
-        )
-        .log_if_error();
-    }
-
-    Ok(())
 }

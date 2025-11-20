@@ -45,12 +45,13 @@ impl Catalog {
     }
 }
 
+/// This is a kind of mapping between a ontology URL and a relative file path
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct CatalogUri {
     /// Non unique name of item
     #[serde(rename = "@id")]
-    pub _id: String,
+    _id: String,
 
     /// Full URL of the ontology. This will be used in OMN import statements
     #[serde(rename = "@name")]

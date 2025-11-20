@@ -1,4 +1,5 @@
 Prefix: : <https://example.com/ontology#>
+Prefix: rdfs: <https://www.w3.org/2000/01/rdf-schema#>
 
 Ontology:
 Class: <https://example.com/ontology#B>
@@ -8,4 +9,64 @@ Class: B
 Class: :B
     SubClassOf: owl:Thing
 Class: <https://example.com/ontology#B>
+    Annotations: rdfs:label "B thing"
     SubClassOf: owl:Thing
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        

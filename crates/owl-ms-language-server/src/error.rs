@@ -1,6 +1,5 @@
 use log::error;
-use parking_lot::RwLock;
-use std::{borrow::Cow, io, path::PathBuf, time::Duration};
+use std::{borrow::Cow, io, path::PathBuf};
 use thiserror::Error;
 use tower_lsp::lsp_types::Url;
 
@@ -12,6 +11,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("The provided document can not be found {0}")]
     DocumentNotFound(Url),
+    #[error("The provided internal document can not be found {0}")]
+    InternalDocumentNotFound(PathBuf),
+    #[error("The provided document was not loaded but requested {0}")]
+    DocumentNotLoaded(Url),
     #[error("The provided document type is not supported extention: {0}")]
     DocumentNotSupported(String),
     #[error("The provided document was empty: {0}")]
@@ -30,6 +33,8 @@ pub enum Error {
     PositionOutOfBoundsTowerLsp(tower_lsp::lsp_types::Position),
     #[error("The LSP Feature is not supported at the moment: {0}")]
     LspFeatureNotSupported(&'static str),
+    #[error("The request to {0} could not be fulfilled because: {1}")]
+    Web(String, &'static str), // Url and reason
     // From other error types
     #[error("Ureq Error: {0}")]
     Ureq(#[from] ureq::Error),
@@ -85,20 +90,5 @@ pub trait ResultIterator<T> {
 impl<T, I: Iterator<Item = Result<T>>> ResultIterator<T> for I {
     fn filter_and_log(self) -> impl Iterator<Item = T> {
         self.filter_map(|r| r.inspect_log().ok())
-    }
-}
-
-pub trait RwLockExt<T> {
-    fn read_timeout(
-        &'_ self,
-    ) -> Result<parking_lot::lock_api::RwLockReadGuard<'_, parking_lot::RawRwLock, T>>;
-}
-
-impl<T> RwLockExt<T> for RwLock<T> {
-    fn read_timeout(
-        &'_ self,
-    ) -> Result<parking_lot::lock_api::RwLockReadGuard<'_, parking_lot::RawRwLock, T>> {
-        self.try_read_recursive_for(Duration::from_secs(5))
-            .ok_or(Error::LockTimeout(5))
     }
 }

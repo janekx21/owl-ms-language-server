@@ -1,19 +1,18 @@
 use std::{collections::HashMap, sync::LazyLock};
 
-use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tree_sitter_c2rust::Query;
 
 use crate::LANGUAGE;
 
-pub static NODE_TYPES: LazyLock<DashMap<String, StaticNode>> = LazyLock::new(|| {
+pub static NODE_TYPES: LazyLock<HashMap<String, StaticNode>> = LazyLock::new(|| {
     let node_types: Vec<StaticNode> =
         serde_json::from_str(tree_sitter_owl_ms::NODE_TYPES).expect("valid node types");
 
     node_types
         .iter()
         .map(|node| (node.type_.clone(), (*node).clone()))
-        .collect::<DashMap<String, StaticNode>>()
+        .collect::<HashMap<String, StaticNode>>()
 });
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

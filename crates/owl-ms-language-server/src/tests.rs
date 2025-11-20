@@ -1,5 +1,4 @@
-use crate::{catalog::Catalog, *};
-use dashmap::DashMap;
+use crate::{catalog::Catalog, error::Result, web::HttpClient, *};
 use horned_owl::{
     io::{OWXParserConfiguration, ParserConfiguration, RDFParserConfiguration},
     model::{AnnotatedComponent, Build},
@@ -180,18 +179,16 @@ async fn backend_did_open_should_create_document() {
         .await;
 
     // Assert
-    let workspaces = service.inner().workspaces.read();
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
     let workspace = workspaces.iter().exactly_one().unwrap();
-    let workspace = workspace.read();
 
-    let docs = workspace.internal_documents.iter().collect_vec();
+    let docs = workspace.internal_documents().collect_vec();
 
     let doc = docs
         .iter()
         .exactly_one()
-        .unwrap_or_else(|_| panic!("Should be exactly one"))
-        .value()
-        .read();
+        .unwrap_or_else(|_| panic!("Should be exactly one"));
 
     assert_eq!(doc.uri, url);
     assert_eq!(doc.version, 0);
@@ -220,6 +217,11 @@ async fn backend_did_change_should_update_internal_rope() -> error::Result<()> {
             },
         })
         .await;
+
+    {
+        let sync = service.inner().read_sync().await;
+        info!("{sync:#?}");
+    }
 
     // Act
     service
@@ -256,14 +258,10 @@ async fn backend_did_change_should_update_internal_rope() -> error::Result<()> {
         .await;
 
     // Assert
-    let workspace = service.inner().find_workspace(&ontology_url)?;
-    let workspace = workspace.read();
+    let sync = service.inner().read_sync().await;
+    info!("{sync:#?}");
+    let (doc, _) = sync.get_internal_document(&ontology_url).unwrap();
 
-    let doc = workspace
-        .internal_documents
-        .get(&ontology_url.clone())
-        .expect("found the document");
-    let doc = doc.read();
     let doc_content = doc.rope.to_string();
 
     assert_eq!(doc_content, "A😊BCDE😊FGH😊I");
@@ -274,7 +272,11 @@ async fn backend_did_change_should_update_internal_rope() -> error::Result<()> {
 async fn backend_hover_on_class_should_show_class_info() {
     setup();
     // Arrange
-    let service = arrange_backend(None, vec![]).await;
+    let service = arrange_backend(
+        None,
+        vec![("http://www.w3.org/2000/01/rdf-schema#", "dummy")],
+    )
+    .await;
 
     let dir = TempDir::new("owl-ms-test").unwrap();
     let url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
@@ -314,7 +316,7 @@ async fn backend_hover_on_class_should_show_class_info() {
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     let hover_result = hover_result.unwrap();
     let range = hover_result.range.unwrap();
     assert_eq!(
@@ -401,7 +403,9 @@ async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
             uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
             name: "test wosrkpace".into(),
         }),
-        vec![],
+        vec![
+            ("http://www.w3.org/2000/01/rdf-schema#", ""), //dummy
+        ],
     )
     .await;
 
@@ -457,7 +461,7 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     let hover_result = hover_result.unwrap();
     let range = hover_result.range.unwrap();
     assert_eq!(
@@ -473,7 +477,8 @@ async fn backend_hover_in_multi_file_ontology_should_work() {
         HoverContents::Scalar(MarkedString::String(str)) => str,
         _ => panic!("Did not think of that"),
     };
-    info!("{:#?}", service.inner().workspaces.read());
+    let sync = service.inner().read_sync().await;
+    info!("{:#?}", sync.workspaces());
     info!("{contents}");
     assert!(contents.contains("Some class in A2"));
     assert!(contents.contains("test"));
@@ -503,7 +508,7 @@ async fn backend_hover_in_multi_file_ontology_on_not_imported_iri_should_not_wor
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     let hover_result = hover_result.unwrap();
 
     let contents = match hover_result.contents {
@@ -535,9 +540,10 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
             uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
             name: "test wosrkpace".into(),
         }),
-        vec![(
-            "http://ontology-a.org/a2.owx",
-            r##"
+        vec![
+            (
+                "http://ontology-a.org/a2.owx",
+                r##"
                 <?xml version="1.0"?>
                 <Ontology xmlns="http://www.w3.org/2002/07/owl#"
                      xml:base="http://foo.org/ontology"
@@ -562,7 +568,9 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
 
                 </Ontology>
             "##,
-        )],
+            ),
+            ("http://www.w3.org/2000/01/rdf-schema#", "dummy"),
+        ],
     )
     .await;
 
@@ -610,14 +618,14 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     let hover_result = hover_result.unwrap();
 
     let contents = match hover_result.contents {
         HoverContents::Scalar(MarkedString::String(str)) => str,
         _ => panic!("Did not think of that"),
     };
-    info!("{:#?}", service.inner().workspaces.read());
+    // info!("{:#?}", service.inner().workspaces.read());
     info!("contents={contents}");
     assert!(!contents.contains("**ClassA2**"));
     assert!(contents.contains("Some class in A2"));
@@ -643,9 +651,10 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
             uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
             name: "test wosrkpace".into(),
         }),
-        vec![(
-            "http://ontology-a.org/a2.owx",
-            r##"
+        vec![
+            (
+                "http://ontology-a.org/a2.owx",
+                r##"
                 <?xml version="1.0"?>
                 <Ontology xmlns="http://www.w3.org/2002/07/owl#"
                      xml:base="http://foo.org/a"
@@ -669,7 +678,9 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
 
                 </Ontology>
             "##,
-        )],
+            ),
+            ("http://www.w3.org/2000/01/rdf-schema#", "dummy"),
+        ],
     )
     .await;
 
@@ -716,7 +727,7 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     let hover_result = hover_result.unwrap();
 
     let contents = match hover_result.contents {
@@ -748,9 +759,10 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
             uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
             name: "test wosrkpace".into(),
         }),
-        vec![(
-            "http://ontology-a.org/a2.rdf",
-            r##"
+        vec![
+            (
+                "http://ontology-a.org/a2.rdf",
+                r##"
                 <?xml version="1.0"?>
                 <rdf:RDF xmlns="http://www.w3.org/2002/07/owl#"
                      xml:base="http://www.w3.org/2002/07/owl"
@@ -768,7 +780,12 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
                     </Class>
                 </rdf:RDF>
             "##,
-        )],
+            ),
+            ("http://foo.org/ontology#", "dummy"),
+            ("http://www.w3.org/1999/02/22-rdf-syntax-ns#", "dummy"),
+            ("http://www.w3.org/2002/07/owl#", "dummy"),
+            ("http://www.w3.org/2000/01/rdf-schema#", "dummy"),
+        ],
     )
     .await;
 
@@ -815,14 +832,14 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     let hover_result = hover_result.unwrap();
 
     let contents = match hover_result.contents {
         HoverContents::Scalar(MarkedString::String(str)) => str,
         _ => panic!("Did not think of that"),
     };
-    info!("{:#?}", service.inner().workspaces.read());
+    // info!("{:#?}", service.inner().workspaces.read());
     info!("contents={contents}");
     assert!(!contents.contains("**ClassA2**"));
     assert!(contents.contains("Some class in A2"));
@@ -894,7 +911,11 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
 
     let tmp_dir = arrange_workspace_folders(|_| vec![]);
 
-    let service = arrange_backend(None, vec![]).await;
+    let service = arrange_backend(
+        None,
+        vec![("http://a.b/c/", "dummy"), ("http://a.b/b/", "dummy")],
+    )
+    .await;
 
     let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
     service
@@ -927,7 +948,7 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     let edits = result.unwrap();
 
     // TODO
@@ -957,10 +978,12 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
         })
         .await;
 
-    let workspace = service.inner().find_workspace(&url)?;
-    let workspace = workspace.read();
-    let doc = workspace.internal_documents.get(&url).unwrap();
-    let doc = doc.read();
+    let sync = service.inner().read_sync().await;
+    let workspace = sync.get_workspace(&url).unwrap();
+
+    let doc = workspace
+        .get_internal_document(&url.to_file_path().unwrap())
+        .unwrap();
     assert_eq!(doc.diagnostics, vec![], "doc:\n{}", doc.rope.to_string());
     assert_eq!(doc.rope.to_string(), target);
     Ok(())
@@ -986,9 +1009,10 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
             uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
             name: "test wosrkpace".into(),
         }),
-        vec![(
-            "http://ontology-a.org/a2.owx",
-            r##"
+        vec![
+            (
+                "http://ontology-a.org/a2.owx",
+                r##"
                 <?xml version="1.0"?>
                 <Ontology xmlns="http://www.w3.org/2002/07/owl#"
                      xml:base="http://foo.org/a"
@@ -1013,7 +1037,9 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
 
                 </Ontology>
             "##,
-        )],
+            ),
+            ("http://www.w3.org/2000/01/rdf-schema#", ""), // dummy
+        ],
     )
     .await;
 
@@ -1062,7 +1088,7 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     let result = result.unwrap();
 
     info!("result={result:#?}");
@@ -1129,13 +1155,13 @@ async fn backend_import_resolve_should_load_documents() {
         .await;
 
     // Assert
-    assert_empty_diagnostics(&service);
-    let workspaces = service.inner().workspaces.read();
+    assert_empty_diagnostics(&service).await;
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
     assert_eq!(workspaces.len(), 1, "all files should be in one workspace");
     let workspace = workspaces.first().unwrap();
-    let workspace = workspace.read();
-    info!(" Workspace documents {:#?}", workspace.internal_documents);
-    let document_count = workspace.internal_documents.iter().count();
+    info!(" Workspace documents {:#?}", workspace.internal_documents());
+    let document_count = workspace.internal_documents().count();
     assert_eq!(document_count, 2);
 }
 
@@ -1187,16 +1213,15 @@ Class: class-in-first-file
 
     // Assert
 
-    let workspaces = service.inner().workspaces.read();
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
     let workspace = workspaces.iter().exactly_one().unwrap();
-    let workspace = workspace.read();
     let document = workspace
-        .internal_documents
-        .iter()
+        .internal_documents()
         .exactly_one()
         .unwrap_or_else(|_| panic!("Multiple documents"));
     assert_eq!(
-        document.read().rope.to_string(),
+        document.rope.to_string(),
         r#"Ontology: <http://a.b/multi-file>
 Class: class-in-first-file
 
@@ -1287,7 +1312,7 @@ async fn backend_workspace_symbols_should_work() {
         .await;
 
     // Assert
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     let symbols = result
         .expect("Symbols should not throw errors")
         .expect("Symbols should contain something");
@@ -1337,6 +1362,8 @@ async fn backend_did_open_should_load_external_documents_via_http() {
                      xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
                      ontologyIRI="http://foo.org/a">
 
+                    <Prefix name="rdfs" IRI="http://www.w3.org/2000/01/rdf-schema#"/>
+
                     <Declaration>
                         <Class IRI="#SomeOtherClass"/>
                     </Declaration>
@@ -1379,21 +1406,21 @@ async fn backend_did_open_should_load_external_documents_via_http() {
 
     // Assert
 
-    assert_empty_diagnostics(&service);
-    let workspaces = service.inner().workspaces.read();
+    assert_empty_diagnostics(&service).await;
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
     let workspace = workspaces
         .iter()
         .exactly_one()
         .expect("Only one workspace should be crated");
-    let workspace = workspace.read();
 
     assert_eq!(
-        workspace.internal_documents.len(),
+        workspace.internal_documents().len(),
         1,
         "One internal document should be loaded. It was given"
     );
     assert_eq!(
-        workspace.external_documents.len(),
+        workspace.external_documents().len(),
         1,
         "One external document should be loaded"
     );
@@ -1411,24 +1438,27 @@ async fn backend_did_open_should_load_external_rdf_via_http() {
             uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
             name: "foo".into(),
         }),
-        vec![(
-            "http://www.w3.org/2000/01/rdf-schema#",
-            r##"<?xml version="1.0"?>
-<rdf:RDF xmlns="http://www.example.com/iri#"
-     xml:base="http://www.example.com/iri"
-     xmlns:o="http://www.example.com/iri#"
-     xmlns:owl="http://www.w3.org/2002/07/owl#"
-     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-     xmlns:xml="http://www.w3.org/XML/1998/namespace"
-     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
-     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
-    <owl:Ontology rdf:about="http://www.example.com/iri">
-        <owl:versionIRI rdf:resource="http://www.example.com/viri"/>
-    </owl:Ontology>
+        vec![
+            (
+                "http://www.w3.org/2000/01/rdf-schema#",
+                r##"<?xml version="1.0"?>
+                    <rdf:RDF xmlns="http://www.example.com/iri#"
+                         xml:base="http://www.example.com/iri"
+                         xmlns:o="http://www.example.com/iri#"
+                         xmlns:owl="http://www.w3.org/2002/07/owl#"
+                         xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                         xmlns:xml="http://www.w3.org/XML/1998/namespace"
+                         xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+                         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+                        <owl:Ontology rdf:about="http://www.example.com/iri">
+                            <owl:versionIRI rdf:resource="http://www.example.com/viri"/>
+                        </owl:Ontology>
 
-    <owl:Class rdf:about="http://www.example.com/iri#C"/>
-</rdf:RDF>"##,
-        )],
+                        <owl:Class rdf:about="http://www.example.com/iri#C"/>
+                    </rdf:RDF>"##,
+            ),
+            ("http://www.example.com/", "dummy"),
+        ],
     )
     .await;
 
@@ -1460,25 +1490,30 @@ async fn backend_did_open_should_load_external_rdf_via_http() {
 
     // Assert
 
-    assert_empty_diagnostics(&service);
-    let workspaces = service.inner().workspaces.read();
-    info!("{workspaces:#?}");
+    assert_empty_diagnostics(&service).await;
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
     let workspace = workspaces
         .iter()
         .exactly_one()
         .expect("Only one workspace should be crated");
 
-    let workspace = workspace.read();
+    // TODO move to own function
+    // TODO and implement stuff
+    // while let Some(handle) = workspace.indexing_thread_handle.pop() {
+    //     handle.join().unwrap();
+    // }
 
     assert_eq!(
-        workspace.internal_documents.len(),
+        workspace.internal_documents().len(),
         1,
         "One internal document should be loaded. It was given"
     );
 
-    info!("{:#?}", workspace.external_documents);
+    info!("External Documents: {:#?}", workspace.external_documents());
     assert_eq!(
-        workspace.external_documents.len(),
+        workspace.external_documents().len(),
         1,
         "One external document should be loaded"
     );
@@ -1496,9 +1531,10 @@ async fn backend_hover_should_use_external_rdf_info() {
             uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
             name: "foo".into(),
         }),
-        vec![(
-            "http://www.w3.org/2000/01/rdf-schema#",
-            r##"
+        vec![
+            (
+                "http://www.w3.org/2000/01/rdf-schema#",
+                r##"
                 <rdf:RDF
                     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
                     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
@@ -1525,7 +1561,12 @@ async fn backend_hover_should_use_external_rdf_info() {
 
                 </rdf:RDF>
             "##,
-        )],
+            ),
+            ("http://purl.org/dc/elements/1.1/", "dummy"),
+            ("http://purl.org/dc/elements/1.1", "dummy"),
+            ("http://www.w3.org/1999/02/22-rdf-syntax-ns#", "dummy"),
+            ("http://www.w3.org/2002/07/owl#", "dummy"),
+        ],
     )
     .await;
 
@@ -1573,7 +1614,7 @@ async fn backend_hover_should_use_external_rdf_info() {
 
     // Assert
 
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     let result = result.unwrap();
     let result = result.unwrap();
     let contents = result.contents;
@@ -1608,6 +1649,8 @@ async fn backend_did_open_should_load_external_documents_via_file() {
                          xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
                          xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
                          ontologyIRI="http://foo.org/a">
+
+                        <Prefix name="rdfs" IRI="http://www.w3.org/2000/01/rdf-schema#"/>
 
                         <Declaration>
                             <Class IRI="#SomeOtherClass"/>
@@ -1660,21 +1703,21 @@ async fn backend_did_open_should_load_external_documents_via_file() {
         .await;
 
     // Assert
-    assert_empty_diagnostics(&service);
-    let workspaces = service.inner().workspaces.read();
+    assert_empty_diagnostics(&service).await;
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
     let workspace = workspaces
         .iter()
         .exactly_one()
         .expect("Only one workspace should be crated");
-    let workspace = workspace.read();
 
     assert_eq!(
-        workspace.internal_documents.len(),
+        workspace.internal_documents().len(),
         1,
         "One internal document should be loaded. It was given"
     );
     assert_eq!(
-        workspace.external_documents.len(),
+        workspace.external_documents().len(),
         1,
         "One external document should be loaded"
     );
@@ -1934,7 +1977,7 @@ async fn backend_references_in_multi_file_ontology_should_work() {
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     let url2 = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a2.omn")).unwrap();
     let result = result.unwrap();
     info!("{result:#?}");
@@ -1973,7 +2016,7 @@ async fn backend_references_without_def_should_not_show_def() {
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     let result = result.unwrap();
     info!("{result:#?}");
     assert_eq!(result.len(), 1);
@@ -2007,8 +2050,8 @@ async fn backend_goto_definition_in_multi_file_ontology_should_work() {
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service);
-    info!("{:#?}", service.inner().workspaces.read());
+    assert_empty_diagnostics(&service).await;
+    // info!("{:#?}", service.inner().workspaces.read());
     let url2 = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a2.omn")).unwrap();
     let result = result.unwrap();
     match result {
@@ -2029,6 +2072,11 @@ async fn backend_document_symbols_in_multi_file_ontology_should_just_show_symbol
 
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a2.omn")).unwrap();
 
+    {
+        let sync = service.inner().read_sync().await;
+        debug!("Sync Backend: \n{sync:#?}");
+    }
+
     // Act
     let result = service
         .inner()
@@ -2045,7 +2093,7 @@ async fn backend_document_symbols_in_multi_file_ontology_should_just_show_symbol
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     match result.unwrap() {
         DocumentSymbolResponse::Flat(symbol_informations) => {
             let info = symbol_informations.iter().exactly_one().unwrap();
@@ -2238,7 +2286,7 @@ async fn backend_rename_helper(
     new_name: &str,
 ) {
     // Arrange
-    let service = arrange_backend(None, vec![]).await;
+    let service = arrange_backend(None, vec![("https://example.com/ontology#", "dummy")]).await;
 
     let dir = TempDir::new("owl-ms-test").unwrap();
     let url = Url::from_file_path(dir.path().join("foo.omn")).unwrap();
@@ -2255,17 +2303,14 @@ async fn backend_rename_helper(
         })
         .await;
 
+    let sync = service.inner().read_sync().await;
+    let (doc, _) = sync.get_internal_document(&url).unwrap();
+
     let pos = position
-        .into_lsp(
-            &service
-                .inner()
-                .get_internal_document(&url)
-                .unwrap()
-                .read()
-                .rope,
-            &PositionEncodingKind::UTF16,
-        )
+        .into_lsp(&doc.rope, &PositionEncodingKind::UTF16)
         .unwrap();
+
+    drop(sync);
 
     // Act
     let result = service
@@ -2283,7 +2328,7 @@ async fn backend_rename_helper(
         .await;
 
     // Assert
-    assert_empty_diagnostics(&service);
+    assert_empty_diagnostics(&service).await;
     let result = result.unwrap();
     let result = result.unwrap();
 
@@ -2310,27 +2355,109 @@ async fn backend_rename_helper(
             .await;
     }
 
-    let workspaces = service.inner().workspaces.read();
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
     let workspace = workspaces.iter().exactly_one().unwrap();
-    let workspace = workspace.read();
-    let doc = workspace.internal_documents.get(&url).unwrap();
-    let doc = doc.read();
+    let doc = workspace
+        .get_internal_document(&url.to_file_path().unwrap())
+        .unwrap();
     let doc_content = doc.rope.to_string();
 
     assert_eq!(doc_content, new_ontology);
 }
 
 #[test(tokio::test)]
-#[should_panic]
-#[ignore = "panic not working. using abort but that cant be detected"]
-async fn lock_test() {
-    setup();
-    info!("lock test...");
-    let a = RwLock::new(());
-    let mut w = a.write();
-    let r = a.read();
-    *w = ();
-    info!("{r:?}");
+async fn backend_did_open_should_load_external_documents_recursivly() {
+    // Arrange
+    let service = arrange_backend(
+        None,
+        vec![
+            (
+                "http://a/depth-1#",
+                indoc! {r#"
+                    <?xml version="1.0"?>
+                    <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                     xml:base="http://a/depth-1#"
+                     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+                     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+                     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+                     ontologyIRI="http://a/depth-1#">
+                        <Prefix name="" IRI="http://a/depth-1#"/>
+                        <Prefix name="owl" IRI="http://www.w3.org/2002/07/owl#"/>
+                        <Prefix name="rdf" IRI="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+                        <Prefix name="xml" IRI="http://www.w3.org/XML/1998/namespace"/>
+                        <Prefix name="xsd" IRI="http://www.w3.org/2001/XMLSchema#"/>
+                        <Prefix name="rdfs" IRI="http://www.w3.org/2000/01/rdf-schema#"/>
+                        <Prefix name="d-2" IRI="http://a/depth-2#"/>
+
+                        <Declaration>
+                            <Class IRI="Depth1Class"/>
+                        </Declaration>
+
+                        <AnnotationAssertion>
+                            <AnnotationProperty abbreviatedIRI="d-2:Depth2Annotation"/>
+                            <IRI>Depth1Class</IRI>
+                            <Literal xml:lang="en">Tutor</Literal>
+                        </AnnotationAssertion>
+
+                    </Ontology>
+                "#},
+            ),
+            (
+                "http://a/depth-2#",
+                indoc! {r#"
+                    <?xml version="1.0"?>
+                    <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                     xml:base="http://a/depth-2"
+                     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+                     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+                     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+                     ontologyIRI="http://a/depth-2">
+                        <Prefix name="" IRI="http://a/depth-2#"/>
+                        <Prefix name="owl" IRI="http://www.w3.org/2002/07/owl#"/>
+                        <Prefix name="rdf" IRI="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+                        <Prefix name="xml" IRI="http://www.w3.org/XML/1998/namespace"/>
+                        <Prefix name="xsd" IRI="http://www.w3.org/2001/XMLSchema#"/>
+                        <Prefix name="rdfs" IRI="http://www.w3.org/2000/01/rdf-schema#"/>
+                    </Ontology>
+                "#},
+            ),
+        ],
+    )
+    .await;
+
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let url = Url::from_file_path(dir.path().join("foo.omn")).unwrap();
+
+    let ontology = "
+        Prefix: d-1: <http://a/depth-1#>
+        Ontology: depth-0
+    ";
+
+    // Act
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.into(),
+            },
+        })
+        .await;
+
+    // Assert
+    assert_empty_diagnostics(&service).await;
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+
+    assert_eq!(workspace.external_documents().len(), 2);
 }
 
 //////////////////////////
@@ -2339,35 +2466,7 @@ async fn lock_test() {
 
 /// The setup is for setting up test fixture stuff. No test data or otherwise test dependent stuff is set up here.
 fn setup() {
-    setup_deadlock_detection();
-}
-
-fn setup_deadlock_detection() {
-    use parking_lot::deadlock;
-    use std::thread;
-    use std::time::Duration;
-
-    thread::spawn(|| {
-        // Create a background thread which checks for deadlocks every 1s
-        loop {
-            thread::sleep(Duration::from_secs(10));
-            let deadlocks = deadlock::check_deadlock();
-            if deadlocks.is_empty() {
-                continue;
-            }
-
-            error!("{} deadlocks detected", deadlocks.len());
-            for (i, threads) in deadlocks.iter().enumerate() {
-                error!("Deadlock #{}", i);
-                for t in threads {
-                    error!("Thread Id {:#?}", t.thread_id());
-                    error!("{:#?}", t.backtrace());
-                }
-            }
-            // panic sadly does not stop the test BECAUSE it is deadlocked :<
-            std::process::abort();
-        }
-    });
+    // Do nothing for now
 }
 
 #[derive(Debug, Clone)]
@@ -2472,37 +2571,44 @@ async fn arrange_backend(
     workspace_folder: Option<WorkspaceFolder>,
     data: Vec<(&str, &str)>,
 ) -> LspService<Backend> {
-    let (service, _) = LspService::new(|client| {
-        let mut backend = Backend::new(client);
-        backend.http_client = Arc::new(StaticClient {
-            data: data
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-        });
-        backend
+    let http_client = Box::new(StaticClient {
+        data: [
+            // Defaults for tests
+            ("http://www.w3.org/1999/02/22-rdf-syntax-ns#", "dummy"),
+            ("http://www.w3.org/2002/07/owl#", "dummy"),
+            ("http://www.w3.org/2000/01/rdf-schema#", "dummy"),
+        ]
+        .into_iter()
+        .chain(data.into_iter())
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect(),
     });
+
+    let (service, _) = LspService::new(|client| Backend::new(client, http_client));
+
+    // set_global_http_client();
+
     arrange_init_backend(&service, workspace_folder).await;
     service
 }
 
-fn assert_empty_diagnostics(service: &LspService<Backend>) {
-    let workspaces = service.inner().workspaces.read();
+async fn assert_empty_diagnostics(service: &LspService<Backend>) {
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
     for workspace in workspaces.iter() {
-        let workspace = workspace.read();
-        for doc in workspace.internal_documents.iter() {
-            let doc = doc.value().read();
+        for doc in workspace.internal_documents() {
             assert_eq!(doc.diagnostics, vec![], "rope:\n{}", doc.rope.to_string());
         }
     }
 }
 
+#[derive(Debug)]
 pub struct StaticClient {
-    pub data: DashMap<String, String>,
+    pub data: HashMap<String, String>,
 }
 
 impl HttpClient for StaticClient {
-    fn get(&self, url: &str) -> MyResult<String> {
+    fn get(&self, url: &str) -> Result<String> {
         info!("Resolving {url} in static client");
         Ok(self
             .data
