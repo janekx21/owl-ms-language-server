@@ -464,6 +464,7 @@ pub struct InternalDocument {
     pub rope: Rope,
     pub version: i32,
     pub diagnostics: Vec<(Range, String)>, // Not using the LSP type
+    pub all_frame_infos: HashMap<Iri, FrameInfo>,
 }
 
 impl Display for InternalDocument {
@@ -510,13 +511,21 @@ impl InternalDocument {
             gen_diagnostics(&tree.root_node())
         });
 
-        InternalDocument {
+        // Stage 1
+        let doc = InternalDocument {
             path,
             uri,
             tree,
             rope,
             version,
             diagnostics,
+            all_frame_infos: HashMap::new(),
+        };
+
+        // Stage 2
+        InternalDocument {
+            all_frame_infos: document_all_frame_infos(&doc),
+            ..doc
         }
     }
 
@@ -742,14 +751,22 @@ impl InternalDocument {
             gen_diagnostics(&new_tree.root_node())
         });
 
-        Ok(InternalDocument {
+        let doc = InternalDocument {
             path,
             uri,
             tree: new_tree,
             rope: new_rope,
             version: new_version,
             diagnostics: new_diagnostics,
-        })
+            all_frame_infos: HashMap::new(),
+        };
+
+        let doc = InternalDocument {
+            all_frame_infos: document_all_frame_infos(&doc),
+            ..doc
+        };
+
+        Ok(doc)
     }
 
     pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: &str) -> Option<String> {
@@ -847,10 +864,7 @@ impl InternalDocument {
     }
 
     pub fn all_frame_infos(&self) -> Vec<FrameInfo> {
-        document_all_frame_infos(self)
-            .values()
-            .cloned()
-            .collect_vec()
+        self.all_frame_infos.values().cloned().collect_vec()
     }
 
     pub fn try_keywords_at_position(&self, cursor: Position) -> Vec<String> {
@@ -1149,15 +1163,6 @@ fn imports_helper(doc: &InternalDocument) -> Vec<Url> {
         .collect_vec()
 }
 
-#[cached(
-    size = 20,
-    key = "u64",
-    convert = r#"{
-        let mut hasher = DefaultHasher::new();
-        doc.hash(&mut hasher);
-        hasher.finish()
-     } "#
-)]
 fn document_all_frame_infos(doc: &InternalDocument) -> HashMap<Iri, FrameInfo> {
     let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
 
@@ -1204,18 +1209,8 @@ fn document_all_frame_infos(doc: &InternalDocument) -> HashMap<Iri, FrameInfo> {
     frame_infos
 }
 
-#[cached(
-    size = 2000,
-    key = "u64",
-    convert = r#"{
-        let mut hasher = DefaultHasher::new();
-        doc.hash(&mut hasher);
-        iri.hash(&mut hasher);
-        hasher.finish()
-     } "#
-)]
 fn get_frame_info_helper(doc: &InternalDocument, iri: &Iri) -> Option<FrameInfo> {
-    document_all_frame_infos(doc).get(iri).cloned()
+    doc.all_frame_infos.get(iri).cloned()
 }
 
 fn document_annotations(doc: &InternalDocument) -> Vec<(String, String, String)> {
