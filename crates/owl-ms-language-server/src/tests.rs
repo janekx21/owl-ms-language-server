@@ -1,4 +1,4 @@
-use crate::{catalog::Catalog, error::Result, web::HttpClient, *};
+use crate::{catalog::Catalog, error::Result, queries::ALL_QUERIES, web::HttpClient, *};
 use horned_owl::{
     io::{OWXParserConfiguration, ParserConfiguration, RDFParserConfiguration},
     model::{AnnotatedComponent, Build},
@@ -984,7 +984,12 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
     let doc = workspace
         .get_internal_document(&url.to_file_path().unwrap())
         .unwrap();
-    assert_eq!(doc.diagnostics, vec![], "doc:\n{}", doc.rope().to_string());
+    assert_eq!(
+        doc.diagnostics(),
+        &vec![],
+        "doc:\n{}",
+        doc.rope().to_string()
+    );
     assert_eq!(doc.rope().to_string(), target);
     Ok(())
 }
@@ -2379,7 +2384,7 @@ async fn backend_rename_helper(
     let (doc, _) = sync.get_internal_document(&url).unwrap();
 
     let pos = position
-        .into_lsp(&doc.rope(), &PositionEncodingKind::UTF16)
+        .into_lsp(doc.rope(), &PositionEncodingKind::UTF16)
         .unwrap();
 
     drop(sync);
@@ -2669,7 +2674,12 @@ async fn assert_empty_diagnostics(service: &LspService<Backend>) {
     let workspaces = sync.workspaces();
     for workspace in workspaces.iter() {
         for doc in workspace.internal_documents() {
-            assert_eq!(doc.diagnostics, vec![], "rope:\n{}", doc.rope().to_string());
+            assert_eq!(
+                doc.diagnostics(),
+                &vec![],
+                "rope:\n{}",
+                doc.rope().to_string()
+            );
         }
     }
 }

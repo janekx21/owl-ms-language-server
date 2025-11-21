@@ -18,7 +18,6 @@ use error::{Error, ResultExt, ResultIterator};
 use itertools::Itertools;
 use log::{debug, error, info};
 use pos::Position;
-use queries::ALL_QUERIES;
 use range::Range;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
@@ -200,7 +199,7 @@ impl LanguageServer for Backend {
             );
 
             let diagnostics = internal_document
-                .diagnostics
+                .diagnostics()
                 .iter()
                 .map(|(range, msg)| {
                     Ok(Diagnostic {
@@ -273,7 +272,7 @@ impl LanguageServer for Backend {
             let document = workspace.insert_internal_document(new_document);
 
             let diagnostics = document
-                .diagnostics
+                .diagnostics()
                 .iter()
                 .map(|(range, msg)| {
                     Ok(Diagnostic {
@@ -727,53 +726,19 @@ impl LanguageServer for Backend {
             let locations = workspace
                 .internal_documents()
                 .flat_map(|doc| {
-                    doc.query(&ALL_QUERIES.iri_query)
+                    doc.references(&full_iri, !params.context.include_declaration)
                         .into_iter()
-                        .map(|m| {
-                            let (iri, range, node_id) = match &m.captures[..] {
-                                [iri_capture] => (
-                                    match iri_capture.node.kind.as_str() {
-                                        "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
-                                        "simple_iri" | "abbreviated_iri" => doc
-                                            .abbreviated_iri_to_full_iri(&iri_capture.node.text)
-                                            .unwrap_or(iri_capture.node.text.clone()),
-
-                                        _ => unreachable!(),
-                                    },
-                                    iri_capture.node.range,
-                                    iri_capture.node.id,
-                                ),
-                                _ => unreachable!(),
-                            };
-
-                            if iri == full_iri {
-                                if !params.context.include_declaration {
-                                    if let Some(node) = doc.node_by_id(node_id) {
-                                        let iri_context_kind = node
-                                            .parent()
-                                            .expect("IRIs should have parent nodes")
-                                            .parent()
-                                            .expect("IRI supertype should have a parent")
-                                            .kind();
-                                        if iri_context_kind.ends_with("frame") {
-                                            // This is a definition we want to filter out
-                                            return Ok(None);
-                                        }
-                                    }
-                                }
-
-                                Ok(Some(Location {
-                                    uri: Url::from_file_path(&doc.path)
-                                        .expect("File path should be a valid URL"),
-                                    range: range.into_lsp(doc.rope(), self.encoding())?,
-                                }))
-                            } else {
-                                Ok(None)
-                            }
+                        .filter_map(|range| {
+                            range
+                                .into_lsp(doc.rope(), self.encoding())
+                                .inspect_log()
+                                .ok()
                         })
-                        .filter_and_log()
-                        .flatten()
-                        .collect_vec()
+                        .map(|range| Location {
+                            uri: Url::from_file_path(&doc.path)
+                                .expect("File path should be a valid URL"),
+                            range,
+                        })
                 })
                 .collect_vec();
             Some(locations)
@@ -898,47 +863,18 @@ impl LanguageServer for Backend {
                 .internal_documents()
                 .map(|doc| {
                     let edits = doc
-                        .query(&ALL_QUERIES.iri_query)
+                        .rename_edits(&full_iri, new_iri.as_ref(), &iri_kind, &original)
                         .into_iter()
-                        .map(|m| {
-                            let (iri, range, parent_kind) = match &m.captures[..] {
-                                [iri_capture] => (
-                                    match iri_capture.node.kind.as_str() {
-                                        "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
-                                        "simple_iri" | "abbreviated_iri" => doc
-                                            .abbreviated_iri_to_full_iri(&iri_capture.node.text)
-                                            .unwrap_or(iri_capture.node.text.clone()),
-
-                                        _ => unreachable!(),
-                                    },
-                                    iri_capture.node.range,
-                                    doc.node_by_id(iri_capture.node.id)
-                                        .expect("the node id to be valid")
-                                        .parent()
-                                        .expect(
-                                            "the iri node to have a parent of a specific iri kind",
-                                        )
-                                        .kind(),
-                                ),
-                                _ => unreachable!(),
-                            };
-                            if iri == full_iri && iri_kind == parent_kind {
-                                Ok(Some(TextEdit {
-                                    range: range.into_lsp(doc.rope(), self.encoding())?,
-                                    new_text: new_iri
-                                        .clone()
-                                        .map(|new_iri| {
-                                            doc.full_iri_to_abbreviated_iri(&new_iri)
-                                                .unwrap_or(format!("<{new_iri}>"))
-                                        })
-                                        .unwrap_or(original.clone()),
-                                }))
-                            } else {
-                                Ok(None)
-                            }
+                        .filter_map(|(range, str)| {
+                            range
+                                .into_lsp(doc.rope(), self.encoding())
+                                .inspect_log()
+                                .ok()
+                                .map(|range| TextEdit {
+                                    range,
+                                    new_text: str,
+                                })
                         })
-                        .filter_and_log()
-                        .flatten()
                         .collect_vec();
                     (doc.uri.clone(), edits)
                 })

@@ -12,7 +12,6 @@ use crate::{
     rope_provider::RopeProvider, LANGUAGE,
 };
 use cached::proc_macro::cached;
-use cached::SizedCache;
 use horned_owl::model::Component::AnnotationAssertion;
 use horned_owl::model::{AnnotationSubject, AnnotationValue, ArcStr, Build, Literal};
 use horned_owl::ontology::set::SetOntology;
@@ -463,16 +462,28 @@ pub struct InternalDocument {
     pub version: i32,
 
     stage1: Stage1Document,
-
-    pub diagnostics: Vec<(Range, String)>, // Not using the LSP type
-    pub all_frame_infos: HashMap<Iri, FrameInfo>,
+    stage2: Stage2Document,
 }
 
 /// An internal document that has no semantic analysis. Just text and syntax tree.
 #[derive(Debug)]
 struct Stage1Document {
+    // TODO remove path and uri maybe
+    /// File location
+    path: PathBuf,
+    /// URL and location where this document was loaded from
+    uri: Url,
     tree: Tree,
     rope: Rope,
+}
+
+/// An internal document that has analysis results.
+#[derive(Debug)]
+struct Stage2Document {
+    prefixes: HashMap<String, String>,
+    all_frame_infos: HashMap<Iri, FrameInfo>,
+    diagnostics: Vec<(Range, String)>, // Not using the LSP type
+    reachable_urls: Vec<Url>,
 }
 
 impl Display for InternalDocument {
@@ -515,26 +526,21 @@ impl InternalDocument {
         });
 
         let rope = Rope::from(text);
-        let stage1 = Stage1Document { tree, rope };
 
-        let diagnostics = timeit("create_document / gen_diagnostics", || {
-            gen_diagnostics(&stage1)
-        });
+        let stage1 = Stage1Document {
+            path: path.clone(),
+            uri: uri.clone(),
+            tree,
+            rope,
+        };
+        let stage2 = stage1.analyze();
 
-        // Stage 1
-        let doc = InternalDocument {
+        InternalDocument {
             path,
             uri,
-            stage1,
             version,
-            diagnostics,
-            all_frame_infos: HashMap::new(),
-        };
-
-        // Stage 2
-        InternalDocument {
-            all_frame_infos: document_all_frame_infos(&doc),
-            ..doc
+            stage1,
+            stage2,
         }
     }
 
@@ -546,19 +552,19 @@ impl InternalDocument {
         &self.stage1.tree
     }
 
+    pub fn prefixes(&self) -> &HashMap<String, String> {
+        &self.stage2.prefixes
+    }
+
+    pub fn diagnostics(&self) -> &Vec<(Range, String)> {
+        &self.stage2.diagnostics
+    }
+
     pub fn formatted(&self, tab_size: u32, ruler_width: usize) -> String {
         let root = self.tree().root_node();
         let doc = to_doc(&root, self.rope(), tab_size);
         debug!("doc:\n{doc:#?}");
         doc.pretty(ruler_width).to_string()
-    }
-
-    pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
-        self.query_helper(query, None)
-    }
-
-    pub fn query_range(&self, query: &Query, range: Range) -> Vec<UnwrappedQueryMatch> {
-        self.query_helper(query, Some(range))
     }
 
     pub fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
@@ -619,66 +625,6 @@ impl InternalDocument {
             }
         }
         Ok(())
-    }
-
-    /// Finds flat references to other document URL's in this document
-    pub fn reachable_urls(&self) -> Vec<Url> {
-        let imports = self.imports();
-
-        let prefixes = self
-            .prefixes()
-            .into_iter()
-            // Filter out the empty prefix ":"
-            .filter_map(|(prefix, url)| if prefix.is_empty() { None } else { Some(url) })
-            .filter_map(|url| Url::parse(&url).ok())
-            // Filter out the current document as a prefix (most likely the empty prefix ":")
-            .filter(|url| url != &self.uri)
-            .map(|url| {
-                // Remove fragments from prefixes
-                if url.fragment().is_some() {
-                    let mut url = url.clone();
-                    url.set_fragment(Some(""));
-                    url
-                } else {
-                    url
-                }
-            });
-
-        imports.into_iter().chain(prefixes).unique().collect_vec()
-    }
-
-    pub fn imports(&self) -> Vec<Url> {
-        imports_helper(self)
-    }
-
-    pub fn query_helper(&self, query: &Query, range: Option<Range>) -> Vec<UnwrappedQueryMatch> {
-        let mut query_cursor = QueryCursor::new();
-        if let Some(range) = range {
-            query_cursor.set_point_range(range.into());
-        }
-        let rope_provider = RopeProvider::new(self.rope());
-
-        query_cursor
-            .matches(query, self.tree().root_node(), rope_provider)
-            .map_deref(|m| UnwrappedQueryMatch {
-                _pattern_index: m.pattern_index,
-                _id: m.id(),
-                captures: m
-                    .captures
-                    .iter()
-                    .sorted_by_key(|c| c.index)
-                    .map(|c| UnwrappedQueryCapture {
-                        node: UnwrappedNode {
-                            id: c.node.id(),
-                            text: node_text(&c.node, self.rope()).to_string(),
-                            range: c.node.range().into(),
-                            kind: c.node.kind().into(),
-                        },
-                        index: c.index,
-                    })
-                    .collect_vec(),
-            })
-            .collect_vec()
     }
 
     pub fn edit(
@@ -765,42 +711,23 @@ impl InternalDocument {
         // Move all other diagnostics
 
         let stage1 = Stage1Document {
+            uri: uri.clone(),
+            path: path.clone(),
             tree: new_tree,
             rope: new_rope,
         };
 
-        let new_diagnostics = timeit("did_change > gen_diagnostics", || gen_diagnostics(&stage1));
+        let stage2 = stage1.analyze();
 
         let doc = InternalDocument {
             path,
             uri,
             version: new_version,
             stage1,
-            diagnostics: new_diagnostics,
-            all_frame_infos: HashMap::new(),
-        };
-
-        let doc = InternalDocument {
-            all_frame_infos: document_all_frame_infos(&doc),
-            ..doc
+            stage2,
         };
 
         Ok(doc)
-    }
-
-    pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: &str) -> Option<String> {
-        let prefixes = self.prefixes();
-        if let Some((prefix, simple_iri)) = abbriviated_iri.split_once(':') {
-            prefixes
-                .get(prefix)
-                .map(|resolved_prefix| resolved_prefix.clone() + simple_iri)
-        } else {
-            // Simple IRIs get a free colon prependet
-            // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
-            prefixes
-                .get("")
-                .map(|resolved_prefix| resolved_prefix.clone() + abbriviated_iri)
-        }
     }
 
     /// Converts a full IRI into a abbriviated one by spliting it.
@@ -809,28 +736,14 @@ impl InternalDocument {
     /// With `Prefix: o: http://foo.bar/o#` and `doc.full_iri_to_abbreviated_iri("http://foo.bar/o#a")` -> `o:a`
     pub fn full_iri_to_abbreviated_iri(&self, full_iri: &str) -> Option<String> {
         self.prefixes()
-            .into_iter()
-            .filter_map(|(prefix, url)| match full_iri.split_once(&url) {
+            .iter()
+            .filter_map(|(prefix, url)| match full_iri.split_once(url) {
                 Some(("", post)) if prefix.is_empty() => Some(post.to_string()),
-                Some(("", post)) => Some(prefix + ":" + post),
+                Some(("", post)) => Some(prefix.to_owned() + ":" + post),
                 Some(_) | None => None,
             })
             .sorted_by_key(String::len) // short IRI's are preferred
             .next()
-    }
-
-    /// Returns the prefixes of a document (without colon :) in a prefix name to iri map.
-    ///
-    /// Some prefixes should always be defined
-    ///
-    /// ```owl-ms
-    /// Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-    /// Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-    /// Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
-    /// Prefix: owl: <http://www.w3.org/2002/07/owl#>
-    /// ```
-    pub fn prefixes(&self) -> HashMap<String, String> {
-        prefixes_helper(self)
     }
 
     pub fn inlay_hint(
@@ -839,7 +752,9 @@ impl InternalDocument {
         enconding: &PositionEncodingKind,
         workspace: &Workspace,
     ) -> std::vec::Vec<tower_lsp::lsp_types::InlayHint> {
-        self.query_range(&ALL_QUERIES.iri_query, range)
+        // TODO cache this in stage2
+        self.stage1
+            .query_range(&ALL_QUERIES.iri_query, range)
             .into_iter()
             .flat_map(|match_| match_.captures)
             .map(|capture| {
@@ -879,11 +794,11 @@ impl InternalDocument {
     }
 
     pub fn frame_info_by_iri(&self, iri: &Iri) -> Option<FrameInfo> {
-        get_frame_info_helper(self, iri)
+        self.stage2.all_frame_infos.get(iri).cloned()
     }
 
     pub fn all_frame_infos(&self) -> Vec<FrameInfo> {
-        self.all_frame_infos.values().cloned().collect_vec()
+        self.stage2.all_frame_infos.values().cloned().collect_vec()
     }
 
     pub fn try_keywords_at_position(&self, cursor: Position) -> Vec<String> {
@@ -1066,8 +981,8 @@ impl InternalDocument {
                 let document = workspace.get_internal_document(&path).unwrap();
                 document
                     .reachable_urls()
-                    .into_iter()
-                    .map(|u| (u, 1))
+                    .iter()
+                    .map(|u| (u.clone(), 1))
                     .collect()
             };
 
@@ -1114,7 +1029,7 @@ impl InternalDocument {
                     match doc {
                         Document::Internal(internal_document) => {
                             for ele in internal_document.reachable_urls() {
-                                todo.push_back((ele, 1));
+                                todo.push_back((ele.clone(), 1));
                             }
                             {
                                 let mut sync = sync_ref_clone.write().await;
@@ -1149,6 +1064,320 @@ impl InternalDocument {
             }
         })
     }
+
+    pub fn reachable_urls(&self) -> &Vec<Url> {
+        &self.stage2.reachable_urls
+    }
+
+    pub fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<String> {
+        self.stage1.abbreviated_iri_to_full_iri(iri)
+    }
+
+    pub fn rename_edits(
+        &self,
+        full_iri: &String,
+        new_iri: Option<&String>,
+        iri_kind: &String,
+        original: &str,
+    ) -> Vec<(Range, String)> {
+        self.stage1
+            .query(&ALL_QUERIES.iri_query)
+            .into_iter()
+            .map(|m| {
+                let (iri, range, parent_kind) = match &m.captures[..] {
+                    [iri_capture] => (
+                        match iri_capture.node.kind.as_str() {
+                            "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
+                            "simple_iri" | "abbreviated_iri" => self
+                                .abbreviated_iri_to_full_iri(&iri_capture.node.text)
+                                .unwrap_or(iri_capture.node.text.clone()),
+
+                            _ => unreachable!(),
+                        },
+                        iri_capture.node.range,
+                        self.node_by_id(iri_capture.node.id)
+                            .expect("the node id to be valid")
+                            .parent()
+                            .expect("the iri node to have a parent of a specific iri kind")
+                            .kind(),
+                    ),
+                    _ => unreachable!(),
+                };
+                if &iri == full_iri && iri_kind == parent_kind {
+                    Ok(Some((
+                        range,
+                        new_iri
+                            .map(|new_iri| {
+                                self.full_iri_to_abbreviated_iri(new_iri)
+                                    .unwrap_or(format!("<{new_iri}>"))
+                            })
+                            .unwrap_or(original.to_string()),
+                    )))
+                } else {
+                    Ok(None)
+                }
+            })
+            .filter_and_log()
+            .flatten()
+            .collect_vec()
+    }
+
+    pub fn references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range> {
+        self.stage1
+            .query(&ALL_QUERIES.iri_query)
+            .into_iter()
+            .map(|m| {
+                let (iri, range, node_id) = match &m.captures[..] {
+                    [iri_capture] => (
+                        match iri_capture.node.kind.as_str() {
+                            "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
+                            "simple_iri" | "abbreviated_iri" => self
+                                .abbreviated_iri_to_full_iri(&iri_capture.node.text)
+                                .unwrap_or(iri_capture.node.text.clone()),
+
+                            _ => unreachable!(),
+                        },
+                        iri_capture.node.range,
+                        iri_capture.node.id,
+                    ),
+                    _ => unreachable!(),
+                };
+
+                if &iri == full_iri {
+                    if include_declaration {
+                        if let Some(node) = self.node_by_id(node_id) {
+                            let iri_context_kind = node
+                                .parent()
+                                .expect("IRIs should have parent nodes")
+                                .parent()
+                                .expect("IRI supertype should have a parent")
+                                .kind();
+                            if iri_context_kind.ends_with("frame") {
+                                // This is a definition we want to filter out
+                                return Ok(None);
+                            }
+                        }
+                    }
+
+                    Ok(Some(range))
+                } else {
+                    Ok(None)
+                }
+            })
+            .filter_and_log()
+            .flatten()
+            .collect_vec()
+    }
+}
+
+impl Stage1Document {
+    pub fn analyze(&self) -> Stage2Document {
+        Stage2Document {
+            prefixes: self.prefixes(),
+            all_frame_infos: self.document_all_frame_infos(),
+            diagnostics: gen_diagnostics(self),
+            reachable_urls: self.reachable_urls(),
+        }
+    }
+
+    pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
+        self.query_helper(query, None)
+    }
+
+    pub fn query_range(&self, query: &Query, range: Range) -> Vec<UnwrappedQueryMatch> {
+        self.query_helper(query, Some(range))
+    }
+
+    pub fn query_helper(&self, query: &Query, range: Option<Range>) -> Vec<UnwrappedQueryMatch> {
+        let mut query_cursor = QueryCursor::new();
+        if let Some(range) = range {
+            query_cursor.set_point_range(range.into());
+        }
+        let rope_provider = RopeProvider::new(&self.rope);
+
+        query_cursor
+            .matches(query, self.tree.root_node(), rope_provider)
+            .map_deref(|m| UnwrappedQueryMatch {
+                _pattern_index: m.pattern_index,
+                _id: m.id(),
+                captures: m
+                    .captures
+                    .iter()
+                    .sorted_by_key(|c| c.index)
+                    .map(|c| UnwrappedQueryCapture {
+                        node: UnwrappedNode {
+                            id: c.node.id(),
+                            text: node_text(&c.node, &self.rope).to_string(),
+                            range: c.node.range().into(),
+                            kind: c.node.kind().into(),
+                        },
+                        index: c.index,
+                    })
+                    .collect_vec(),
+            })
+            .collect_vec()
+    }
+
+    /// Returns the prefixes of a document (without colon :) in a prefix name to iri map.
+    ///
+    /// Some prefixes should always be defined
+    ///
+    /// ```owl-ms
+    /// Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+    /// Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+    /// Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+    /// Prefix: owl: <http://www.w3.org/2002/07/owl#>
+    /// ```
+    pub fn prefixes(&self) -> HashMap<String, String> {
+        self.query(&ALL_QUERIES.prefix)
+            .into_iter()
+            .map(|m| match &m.captures[..] {
+                [name, iri] => (
+                    name.node.text.trim_end_matches(':').to_string(),
+                    trim_full_iri(iri.node.text.clone()),
+                ),
+                _ => unreachable!(),
+            })
+            // Horned owl has no default here. Lets keep it out for now.
+            // .chain(
+            //     STANDART_PREFIX_NAMES
+            //         .iter()
+            //         .map(|(a, b)| (a.to_string(), b.to_string())),
+            // )
+            .unique()
+            .collect()
+    }
+
+    fn document_all_frame_infos(&self) -> HashMap<Iri, FrameInfo> {
+        let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
+
+        // First we collect the annotations
+        for frame_info in
+            self.document_annotations()
+                .into_iter()
+                .map(|(frame_iri, annoation_iri, literal)| FrameInfo {
+                    iri: frame_iri.clone(),
+                    annotations: HashMap::from([(annoation_iri, vec![literal])]),
+                    frame_type: FrameType::Unknown,
+                    definitions: Vec::new(),
+                })
+        {
+            if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
+                // Merge the frame info for the same IRI
+                frame_info_mut.extend(frame_info);
+            } else {
+                frame_infos.insert(frame_info.iri.clone(), frame_info);
+            }
+        }
+
+        // Second we collect the location and frame type (definitions)
+        for frame_info in self
+            .document_definitions()
+            .into_iter()
+            .map(|(frame_iri, range, kind)| FrameInfo {
+                iri: frame_iri.clone(),
+                annotations: HashMap::new(),
+                frame_type: FrameType::parse(&kind),
+                definitions: vec![Location {
+                    uri: Url::from_file_path(&self.path)
+                        .expect("Filepath should be convertable to URL"),
+                    range,
+                }],
+            })
+        {
+            if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
+                // Merge the frame info for the same IRI
+                frame_info_mut.extend(frame_info);
+            } else {
+                frame_infos.insert(frame_info.iri.clone(), frame_info);
+            }
+        }
+
+        frame_infos
+    }
+    fn document_annotations(&self) -> Vec<(String, String, String)> {
+        self.query(&ALL_QUERIES.annotation_query)
+            .iter()
+            .map(|m| match &m.captures[..] {
+                [frame_iri, annoation_iri, literal] => {
+                    let iri = trim_full_iri(frame_iri.node.text.clone());
+                    let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                    let iri = trim_full_iri(annoation_iri.node.text.clone());
+                    let annoation_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                    let literal = trim_string_value(&literal.node.text);
+
+                    (frame_iri, annoation_iri, literal)
+                }
+                _ => unreachable!(),
+            })
+            .collect_vec()
+    }
+
+    fn document_definitions(&self) -> Vec<(String, Range, String)> {
+        self.query(&ALL_QUERIES.frame_query)
+            .iter()
+            .map(|m| match &m.captures[..] {
+                [frame_iri, frame] => {
+                    let iri = trim_full_iri(frame_iri.node.text.clone());
+                    let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+
+                    (frame_iri, frame.node.range, frame.node.kind.clone())
+                }
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    pub fn abbreviated_iri_to_full_iri(&self, abbriviated_iri: &str) -> Option<String> {
+        let prefixes = self.prefixes();
+        if let Some((prefix, simple_iri)) = abbriviated_iri.split_once(':') {
+            prefixes
+                .get(prefix)
+                .map(|resolved_prefix| resolved_prefix.clone() + simple_iri)
+        } else {
+            // Simple IRIs get a free colon prependet
+            // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
+            prefixes
+                .get("")
+                .map(|resolved_prefix| resolved_prefix.clone() + abbriviated_iri)
+        }
+    }
+    ///
+    /// Finds flat references to other document URL's in this document
+    pub fn reachable_urls(&self) -> Vec<Url> {
+        let imports = self.imports();
+
+        let prefixes = self
+            .prefixes()
+            .into_iter()
+            // Filter out the empty prefix ":"
+            .filter_map(|(prefix, url)| if prefix.is_empty() { None } else { Some(url) })
+            .filter_map(|url| Url::parse(&url).ok())
+            // Filter out the current document as a prefix (most likely the empty prefix ":")
+            .filter(|url| url != &self.uri)
+            .map(|url| {
+                // Remove fragments from prefixes
+                if url.fragment().is_some() {
+                    let mut url = url.clone();
+                    url.set_fragment(Some(""));
+                    url
+                } else {
+                    url
+                }
+            });
+
+        imports.into_iter().chain(prefixes).unique().collect_vec()
+    }
+
+    pub fn imports(&self) -> Vec<Url> {
+        self.query(&ALL_QUERIES.import_query)
+            .iter()
+            .filter_map(|m| match &m.captures[..] {
+                [iri] => Url::parse(&trim_full_iri(iri.node.text.clone())[..]).ok(),
+                _ => unimplemented!(),
+            })
+            .collect_vec()
+    }
 }
 
 /// Returns the word before the [`character`] position in the [`line`]
@@ -1164,108 +1393,6 @@ pub fn word_before_character(byte_index: usize, line: &str) -> String {
                 .collect()
         })
         .unwrap_or_default()
-}
-
-#[cached(
-    size = 20,
-    key = "u64",
-    convert = r#"{
-        let mut hasher = DefaultHasher::new();
-        doc.hash(&mut hasher);
-        hasher.finish()
-     } "#
-)]
-fn imports_helper(doc: &InternalDocument) -> Vec<Url> {
-    doc.query(&ALL_QUERIES.import_query)
-        .iter()
-        .filter_map(|m| match &m.captures[..] {
-            [iri] => Url::parse(&trim_full_iri(iri.node.text.clone())[..]).ok(),
-            _ => unimplemented!(),
-        })
-        .collect_vec()
-}
-
-fn document_all_frame_infos(doc: &InternalDocument) -> HashMap<Iri, FrameInfo> {
-    let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
-
-    // First we collect the annotations
-    for frame_info in
-        document_annotations(doc)
-            .into_iter()
-            .map(|(frame_iri, annoation_iri, literal)| FrameInfo {
-                iri: frame_iri.clone(),
-                annotations: HashMap::from([(annoation_iri, vec![literal])]),
-                frame_type: FrameType::Unknown,
-                definitions: Vec::new(),
-            })
-    {
-        if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
-            // Merge the frame info for the same IRI
-            frame_info_mut.extend(frame_info);
-        } else {
-            frame_infos.insert(frame_info.iri.clone(), frame_info);
-        }
-    }
-
-    // Second we collect the location and frame type (definitions)
-    for frame_info in document_definitions(doc)
-        .into_iter()
-        .map(|(frame_iri, range, kind)| FrameInfo {
-            iri: frame_iri.clone(),
-            annotations: HashMap::new(),
-            frame_type: FrameType::parse(&kind),
-            definitions: vec![Location {
-                uri: Url::from_file_path(&doc.path).expect("Filepath should be convertable to URL"),
-                range,
-            }],
-        })
-    {
-        if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
-            // Merge the frame info for the same IRI
-            frame_info_mut.extend(frame_info);
-        } else {
-            frame_infos.insert(frame_info.iri.clone(), frame_info);
-        }
-    }
-
-    frame_infos
-}
-
-fn get_frame_info_helper(doc: &InternalDocument, iri: &Iri) -> Option<FrameInfo> {
-    doc.all_frame_infos.get(iri).cloned()
-}
-
-fn document_annotations(doc: &InternalDocument) -> Vec<(String, String, String)> {
-    doc.query(&ALL_QUERIES.annotation_query)
-        .iter()
-        .map(|m| match &m.captures[..] {
-            [frame_iri, annoation_iri, literal] => {
-                let iri = trim_full_iri(frame_iri.node.text.clone());
-                let frame_iri = doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-                let iri = trim_full_iri(annoation_iri.node.text.clone());
-                let annoation_iri = doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-                let literal = trim_string_value(&literal.node.text);
-
-                (frame_iri, annoation_iri, literal)
-            }
-            _ => unreachable!(),
-        })
-        .collect_vec()
-}
-
-fn document_definitions(doc: &InternalDocument) -> Vec<(String, Range, String)> {
-    doc.query(&ALL_QUERIES.frame_query)
-        .iter()
-        .map(|m| match &m.captures[..] {
-            [frame_iri, frame] => {
-                let iri = trim_full_iri(frame_iri.node.text.clone());
-                let frame_iri = doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-
-                (frame_iri, frame.node.range, frame.node.kind.clone())
-            }
-            _ => unreachable!(),
-        })
-        .collect()
 }
 
 /// External documents are ontologies that are not expected to change in any way.
@@ -1753,7 +1880,7 @@ pub fn node_text(node: &Node, rope: &Rope) -> String {
 }
 
 /// Generate the diagnostics for a single node, walking recusivly down to every child and every syntax error within
-pub fn gen_diagnostics(stage1: &Stage1Document) -> Vec<(Range, String)> {
+fn gen_diagnostics(stage1: &Stage1Document) -> Vec<(Range, String)> {
     let mut cursor = stage1.tree.root_node().walk();
     let mut diagnostics = Vec::<(Range, String)>::new();
 
@@ -1917,35 +2044,6 @@ pub fn trim_full_iri(untrimmed_iri: String) -> Iri {
 //     ("owl:", "http://www.w3.org/2002/07/owl#"),
 //     ("xsd:", "http://www.w3.org/2001/XMLSchema#"),
 // ];
-
-#[cached(
-    ty = "SizedCache<u64, HashMap<String, String>>",
-    create = "{ SizedCache::with_size(20) }",
-    convert = r#"{
-            let mut hasher = DefaultHasher::new();
-            doc.hash(&mut hasher);
-            hasher.finish()
-     } "#
-)]
-fn prefixes_helper(doc: &InternalDocument) -> HashMap<String, String> {
-    doc.query(&ALL_QUERIES.prefix)
-        .into_iter()
-        .map(|m| match &m.captures[..] {
-            [name, iri] => (
-                name.node.text.trim_end_matches(':').to_string(),
-                trim_full_iri(iri.node.text.clone()),
-            ),
-            _ => unreachable!(),
-        })
-        // Horned owl has no default here. Lets keep it out for now.
-        // .chain(
-        //     STANDART_PREFIX_NAMES
-        //         .iter()
-        //         .map(|(a, b)| (a.to_string(), b.to_string())),
-        // )
-        .unique()
-        .collect()
-}
 
 fn to_doc(node: &Node, rope: &Rope, tab_size: u32) -> RcDoc<'static, ()> {
     // I do not target 32 systems
@@ -2378,7 +2476,12 @@ mod tests {
             .into(),
         );
 
-        let prefixes = doc.prefixes().into_iter().sorted().collect_vec();
+        let prefixes = doc
+            .prefixes()
+            .iter()
+            .map(|(a, b)| (a.clone(), b.clone()))
+            .sorted()
+            .collect_vec();
 
         assert_eq!(
             prefixes,
