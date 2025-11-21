@@ -277,14 +277,14 @@ impl Workspace {
                 }
             }
             "full_iri" => {
-                let iri = trim_full_iri(node_text(node, &doc.rope));
+                let iri = trim_full_iri(node_text(node, &doc.rope()));
 
                 self.get_frame_info(&iri)
                     .map(|fi| fi.info_display(self))
                     .unwrap_or(iri)
             }
             "simple_iri" | "abbreviated_iri" => {
-                let iri = node_text(node, &doc.rope);
+                let iri = node_text(node, &doc.rope());
                 debug!("Getting node info for {iri} at doc {}", doc.uri);
                 let iri = doc
                     .abbreviated_iri_to_full_iri(&iri)
@@ -460,11 +460,19 @@ pub struct InternalDocument {
     pub path: PathBuf,
     /// URL and location where this document was loaded from
     pub uri: Url,
-    pub tree: Tree,
-    pub rope: Rope,
     pub version: i32,
+
+    stage1: Stage1Document,
+
     pub diagnostics: Vec<(Range, String)>, // Not using the LSP type
     pub all_frame_infos: HashMap<Iri, FrameInfo>,
+}
+
+/// An internal document that has no semantic analysis. Just text and syntax tree.
+#[derive(Debug)]
+struct Stage1Document {
+    tree: Tree,
+    rope: Rope,
 }
 
 impl Display for InternalDocument {
@@ -475,7 +483,7 @@ impl Display for InternalDocument {
             self.path.display(),
             self.uri,
             self.version,
-            self.rope.len_bytes()
+            self.rope().len_bytes()
         )
     }
 }
@@ -489,7 +497,7 @@ impl core::hash::Hash for InternalDocument {
 impl Eq for InternalDocument {}
 impl PartialEq for InternalDocument {
     fn eq(&self, other: &Self) -> bool {
-        self.rope == other.rope
+        self.rope() == other.rope()
     }
 }
 
@@ -507,16 +515,17 @@ impl InternalDocument {
         });
 
         let rope = Rope::from(text);
+        let stage1 = Stage1Document { tree, rope };
+
         let diagnostics = timeit("create_document / gen_diagnostics", || {
-            gen_diagnostics(&tree.root_node())
+            gen_diagnostics(&stage1)
         });
 
         // Stage 1
         let doc = InternalDocument {
             path,
             uri,
-            tree,
-            rope,
+            stage1,
             version,
             diagnostics,
             all_frame_infos: HashMap::new(),
@@ -529,9 +538,17 @@ impl InternalDocument {
         }
     }
 
+    pub fn rope(&self) -> &Rope {
+        &self.stage1.rope
+    }
+
+    pub fn tree(&self) -> &Tree {
+        &self.stage1.tree
+    }
+
     pub fn formatted(&self, tab_size: u32, ruler_width: usize) -> String {
-        let root = self.tree.root_node();
-        let doc = to_doc(&root, &self.rope, tab_size);
+        let root = self.tree().root_node();
+        let doc = to_doc(&root, &self.rope(), tab_size);
         debug!("doc:\n{doc:#?}");
         doc.pretty(ruler_width).to_string()
     }
@@ -545,7 +562,7 @@ impl InternalDocument {
     }
 
     pub fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
-        let mut w = self.tree.walk();
+        let mut w = self.tree().walk();
         loop {
             if w.node().id() == id {
                 return Some(w.node());
@@ -639,10 +656,10 @@ impl InternalDocument {
         if let Some(range) = range {
             query_cursor.set_point_range(range.into());
         }
-        let rope_provider = RopeProvider::new(&self.rope);
+        let rope_provider = RopeProvider::new(&self.rope());
 
         query_cursor
-            .matches(query, self.tree.root_node(), rope_provider)
+            .matches(query, self.tree().root_node(), rope_provider)
             .map_deref(|m| UnwrappedQueryMatch {
                 _pattern_index: m.pattern_index,
                 _id: m.id(),
@@ -653,7 +670,7 @@ impl InternalDocument {
                     .map(|c| UnwrappedQueryCapture {
                         node: UnwrappedNode {
                             id: c.node.id(),
-                            text: node_text(&c.node, &self.rope).to_string(),
+                            text: node_text(&c.node, &self.rope()).to_string(),
                             range: c.node.range().into(),
                             kind: c.node.kind().into(),
                         },
@@ -686,8 +703,8 @@ impl InternalDocument {
 
         debug!("content changes {:#?}", params.content_changes);
 
-        let mut new_tree = self.tree.clone();
-        let mut new_rope = self.rope.clone();
+        let mut new_tree = self.tree().clone();
+        let mut new_rope = self.rope().clone();
         let uri = self.uri;
         let path = self.path;
 
@@ -747,16 +764,18 @@ impl InternalDocument {
         // Remove all old diagnostics with an overlapping range. They will need to be recreated
         // Move all other diagnostics
 
-        let new_diagnostics = timeit("did_change > gen_diagnostics", || {
-            gen_diagnostics(&new_tree.root_node())
-        });
+        let stage1 = Stage1Document {
+            tree: new_tree,
+            rope: new_rope,
+        };
+
+        let new_diagnostics = timeit("did_change > gen_diagnostics", || gen_diagnostics(&stage1));
 
         let doc = InternalDocument {
             path,
             uri,
-            tree: new_tree,
-            rope: new_rope,
             version: new_version,
+            stage1,
             diagnostics: new_diagnostics,
             all_frame_infos: HashMap::new(),
         };
@@ -843,7 +862,7 @@ impl InternalDocument {
                     Ok(None)
                 } else {
                     Ok(Some(InlayHint {
-                        position: capture.node.range.end.into_lsp(&self.rope, enconding)?,
+                        position: capture.node.range.end.into_lsp(&self.rope(), enconding)?,
                         label: InlayHintLabel::String(label),
                         kind: None,
                         text_edits: None,
@@ -869,8 +888,8 @@ impl InternalDocument {
 
     pub fn try_keywords_at_position(&self, cursor: Position) -> Vec<String> {
         let mut parser = lock_global_parser();
-        let rope = self.rope.clone();
-        let tree = self.tree.clone();
+        let rope = self.rope().clone();
+        let tree = self.tree().clone();
 
         let line = rope
             .get_line(cursor.line() as usize)
@@ -968,8 +987,11 @@ impl InternalDocument {
         if let Some(range) = range {
             query_cursor.set_point_range(range.into());
         }
-        let matches =
-            query_cursor.matches(&query, doc.tree.root_node(), RopeProvider::new(&doc.rope));
+        let matches = query_cursor.matches(
+            &query,
+            doc.tree().root_node(),
+            RopeProvider::new(&doc.rope()),
+        );
 
         let mut tokens = vec![];
 
@@ -996,8 +1018,8 @@ impl InternalDocument {
             let range: Range = node.range().into();
             // This will never happen tokens are never longer than u32
             #[allow(clippy::cast_possible_truncation)]
-            let length = range.len_lsp(&self.rope, encoding) as u32;
-            let range = range.into_lsp(&self.rope, encoding)?;
+            let length = range.len_lsp(&self.rope(), encoding) as u32;
+            let range = range.into_lsp(&self.rope(), encoding)?;
             let start = range.start;
 
             let delta_line = start.line - last_line;
@@ -1731,8 +1753,8 @@ pub fn node_text(node: &Node, rope: &Rope) -> String {
 }
 
 /// Generate the diagnostics for a single node, walking recusivly down to every child and every syntax error within
-pub fn gen_diagnostics(node: &Node) -> Vec<(Range, String)> {
-    let mut cursor = node.walk();
+pub fn gen_diagnostics(stage1: &Stage1Document) -> Vec<(Range, String)> {
+    let mut cursor = stage1.tree.root_node().walk();
     let mut diagnostics = Vec::<(Range, String)>::new();
 
     loop {
@@ -2202,7 +2224,7 @@ mod tests {
             .into(),
         );
 
-        info!("sexp:\n{}", doc.tree.root_node().to_sexp());
+        info!("sexp:\n{}", doc.tree().root_node().to_sexp());
 
         let result = doc.formatted(4, 35);
 
@@ -2255,7 +2277,7 @@ mod tests {
             .into(),
         );
 
-        info!("sexp:\n{}", doc.tree.root_node().to_sexp());
+        info!("sexp:\n{}", doc.tree().root_node().to_sexp());
 
         let result = doc.formatted(4, 35);
 

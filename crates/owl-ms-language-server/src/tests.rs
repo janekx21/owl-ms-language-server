@@ -192,8 +192,8 @@ async fn backend_did_open_should_create_document() {
 
     assert_eq!(doc.uri, url);
     assert_eq!(doc.version, 0);
-    assert_eq!(doc.rope.to_string(), "abc");
-    assert!(doc.tree.root_node().is_error());
+    assert_eq!(doc.rope().to_string(), "abc");
+    assert!(doc.tree().root_node().is_error());
 }
 
 /// This tests if the "did_change" feature works on the lsp. It takes the document DEF and adds two changes resolving in ABCDEFGHI.
@@ -262,7 +262,7 @@ async fn backend_did_change_should_update_internal_rope() -> error::Result<()> {
     info!("{sync:#?}");
     let (doc, _) = sync.get_internal_document(&ontology_url).unwrap();
 
-    let doc_content = doc.rope.to_string();
+    let doc_content = doc.rope().to_string();
 
     assert_eq!(doc_content, "A😊BCDE😊FGH😊I");
     Ok(())
@@ -984,8 +984,8 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
     let doc = workspace
         .get_internal_document(&url.to_file_path().unwrap())
         .unwrap();
-    assert_eq!(doc.diagnostics, vec![], "doc:\n{}", doc.rope.to_string());
-    assert_eq!(doc.rope.to_string(), target);
+    assert_eq!(doc.diagnostics, vec![], "doc:\n{}", doc.rope().to_string());
+    assert_eq!(doc.rope().to_string(), target);
     Ok(())
 }
 
@@ -1221,7 +1221,7 @@ Class: class-in-first-file
         .exactly_one()
         .unwrap_or_else(|_| panic!("Multiple documents"));
     assert_eq!(
-        document.rope.to_string(),
+        document.rope().to_string(),
         r#"Ontology: <http://a.b/multi-file>
 Class: class-in-first-file
 
@@ -2379,7 +2379,7 @@ async fn backend_rename_helper(
     let (doc, _) = sync.get_internal_document(&url).unwrap();
 
     let pos = position
-        .into_lsp(&doc.rope, &PositionEncodingKind::UTF16)
+        .into_lsp(&doc.rope(), &PositionEncodingKind::UTF16)
         .unwrap();
 
     drop(sync);
@@ -2433,7 +2433,7 @@ async fn backend_rename_helper(
     let doc = workspace
         .get_internal_document(&url.to_file_path().unwrap())
         .unwrap();
-    let doc_content = doc.rope.to_string();
+    let doc_content = doc.rope().to_string();
 
     assert_eq!(doc_content, new_ontology);
 }
@@ -2669,7 +2669,7 @@ async fn assert_empty_diagnostics(service: &LspService<Backend>) {
     let workspaces = sync.workspaces();
     for workspace in workspaces.iter() {
         for doc in workspace.internal_documents() {
-            assert_eq!(doc.diagnostics, vec![], "rope:\n{}", doc.rope.to_string());
+            assert_eq!(doc.diagnostics, vec![], "rope:\n{}", doc.rope().to_string());
         }
     }
 }
