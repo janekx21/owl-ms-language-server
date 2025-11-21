@@ -204,7 +204,7 @@ impl LanguageServer for Backend {
                 .iter()
                 .map(|(range, msg)| {
                     Ok(Diagnostic {
-                        range: range.into_lsp(&internal_document.rope(), self.encoding())?,
+                        range: range.into_lsp(internal_document.rope(), self.encoding())?,
                         severity: Some(DiagnosticSeverity::ERROR),
                         code: None,
                         code_description: None,
@@ -277,7 +277,7 @@ impl LanguageServer for Backend {
                 .iter()
                 .map(|(range, msg)| {
                     Ok(Diagnostic {
-                        range: range.into_lsp(&document.rope(), self.encoding())?,
+                        range: range.into_lsp(document.rope(), self.encoding())?,
                         severity: Some(DiagnosticSeverity::ERROR),
                         code: None,
                         code_description: None,
@@ -337,7 +337,7 @@ impl LanguageServer for Backend {
         let range: Range = doc.tree().root_node().range().into();
 
         return Ok(Some(vec![TextEdit {
-            range: range.into_lsp(&doc.rope(), self.encoding())?,
+            range: range.into_lsp(doc.rope(), self.encoding())?,
             new_text: text,
         }]));
     }
@@ -354,7 +354,7 @@ impl LanguageServer for Backend {
 
         let pos: Position = Position::from_lsp(
             params.text_document_position_params.position,
-            &doc.rope(),
+            doc.rope(),
             self.encoding(),
         )?;
         let node = doc
@@ -372,7 +372,7 @@ impl LanguageServer for Backend {
             let range: Range = node.range().into();
             Some(Hover {
                 contents: HoverContents::Scalar(MarkedString::String(info)),
-                range: Some(range.into_lsp(&doc.rope(), self.encoding())?),
+                range: Some(range.into_lsp(doc.rope(), self.encoding())?),
             })
         })
     }
@@ -384,7 +384,7 @@ impl LanguageServer for Backend {
         let sync = self.read_sync().await;
         let (document, workspace) = sync.get_internal_document(&url)?;
 
-        let range = Range::from_lsp(&params.range, &document.rope(), self.encoding())?;
+        let range = Range::from_lsp(&params.range, document.rope(), self.encoding())?;
 
         debug!(
             "inlay_hint at {}:{range}",
@@ -410,7 +410,7 @@ impl LanguageServer for Backend {
         let (doc, workspace) = sync.get_internal_document(&url)?;
         let pos: Position = Position::from_lsp(
             params.text_document_position_params.position,
-            &doc.rope(),
+            doc.rope(),
             self.encoding(),
         )?;
 
@@ -421,7 +421,7 @@ impl LanguageServer for Backend {
             .ok_or(Error::PositionOutOfBounds(pos))?;
 
         if ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind()) {
-            let iri = trim_full_iri(node_text(&leaf_node, &doc.rope()));
+            let iri = trim_full_iri(node_text(&leaf_node, doc.rope()));
             let iri = doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
             debug!("Try goto definition of {iri}");
@@ -439,7 +439,7 @@ impl LanguageServer for Backend {
                             l.range.start.line()
                         }
                     })
-                    .map(|l| l.clone().into_lsp(&doc.rope(), self.encoding()))
+                    .map(|l| l.clone().into_lsp(doc.rope(), self.encoding()))
                     .filter_and_log()
                     .collect_vec();
 
@@ -465,8 +465,8 @@ impl LanguageServer for Backend {
                     url,
                     vec![TextEdit {
                         range: lsp_types::Range {
-                            start: end.into_lsp(&doc.rope(), self.encoding())?,
-                            end: end.into_lsp(&doc.rope(), self.encoding())?,
+                            start: end.into_lsp(doc.rope(), self.encoding())?,
+                            end: end.into_lsp(doc.rope(), self.encoding())?,
                         },
                         new_text:
                             "\nClass: new_class\n    Annotations:\n        rdfs:label \"new class\""
@@ -492,7 +492,7 @@ impl LanguageServer for Backend {
         let (doc, workspace) = sync.get_internal_document(&url)?;
         let pos: Position = Position::from_lsp(
             params.text_document_position.position,
-            &doc.rope(),
+            doc.rope(),
             self.encoding(),
         )?;
 
@@ -502,7 +502,7 @@ impl LanguageServer for Backend {
 
         debug!("The resultingn kws are {kws:#?}");
 
-        let pos_one_left = pos.moved_left(1, &doc.rope());
+        let pos_one_left = pos.moved_left(1, doc.rope());
 
         let keywords_completion_items = kws.into_iter().map(|keyword| CompletionItem {
             label: keyword,
@@ -519,7 +519,7 @@ impl LanguageServer for Backend {
             .expect("The pos to be in at least one node");
 
         // Generate the list of iris that can be inserted.
-        let partial_text = node_text(&node, &doc.rope()).to_string();
+        let partial_text = node_text(&node, doc.rope()).to_string();
 
         if node.kind() == "simple_iri" {
             debug!("Try iris...");
@@ -584,7 +584,7 @@ impl LanguageServer for Backend {
         let url = params.text_document.uri;
         let sync = self.read_sync().await;
         let (doc, _) = sync.get_internal_document(&url)?;
-        let range = Range::from_lsp(&params.range, &doc.rope(), self.encoding())?;
+        let range = Range::from_lsp(&params.range, doc.rope(), self.encoding())?;
         let tokens = doc.sematic_tokens(Some(range), self.encoding())?;
 
         return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
@@ -617,7 +617,7 @@ impl LanguageServer for Backend {
                             deprecated: None,
                             location: Location {
                                 uri: url.clone(),
-                                range: def.range.into_lsp(&doc.rope(), self.encoding())?,
+                                range: def.range.into_lsp(doc.rope(), self.encoding())?,
                             },
                             container_name: None,
                         })
@@ -664,7 +664,7 @@ impl LanguageServer for Backend {
                     let url = &definition.uri;
                     let location = sync
                         .get_internal_document(url)
-                        .map(|(doc, _)| definition.clone().into_lsp(&doc.rope(), self.encoding()))
+                        .map(|(doc, _)| definition.clone().into_lsp(doc.rope(), self.encoding()))
                         .and_then(|r| r.inspect_err(|e| error!("{e}")))
                         .unwrap_or(Location {
                             uri: url.clone(),
@@ -701,7 +701,7 @@ impl LanguageServer for Backend {
 
         let pos: Position = Position::from_lsp(
             params.text_document_position.position,
-            &doc.rope(),
+            doc.rope(),
             self.encoding(),
         )?;
 
@@ -712,9 +712,9 @@ impl LanguageServer for Backend {
             .ok_or(Error::PositionOutOfBounds(pos))?;
 
         let full_iri_option = match node.kind() {
-            "full_iri" => Some(trim_full_iri(node_text(&node, &doc.rope()))),
+            "full_iri" => Some(trim_full_iri(node_text(&node, doc.rope()))),
             "simple_iri" | "abbreviated_iri" => {
-                let iri = node_text(&node, &doc.rope());
+                let iri = node_text(&node, doc.rope());
                 Some(
                     doc.abbreviated_iri_to_full_iri(&iri)
                         .unwrap_or(iri.to_string()),
@@ -765,7 +765,7 @@ impl LanguageServer for Backend {
                                 Ok(Some(Location {
                                     uri: Url::from_file_path(&doc.path)
                                         .expect("File path should be a valid URL"),
-                                    range: range.into_lsp(&doc.rope(), self.encoding())?,
+                                    range: range.into_lsp(doc.rope(), self.encoding())?,
                                 }))
                             } else {
                                 Ok(None)
@@ -790,7 +790,7 @@ impl LanguageServer for Backend {
 
         let sync = self.read_sync().await;
         let (doc, _) = sync.get_internal_document(&url)?;
-        let pos: Position = Position::from_lsp(params.position, &doc.rope(), self.encoding())?;
+        let pos: Position = Position::from_lsp(params.position, doc.rope(), self.encoding())?;
 
         fn node_range(position: Position, doc: &InternalDocument) -> Option<Range> {
             debug!("prepare_rename try {position:?}");
@@ -817,8 +817,8 @@ impl LanguageServer for Backend {
                 "full_iri" => {
                     let range: Range = node.range().into();
                     let range = Range {
-                        start: range.start.moved_right(1, &doc.rope()),
-                        end: range.end.moved_left(1, &doc.rope()),
+                        start: range.start.moved_right(1, doc.rope()),
+                        end: range.end.moved_left(1, doc.rope()),
                     };
                     Some(range)
                 }
@@ -828,7 +828,7 @@ impl LanguageServer for Backend {
                 }
                 "abbreviated_iri" => {
                     let range: Range = node.range().into();
-                    let text = node_text(&node, &doc.rope()).to_string();
+                    let text = node_text(&node, doc.rope()).to_string();
                     let col_offset = text
                         .find(':')
                         .expect("abbreviated_iri to contain at least one :")
@@ -836,7 +836,7 @@ impl LanguageServer for Backend {
                     let range = Range {
                         // The column offset will never be that big
                         #[allow(clippy::cast_possible_truncation)]
-                        start: range.start.moved_right(col_offset as u32, &doc.rope()),
+                        start: range.start.moved_right(col_offset as u32, doc.rope()),
                         ..range
                     };
                     Some(range)
@@ -852,12 +852,12 @@ impl LanguageServer for Backend {
                 //                           ^
                 //                       Cursor
                 debug!("prepare rename try one position left");
-                let position = pos.moved_left(1, &doc.rope());
+                let position = pos.moved_left(1, doc.rope());
                 node_range(position, doc)
             })
             .map(|range| {
                 Ok(PrepareRenameResponse::Range(
-                    range.into_lsp(&doc.rope(), self.encoding())?,
+                    range.into_lsp(doc.rope(), self.encoding())?,
                 ))
             })
             .and_then(|r| r.inspect_err(|e: &Error| error!("{e}")).ok());
@@ -876,7 +876,7 @@ impl LanguageServer for Backend {
 
         let pos: Position = Position::from_lsp(
             params.text_document_position.position,
-            &doc.rope(),
+            doc.rope(),
             self.encoding(),
         )?;
 
@@ -888,7 +888,7 @@ impl LanguageServer for Backend {
             //                           ^
             //                       Cursor
             debug!("prepare rename try one position left");
-            let position = pos.moved_left(1, &doc.rope());
+            let position = pos.moved_left(1, doc.rope());
             rename_helper(position, doc, new_name)?
         };
 
@@ -924,7 +924,7 @@ impl LanguageServer for Backend {
                             };
                             if iri == full_iri && iri_kind == parent_kind {
                                 Ok(Some(TextEdit {
-                                    range: range.into_lsp(&doc.rope(), self.encoding())?,
+                                    range: range.into_lsp(doc.rope(), self.encoding())?,
                                     new_text: new_iri
                                         .clone()
                                         .map(|new_iri| {
@@ -982,7 +982,7 @@ fn rename_helper(
                 .expect("full_iri to have a parent")
                 .kind()
                 .to_string();
-            let iri = trim_full_iri(node_text(&node, &doc.rope()));
+            let iri = trim_full_iri(node_text(&node, doc.rope()));
             Ok(Some((
                 iri.clone(),
                 Some(new_name.clone()),
@@ -991,7 +991,7 @@ fn rename_helper(
             )))
         }
         "simple_iri" => {
-            let iri = node_text(&node, &doc.rope());
+            let iri = node_text(&node, doc.rope());
             let iri_kind = node
                 .parent()
                 .expect("simple_iri to have a parent")
@@ -1011,7 +1011,7 @@ fn rename_helper(
                 .expect("abbreviated_iri to have a parent")
                 .kind()
                 .to_string();
-            let iri = node_text(&node, &doc.rope()).to_string();
+            let iri = node_text(&node, doc.rope()).to_string();
             let (prefix, _) = iri
                 .split_once(':')
                 .expect("abbreviated_iri to contain at least one :");

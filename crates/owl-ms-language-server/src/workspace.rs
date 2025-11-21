@@ -277,14 +277,14 @@ impl Workspace {
                 }
             }
             "full_iri" => {
-                let iri = trim_full_iri(node_text(node, &doc.rope()));
+                let iri = trim_full_iri(node_text(node, doc.rope()));
 
                 self.get_frame_info(&iri)
                     .map(|fi| fi.info_display(self))
                     .unwrap_or(iri)
             }
             "simple_iri" | "abbreviated_iri" => {
-                let iri = node_text(node, &doc.rope());
+                let iri = node_text(node, doc.rope());
                 debug!("Getting node info for {iri} at doc {}", doc.uri);
                 let iri = doc
                     .abbreviated_iri_to_full_iri(&iri)
@@ -548,7 +548,7 @@ impl InternalDocument {
 
     pub fn formatted(&self, tab_size: u32, ruler_width: usize) -> String {
         let root = self.tree().root_node();
-        let doc = to_doc(&root, &self.rope(), tab_size);
+        let doc = to_doc(&root, self.rope(), tab_size);
         debug!("doc:\n{doc:#?}");
         doc.pretty(ruler_width).to_string()
     }
@@ -656,7 +656,7 @@ impl InternalDocument {
         if let Some(range) = range {
             query_cursor.set_point_range(range.into());
         }
-        let rope_provider = RopeProvider::new(&self.rope());
+        let rope_provider = RopeProvider::new(self.rope());
 
         query_cursor
             .matches(query, self.tree().root_node(), rope_provider)
@@ -670,7 +670,7 @@ impl InternalDocument {
                     .map(|c| UnwrappedQueryCapture {
                         node: UnwrappedNode {
                             id: c.node.id(),
-                            text: node_text(&c.node, &self.rope()).to_string(),
+                            text: node_text(&c.node, self.rope()).to_string(),
                             range: c.node.range().into(),
                             kind: c.node.kind().into(),
                         },
@@ -862,7 +862,7 @@ impl InternalDocument {
                     Ok(None)
                 } else {
                     Ok(Some(InlayHint {
-                        position: capture.node.range.end.into_lsp(&self.rope(), enconding)?,
+                        position: capture.node.range.end.into_lsp(self.rope(), enconding)?,
                         label: InlayHintLabel::String(label),
                         kind: None,
                         text_edits: None,
@@ -990,7 +990,7 @@ impl InternalDocument {
         let matches = query_cursor.matches(
             &query,
             doc.tree().root_node(),
-            RopeProvider::new(&doc.rope()),
+            RopeProvider::new(doc.rope()),
         );
 
         let mut tokens = vec![];
@@ -1018,8 +1018,8 @@ impl InternalDocument {
             let range: Range = node.range().into();
             // This will never happen tokens are never longer than u32
             #[allow(clippy::cast_possible_truncation)]
-            let length = range.len_lsp(&self.rope(), encoding) as u32;
-            let range = range.into_lsp(&self.rope(), encoding)?;
+            let length = range.len_lsp(self.rope(), encoding) as u32;
+            let range = range.into_lsp(self.rope(), encoding)?;
             let start = range.start;
 
             let delta_line = start.line - last_line;
