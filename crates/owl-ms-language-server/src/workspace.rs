@@ -548,7 +548,6 @@ impl InternalDocument {
         });
 
         let rope = Rope::from(text);
-
         let stage1 = Stage1Document {
             path: path.clone(),
             uri: uri.clone(),

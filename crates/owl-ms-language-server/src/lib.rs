@@ -660,6 +660,7 @@ impl LanguageServer for Backend {
             .flat_map(|(_, fi)| {
                 let name = fi.label().unwrap_or(fi.iri.clone());
 
+                
                 #[allow(deprecated)] // All fields need to be specified
                 fi.definitions
                     .iter()
