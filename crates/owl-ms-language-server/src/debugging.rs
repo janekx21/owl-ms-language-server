@@ -6,7 +6,7 @@ use tower_lsp::{lsp_types::MessageType, Client, LspService};
 
 use crate::Backend;
 
-pub fn timeit<F: FnMut() -> T, T>(name: &str, mut f: F) -> T {
+pub fn timeit<F: FnOnce() -> T, T>(name: &str, f: F) -> T {
     use std::time::Instant;
     let start = Instant::now();
     let result = f();

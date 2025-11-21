@@ -2,9 +2,10 @@ use crate::error::Result;
 use crate::pos::Position;
 use ropey::Rope;
 use std::fmt::Display;
+use std::hash::Hash;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// Range like selection therefore endposition is exclusive
+/// Range like selection therefore endposition is exclusive
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Range {
     pub start: Position,
     pub end: Position,

@@ -267,7 +267,7 @@ impl LanguageServer for Backend {
             let mut sync = self.write_sync().await;
             let (document, workspace) = sync.take_internal_document(&url)?;
 
-            let new_document = document.edit(&params, self.encoding())?;
+            let new_document = timeit("document.edit", || document.edit(&params, self.encoding()))?;
 
             let document = workspace.insert_internal_document(new_document);
 
@@ -526,6 +526,8 @@ impl LanguageServer for Backend {
             let iris: Vec<CompletionItem> = workspace
                 .search_frame(&partial_text)
                 .into_iter()
+                .unique_by(|(_, iri, _)| iri.clone())
+                .sorted_unstable_by_key(|(v, _, _)| v.clone())
                 .filter_map(|(full, maybe_full_iri, frame)| {
                     let iri = doc.full_iri_to_abbreviated_iri(&maybe_full_iri).unwrap_or(
                         // This means it was not a full iri
@@ -536,7 +538,7 @@ impl LanguageServer for Backend {
                         None
                     } else {
                         Some(CompletionItem {
-                            label: full,
+                            label: frame.label().unwrap_or(full),
                             kind: Some(CompletionItemKind::REFERENCE),
                             detail: Some(frame.info_display(workspace)),
                             insert_text: Some(iri),
@@ -726,7 +728,7 @@ impl LanguageServer for Backend {
             let locations = workspace
                 .internal_documents()
                 .flat_map(|doc| {
-                    doc.references(&full_iri, !params.context.include_declaration)
+                    doc.references(&full_iri, params.context.include_declaration)
                         .into_iter()
                         .filter_map(|range| {
                             range

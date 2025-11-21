@@ -203,6 +203,8 @@ impl Workspace {
                     .collect_vec()
             })
             .collect_vec()
+
+        // TODO search in external frames
     }
 
     /// This finds a frame info in the internal and external documents.
@@ -473,8 +475,17 @@ struct Stage1Document {
     path: PathBuf,
     /// URL and location where this document was loaded from
     uri: Url,
+    version: i32,
     tree: Tree,
     rope: Rope,
+}
+
+impl Hash for Stage1Document {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
+        self.uri.hash(state);
+        Hash::hash(&self.version, state);
+    }
 }
 
 /// An internal document that has analysis results.
@@ -530,6 +541,7 @@ impl InternalDocument {
         let stage1 = Stage1Document {
             path: path.clone(),
             uri: uri.clone(),
+            version,
             tree,
             rope,
         };
@@ -713,11 +725,12 @@ impl InternalDocument {
         let stage1 = Stage1Document {
             uri: uri.clone(),
             path: path.clone(),
+            version: new_version,
             tree: new_tree,
             rope: new_rope,
         };
 
-        let stage2 = stage1.analyze();
+        let stage2 = timeit("document.edit / stage1.analyze", || stage1.analyze());
 
         let doc = InternalDocument {
             path,
@@ -1144,7 +1157,7 @@ impl InternalDocument {
                 };
 
                 if &iri == full_iri {
-                    if include_declaration {
+                    if !include_declaration {
                         if let Some(node) = self.node_by_id(node_id) {
                             let iri_context_kind = node
                                 .parent()
@@ -1181,41 +1194,11 @@ impl Stage1Document {
     }
 
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
-        self.query_helper(query, None)
+        query_helper(self, query, None)
     }
 
     pub fn query_range(&self, query: &Query, range: Range) -> Vec<UnwrappedQueryMatch> {
-        self.query_helper(query, Some(range))
-    }
-
-    pub fn query_helper(&self, query: &Query, range: Option<Range>) -> Vec<UnwrappedQueryMatch> {
-        let mut query_cursor = QueryCursor::new();
-        if let Some(range) = range {
-            query_cursor.set_point_range(range.into());
-        }
-        let rope_provider = RopeProvider::new(&self.rope);
-
-        query_cursor
-            .matches(query, self.tree.root_node(), rope_provider)
-            .map_deref(|m| UnwrappedQueryMatch {
-                _pattern_index: m.pattern_index,
-                _id: m.id(),
-                captures: m
-                    .captures
-                    .iter()
-                    .sorted_by_key(|c| c.index)
-                    .map(|c| UnwrappedQueryCapture {
-                        node: UnwrappedNode {
-                            id: c.node.id(),
-                            text: node_text(&c.node, &self.rope).to_string(),
-                            range: c.node.range().into(),
-                            kind: c.node.kind().into(),
-                        },
-                        index: c.index,
-                    })
-                    .collect_vec(),
-            })
-            .collect_vec()
+        query_helper(self, query, Some(range))
     }
 
     /// Returns the prefixes of a document (without colon :) in a prefix name to iri map.
@@ -1295,6 +1278,7 @@ impl Stage1Document {
 
         frame_infos
     }
+
     fn document_annotations(&self) -> Vec<(String, String, String)> {
         self.query(&ALL_QUERIES.annotation_query)
             .iter()
@@ -1342,7 +1326,7 @@ impl Stage1Document {
                 .map(|resolved_prefix| resolved_prefix.clone() + abbriviated_iri)
         }
     }
-    ///
+
     /// Finds flat references to other document URL's in this document
     pub fn reachable_urls(&self) -> Vec<Url> {
         let imports = self.imports();
@@ -1378,6 +1362,53 @@ impl Stage1Document {
             })
             .collect_vec()
     }
+}
+
+#[cached(
+    time = 5,
+    key = "u64",
+    convert = r#"{
+        let mut hasher = DefaultHasher::new();
+        stage1.hash(&mut hasher);
+        range.hash(&mut hasher);
+        query.capture_names().hash(&mut hasher);
+        Hash::hash(&query.start_byte_for_pattern(0), &mut hasher);
+        Hash::hash(&query.end_byte_for_pattern(0), &mut hasher);
+        hasher.finish()
+     } "#
+)]
+fn query_helper(
+    stage1: &Stage1Document,
+    query: &Query,
+    range: Option<Range>,
+) -> Vec<UnwrappedQueryMatch> {
+    let mut query_cursor = QueryCursor::new();
+    if let Some(range) = range {
+        query_cursor.set_point_range(range.into());
+    }
+    let rope_provider = RopeProvider::new(&stage1.rope);
+
+    query_cursor
+        .matches(query, stage1.tree.root_node(), rope_provider)
+        .map_deref(|m| UnwrappedQueryMatch {
+            _pattern_index: m.pattern_index,
+            _id: m.id(),
+            captures: m
+                .captures
+                .iter()
+                .sorted_by_key(|c| c.index)
+                .map(|c| UnwrappedQueryCapture {
+                    node: UnwrappedNode {
+                        id: c.node.id(),
+                        text: node_text(&c.node, &stage1.rope).to_string(),
+                        range: c.node.range().into(),
+                        kind: c.node.kind().into(),
+                    },
+                    index: c.index,
+                })
+                .collect_vec(),
+        })
+        .collect_vec()
 }
 
 /// Returns the word before the [`character`] position in the [`line`]
