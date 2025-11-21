@@ -474,7 +474,6 @@ pub struct InternalDocument {
     /// URL and location where this document was loaded from
     pub uri: Url,
     pub version: i32,
-
     stage1: Stage1Document,
     stage2: Stage2Document,
 }
