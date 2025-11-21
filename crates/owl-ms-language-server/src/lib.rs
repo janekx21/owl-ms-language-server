@@ -522,21 +522,25 @@ impl LanguageServer for Backend {
         let partial_text = node_text(&node, &doc.rope).to_string();
 
         if node.kind() == "simple_iri" {
+            debug!("Try iris...");
+
             let iris: Vec<CompletionItem> = workspace
                 .search_frame(&partial_text)
-                .iter()
-                .filter_map(|(full_iri, frame)| {
-                    let iri = doc
-                        .full_iri_to_abbreviated_iri(full_iri)
-                        .unwrap_or(format!("<{full_iri}>"));
+                .into_iter()
+                .filter_map(|(full, maybe_full_iri, frame)| {
+                    let iri = doc.full_iri_to_abbreviated_iri(&maybe_full_iri).unwrap_or(
+                        // This means it was not a full iri
+                        maybe_full_iri.clone(),
+                    );
 
                     if iri == partial_text {
                         None
                     } else {
                         Some(CompletionItem {
-                            label: iri,
+                            label: full,
                             kind: Some(CompletionItemKind::REFERENCE),
                             detail: Some(frame.info_display(workspace)),
+                            insert_text: Some(iri),
                             // TODO #29 add details from the frame
                             ..Default::default()
                         })
@@ -549,6 +553,8 @@ impl LanguageServer for Backend {
         }
 
         items.extend(keywords_completion_items);
+
+        debug!("completion item count {}", items.len());
 
         Ok(Some(CompletionResponse::Array(items)))
     }

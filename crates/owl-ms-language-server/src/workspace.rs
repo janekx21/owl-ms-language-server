@@ -183,14 +183,24 @@ impl Workspace {
 
     // TODO #28 maybe return a reference?
     /// This searches in the frames of internal documents
-    pub fn search_frame(&self, partial_text: &str) -> Vec<(Iri, FrameInfo)> {
+    pub fn search_frame(&self, partial_text: &str) -> Vec<(String, Iri, FrameInfo)> {
         self.internal_documents
             .values()
             .flat_map(|doc| {
                 doc.all_frame_infos()
                     .iter()
-                    .filter(|item| item.iri.contains(partial_text))
-                    .map(|kv| (kv.iri.clone(), kv.clone()))
+                    .filter_map(|item| {
+                        if item.iri.contains(partial_text) {
+                            Some((item.iri.clone(), item.iri.clone(), item.clone()))
+                        } else {
+                            item.annotations
+                                .values()
+                                .find_map(|values| {
+                                    values.iter().find(|value| value.starts_with(partial_text))
+                                })
+                                .map(|full| (full.clone(), item.iri.clone(), item.clone()))
+                        }
+                    })
                     .collect_vec()
             })
             .collect_vec()
@@ -757,6 +767,10 @@ impl InternalDocument {
         }
     }
 
+    /// Converts a full IRI into a abbriviated one by spliting it.
+    /// Works a bit like `make_relative`
+    ///
+    /// With `Prefix: o: http://foo.bar/o#` and `doc.full_iri_to_abbreviated_iri("http://foo.bar/o#a")` -> `o:a`
     pub fn full_iri_to_abbreviated_iri(&self, full_iri: &str) -> Option<String> {
         self.prefixes()
             .into_iter()
@@ -1664,7 +1678,7 @@ impl FrameInfo {
             .label()
             .unwrap_or(trim_url_before_last(&self.iri).to_string());
 
-        debug!("frame annotations {:#?}", self.annotations);
+        debug!("info display / frame annotations {:#?}", self.annotations);
 
         let annotations = self
             .annotations
