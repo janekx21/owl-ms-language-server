@@ -547,7 +547,8 @@ impl InternalDocument {
         };
         let stage2 = stage1.analyze();
 
-        InternalDocument {
+        // Stage 1
+        let doc = InternalDocument {
             path,
             uri,
             version,
