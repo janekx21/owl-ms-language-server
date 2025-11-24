@@ -1985,8 +1985,8 @@ impl FrameInfo {
     const LABEL_IRI: &'static str = "http://www.w3.org/2000/01/rdf-schema#label";
 
     pub fn label(&self) -> Option<String> {
-        self.annotation_display(FrameInfo::LABEL_IRI)
-    }
+    self.annotation_display(FrameInfo::LABEL_IRI)
+}
 
     pub fn annotation_display(&self, iri: &str) -> Option<String> {
         self.annotations
