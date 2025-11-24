@@ -1,4 +1,4 @@
-use crate::{catalog::Catalog, error::Result, queries::ALL_QUERIES, web::HttpClient, *};
+use crate::{catalog::Catalog, queries::ALL_QUERIES, web::HttpClient, *};
 use horned_owl::{
     io::{OWXParserConfiguration, ParserConfiguration, RDFParserConfiguration},
     model::{AnnotatedComponent, Build},
@@ -2690,7 +2690,7 @@ pub struct StaticClient {
 }
 
 impl HttpClient for StaticClient {
-    fn get(&self, url: &str) -> Result<String> {
+    fn get(&self, url: &str) -> crate::web::Result<String> {
         info!("Resolving {url} in static client");
         Ok(self
             .data
