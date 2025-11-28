@@ -1250,19 +1250,25 @@ async fn backend_workspace_symbols_should_work() {
             WorkspaceMember::OmnFile {
                 name: "a.omn".into(),
                 content: r#"
+                Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
                 Ontology: <http://foo.org/a>
-                    Class: some-class
+                    Class: some-class # This will get found by iri
                         Annotations:
                             rdfs:label "Some class"
+                    Class: C_123 # This will get found by label
+                        Annotations:
+                            rdfs:label "some number class"
+                    Class: some-iri-class # This will get found by iri and has no label
                 "#
                 .into(),
             },
             WorkspaceMember::OmnFile {
                 name: "b.omn".into(),
                 content: r#"
+                Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
                 Ontology: <http://foo.org/b>
                     Import: <http://foo.org/a.omn>
-                    Class: some-other-class
+                    Class: some-other-class # This will also be found by iri
                         Annotations:
                             rdfs:label "Some other class"
                 "#
@@ -1283,6 +1289,7 @@ async fn backend_workspace_symbols_should_work() {
     let url = Url::from_file_path(tmp_dir.path().join("c.omn")).unwrap();
 
     let ontology = r#"
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
         Ontology: <http://foo.org/c>
             Import: <http://foo.org/a.omn>
             Class: some-other-class-at-c
@@ -1322,7 +1329,15 @@ async fn backend_workspace_symbols_should_work() {
         .expect("Symbols should not throw errors")
         .expect("Symbols should contain something");
 
-    assert_eq!(symbols.len(), 2);
+    info!("{symbols:#?}");
+    assert_eq!(symbols.len(), 4);
+    assert!(symbols.iter().any(|s| s.name == "Some class"));
+    assert!(!symbols.iter().any(|s| s.name == "some-class"));
+    assert!(symbols.iter().any(|s| s.name == "Some other class at c"));
+    assert!(!symbols.iter().any(|s| s.name == "some-other-class-at-c"));
+    assert!(symbols.iter().any(|s| s.name == "some number class"));
+    assert!(!symbols.iter().any(|s| s.name == "C_123"));
+    assert!(symbols.iter().any(|s| s.name == "some-iri-class"));
 }
 
 #[test(tokio::test)]
