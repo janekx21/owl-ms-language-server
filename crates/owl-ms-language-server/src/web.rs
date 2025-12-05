@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use log::{debug, error};
-use std::{collections::HashMap, sync::Mutex, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Mutex, time::Duration};
 use thiserror::Error;
 use ureq::{http::StatusCode, Agent};
 
@@ -46,33 +46,6 @@ impl Default for UreqClient {
     }
 }
 
-// pub static HTTP_CLIENT: RwLock<Option<Arc<dyn HttpClient>>> = RwLock::new(None);
-
-// .
-//
-// # Panics
-//
-// Panics if http client is not initilized.
-// pub fn global_http_client() -> Arc<dyn HttpClient> {
-//     HTTP_CLIENT
-//         .read()
-//         .unwrap()
-//         .as_ref()
-//         .expect("global http client should be initialized")
-//         .clone()
-// }
-
-// .
-//
-// # Panics
-//
-// Panics if the global http client is intitialised.
-// pub fn set_global_http_client(http_client: Box<dyn HttpClient>) {
-//     let mut hc = HTTP_CLIENT.write().unwrap();
-//     // info!("Set static http client");
-//     *hc = Some(http_client.into());
-// }
-
 impl HttpClient for UreqClient {
     fn get(&self, url: &str) -> Result<String> {
         let mut state = self.state.lock().expect("Client should not panic");
@@ -101,7 +74,8 @@ impl HttpClient for UreqClient {
             error!("not acceptable {url}");
             return Err(Error::Web(url.to_string(), "Not acceptable"));
         }
-        // "content-type": "text/html; charset=UTF-8
+
+        // "content-type" can be something like "text/html; charset=UTF-8". So lets look for substrings.
         if response
             .headers()
             .get("Content-Type")
@@ -114,21 +88,135 @@ impl HttpClient for UreqClient {
             ));
         }
 
-        // TODO web cache
-        // debug!("ontology request {url} got {:#?}", response.headers());
         let read_to_string = response.body_mut().read_to_string()?;
-        // fs::write(
-        //     Path::new("/tmp/owl-ms-web-cache").join(
-        //         url.replace('/', " (slash) ")
-        //             .replace(':', " (colon) ")
-        //             .replace('#', " (hash) "),
-        //     ),
-        //     read_to_string.clone(),
-        // )
-        // .unwrap();
-
-        // TODO reactivate
         state.cache.insert(url.into(), read_to_string.clone());
         Ok(read_to_string)
+    }
+}
+
+/// This is a simple URL to Path escape. Changing this will break the web cache.
+#[must_use]
+pub fn url_to_filename(url: &str) -> PathBuf {
+    url.replace('/', "_slash_")
+        .replace(':', "_colon_")
+        .replace('#', "_hash_")
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .chain(".cache".chars())
+        .collect::<String>()
+        .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_simple_url() {
+        let result = url_to_filename("https://example.com");
+        assert_eq!(
+            result,
+            PathBuf::from("https_colon__slash__slash_example_com.cache")
+        );
+    }
+
+    #[test]
+    fn test_url_with_path() {
+        let result = url_to_filename("https://example.com/path/to/page");
+        assert_eq!(
+            result,
+            PathBuf::from(
+                "https_colon__slash__slash_example_com_slash_path_slash_to_slash_page.cache"
+            )
+        );
+    }
+
+    #[test]
+    fn test_url_with_port() {
+        let result = url_to_filename("http://localhost:8080/api");
+        assert_eq!(
+            result,
+            PathBuf::from("http_colon__slash__slash_localhost_colon_8080_slash_api.cache")
+        );
+    }
+
+    #[test]
+    fn test_url_with_query_params() {
+        let result = url_to_filename("https://api.example.com?key=value&id=123");
+        assert_eq!(
+            result,
+            PathBuf::from("https_colon__slash__slash_api_example_com_key_value_id_123.cache")
+        );
+    }
+
+    #[test]
+    fn test_url_with_hash() {
+        let result = url_to_filename("https://example.com/page#section");
+        assert_eq!(
+            result,
+            PathBuf::from("https_colon__slash__slash_example_com_slash_page_hash_section.cache")
+        );
+    }
+
+    #[test]
+    fn test_url_with_special_chars() {
+        let result = url_to_filename("https://example.com/path@file!name");
+        assert_eq!(
+            result,
+            PathBuf::from("https_colon__slash__slash_example_com_slash_path_file_name.cache")
+        );
+    }
+
+    #[test]
+    fn test_url_with_multiple_special_chars() {
+        let result = url_to_filename("https://example.com/path?q=test&sort=asc#top");
+        assert_eq!(
+            result,
+            PathBuf::from(
+                "https_colon__slash__slash_example_com_slash_path_q_test_sort_asc_hash_top.cache"
+            )
+        );
+    }
+
+    #[test]
+    fn test_ftp_url() {
+        let result = url_to_filename("ftp://files.example.org:21/download");
+        assert_eq!(
+            result,
+            PathBuf::from(
+                "ftp_colon__slash__slash_files_example_org_colon_21_slash_download.cache"
+            )
+        );
+    }
+
+    #[test]
+    fn test_empty_string() {
+        let result = url_to_filename("");
+        assert_eq!(result, PathBuf::from(".cache"));
+    }
+
+    #[test]
+    fn test_url_with_dashes_and_underscores() {
+        let result = url_to_filename("https://my-site.com/my_page");
+        assert_eq!(
+            result,
+            PathBuf::from("https_colon__slash__slash_my_site_com_slash_my_page.cache")
+        );
+    }
+
+    #[test]
+    fn test_cache_extension_always_added() {
+        let result = url_to_filename("simple");
+        assert!(result.to_string_lossy().ends_with(".cache"));
+    }
+
+    #[test]
+    fn test_url_with_encoded_chars() {
+        let result = url_to_filename("https://example.com/path%20with%20spaces");
+        assert_eq!(
+            result,
+            PathBuf::from("https_colon__slash__slash_example_com_slash_path_20with_20spaces.cache")
+        );
     }
 }

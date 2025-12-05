@@ -5,7 +5,7 @@ use crate::pos::Position;
 use crate::queries::{
     self, treesitter_highlight_capture_into_semantic_token_type_index, NODE_TYPES,
 };
-use crate::web::HttpClient;
+use crate::web::{url_to_filename, HttpClient};
 use crate::SyncRef;
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
@@ -185,6 +185,15 @@ impl Workspace {
             .flat_map(InternalDocument::all_frame_infos)
     }
 
+    /// Returns the path for the .owl folder
+    pub fn dot_folder_path(&self) -> PathBuf {
+        self.folder
+            .uri
+            .to_file_path()
+            .expect("Workspace folder url should be file path")
+            .join(".owl")
+    }
+
     // TODO #28 maybe return a reference?
     /// This searches in the frames of internal documents
     pub fn search_frame(&self, partial_text: &str) -> Vec<(String, Iri, FrameInfo)> {
@@ -240,28 +249,13 @@ impl Workspace {
         iri: &Iri,
         doc: &InternalDocument,
     ) -> Option<FrameInfo> {
-        // timeit("rechable docs", ||
         doc.reachable_docs_recusive(workspace)
-            // )
             .iter()
             .filter_map(|url| {
-                if let Some(doc) =
-                    // timeit("\tresolve document", ||
-                    workspace.document_by_url(url)
-                // )
-                {
+                if let Some(doc) = workspace.document_by_url(url) {
                     match &doc {
-                        DocumentReference::Internal(doc) => {
-                            // timeit("\t|-> get frame info internal", || {
-                            doc.frame_info_by_iri(iri)
-                            // })
-                        }
-                        DocumentReference::External(doc) => {
-                            // timeit("\t|-> get frame info external", ||
-
-                            doc.get_frame_info(iri)
-                            // )
-                        }
+                        DocumentReference::Internal(doc) => doc.frame_info_by_iri(iri),
+                        DocumentReference::External(doc) => doc.get_frame_info(iri),
                     }
                 } else {
                     None
@@ -348,6 +342,13 @@ impl Workspace {
             return Ok(None);
         }
 
+        if let Ok(Some(doc)) = read_cached_doc(workspace, url).inspect_log() {
+            debug!("Document found in web cache {url}");
+            return Ok(Some(doc));
+        }
+
+        warn!("Document NOT found in web cache {url}");
+
         // TODO mybe use workspace.url_to_path_with_catalog(url)
 
         let Some((catalog, catalog_uri)) = workspace.find_catalog_uri(url) else {
@@ -362,6 +363,9 @@ impl Workspace {
             .expect("join should work")?;
 
             let document = ExternalDocument::new(document_text, url.clone())?;
+
+            cache_doc(workspace, &document);
+
             return Ok(Some(Document::External(document)));
         };
 
@@ -382,6 +386,9 @@ impl Workspace {
                 // TODO maybe use url or just the requested url
                 // let document = ExternalDocument::new(document_text, url)?;
                 let document = ExternalDocument::new(document_text, url.clone())?;
+
+                cache_doc(workspace, &document);
+
                 Ok(Some(Document::External(document)))
             }
         } else {
@@ -450,6 +457,46 @@ fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
         fs::read_to_string(&path)?,
         Url::from_file_path(&path).map_err(|()| Error::InvalidFilePath(path))?,
     ))
+}
+
+fn read_cached_doc(workspace: &Workspace, url: &Url) -> Result<Option<Document>> {
+    let workspace_path = workspace
+        .folder
+        .uri
+        .to_file_path()
+        .expect("Workspace folder path should be a file path");
+    let owl_dir = workspace_path.join(".owl");
+    let web_cache = owl_dir.join("web_cache");
+    let file_name = url_to_filename(url.as_ref());
+
+    debug!("try read cached doc {}", file_name.display());
+
+    if let Ok(some) = fs::read(web_cache.join(file_name)) {
+        let text = String::from_utf8(some).expect("Cached file should be valid UTF-8");
+        let doc = ExternalDocument::new(text, url.clone())?;
+        Ok(Some(Document::External(doc)))
+    } else {
+        Ok(None)
+    }
+}
+
+fn cache_doc(workspace: &Workspace, doc: &ExternalDocument) {
+    let file_name = url_to_filename(doc.uri.as_ref());
+    let owl_dir = workspace.dot_folder_path();
+
+    if let Err(err) = fs::write(owl_dir.join(".gitignore"), "web_cache") {
+        error!("File write Error: {err}");
+    }
+
+    let web_cache = owl_dir.join("web_cache");
+    if let Err(err) = fs::create_dir_all(web_cache.clone()) {
+        error!("Dir create Error: {err}");
+    }
+    if let Err(err) = fs::write(web_cache.join(file_name), &doc.text) {
+        error!("Web cache Error: {err}");
+    } else {
+        debug!("Added {} to web cache", doc.uri);
+    }
 }
 
 #[derive(Debug)]
