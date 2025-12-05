@@ -484,6 +484,9 @@ fn cache_doc(workspace: &Workspace, doc: &ExternalDocument) {
     let file_name = url_to_filename(doc.uri.as_ref());
     let owl_dir = workspace.dot_folder_path();
 
+    if let Err(err) = fs::create_dir_all(&owl_dir) {
+        error!("Dir create Error: {err}");
+    }
     if let Err(err) = fs::write(owl_dir.join(".gitignore"), "web_cache") {
         error!("File write Error: {err}");
     }

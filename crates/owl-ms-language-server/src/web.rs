@@ -48,6 +48,23 @@ impl Default for UreqClient {
 
 impl HttpClient for UreqClient {
     fn get(&self, url: &str) -> Result<String> {
+        // Some common ontologies that are statictly included in the binary
+        match url {
+            "http://www.w3.org/2000/01/rdf-schema#" => {
+                return Ok(include_str!("../static/rdfs.owl").to_string())
+            }
+            "http://www.w3.org/2002/07/owl#" => {
+                return Ok(include_str!("../static/owl.owl").to_string())
+            }
+            "http://www.w3.org/1999/02/22-rdf-syntax-ns#" => {
+                return Ok(include_str!("../static/rdf.owl").to_string())
+            }
+            "http://purl.org/dc/elements/1.1/" => {
+                return Ok(include_str!("../static/dc.owl").to_string())
+            }
+            _ => {}
+        }
+
         let mut state = self.state.lock().expect("Client should not panic");
 
         if let Some(value) = state.cache.get(url) {
