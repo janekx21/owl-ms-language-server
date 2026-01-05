@@ -26,6 +26,7 @@ use sophia::api::source::TripleSource;
 use sophia::api::term::{BnodeId, LanguageTag, SimpleTerm, Term};
 use sophia::api::MownStr;
 use sophia::inmem::graph::LightGraph;
+use sophia::iri::resolve::Oxiri;
 use sophia::iri::IriRef;
 use std::collections::LinkedList;
 use std::fmt::Debug;
@@ -561,7 +562,10 @@ struct Stage2Document {
     prefixes: HashMap<String, String>,
     all_frame_infos: HashMap<Iri, FrameInfo>,
     diagnostics: Vec<Diagnostic>, // Not using the LSP type
-    reachable_urls: Vec<Url>,
+    directly_reachable_urls: Vec<Url>,
+    defines_iris: HashSet<Iri>,
+    uses_iris: HashSet<Iri>,
+    imports: HashSet<Iri>,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -640,8 +644,14 @@ impl InternalDocument {
         &self.stage2.prefixes
     }
 
-    pub fn diagnostics(&self) -> &Vec<Diagnostic> {
-        &self.stage2.diagnostics
+    pub fn diagnostics(&self) -> Vec<Diagnostic> {
+        let syntax_errors = &self.stage2.diagnostics;
+        let semantic_err = semantic_errors(self);
+        syntax_errors
+            .iter()
+            .cloned()
+            .chain(semantic_err.into_iter())
+            .collect_vec()
     }
 
     pub fn formatted(&self, tab_size: u32, ruler_width: usize) -> String {
@@ -1153,7 +1163,7 @@ impl InternalDocument {
     }
 
     pub fn reachable_urls(&self) -> &Vec<Url> {
-        &self.stage2.reachable_urls
+        &self.stage2.directly_reachable_urls
     }
 
     pub fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<String> {
@@ -1263,7 +1273,18 @@ impl Stage1Document {
             prefixes: self.prefixes(),
             all_frame_infos: self.document_all_frame_infos(),
             diagnostics: syntax_errors(self),
-            reachable_urls: self.reachable_urls(),
+            directly_reachable_urls: self.reachable_urls(),
+            imports: self.imports().into_iter().collect(),
+            defines_iris: self
+                .document_definitions()
+                .into_iter()
+                .map(|(iri, _, _)| iri)
+                .collect(),
+            uses_iris: self
+                .document_references()
+                .into_iter()
+                .map(|(iri, _)| iri)
+                .collect(),
         }
     }
 
@@ -1399,6 +1420,21 @@ impl Stage1Document {
             .collect()
     }
 
+    fn document_references(&self) -> Vec<(String, Range)> {
+        self.query(&ALL_QUERIES.iri_query)
+            .iter()
+            .map(|m| match &m.captures[..] {
+                [iri_capture] => {
+                    let iri = trim_full_iri(iri_capture.node.text.clone());
+                    let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+
+                    (iri, iri_capture.node.range)
+                }
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
     pub fn abbreviated_iri_to_full_iri(&self, abbreviated_iri: &str) -> Option<String> {
         let prefixes = self.prefixes();
         if let Some((prefix, simple_iri)) = abbreviated_iri.split_once(':') {
@@ -1416,7 +1452,11 @@ impl Stage1Document {
 
     /// Finds flat references to other document URL's in this document
     pub fn reachable_urls(&self) -> Vec<Url> {
-        let imports = self.imports();
+        let imports = self
+            .imports()
+            .iter()
+            .filter_map(|iri| Url::parse(iri).ok())
+            .collect_vec();
 
         let prefixes = self
             .prefixes()
@@ -1440,13 +1480,14 @@ impl Stage1Document {
         imports.into_iter().chain(prefixes).unique().collect_vec()
     }
 
-    pub fn imports(&self) -> Vec<Url> {
+    pub fn imports(&self) -> Vec<Iri> {
         self.query(&ALL_QUERIES.import_query)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri] => Url::parse(&trim_full_iri(iri.node.text.clone())[..]).ok(),
+                [iri] => Oxiri::parse(trim_full_iri(iri.node.text.clone())).ok(),
                 _ => unimplemented!(),
             })
+            .map(|iri| iri.as_str().to_string())
             .collect_vec()
     }
 }
@@ -2067,7 +2108,10 @@ fn syntax_errors(stage1: &Stage1Document) -> Vec<Diagnostic> {
                 let parent = node_type_to_string(parent_kind);
                 let msg = format!("Syntax Error. expected {valid_children} inside {parent}");
 
-                diagnostics.push(Diagnostic{range, label: msg.to_string()});
+                diagnostics.push(Diagnostic {
+                    range,
+                    label: msg.to_string(),
+                });
             }
             // move along
             while !cursor.goto_next_sibling() {
@@ -2104,61 +2148,27 @@ fn syntax_errors(stage1: &Stage1Document) -> Vec<Diagnostic> {
 }
 
 /// Generate the diagnostics for a single node, walking recursively down to every child and every syntax error within
-fn semantic_errors(
-    stage1: &Stage1Document,
-    all_frame_infos: &HashMap<String, FrameInfo>,
-) -> Vec<(Range, String)> {
-    let mut errors = Vec::new();
+fn semantic_errors(doc: &InternalDocument) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
 
     // let declarations = stage1.declarations();
     // let definitions = stage1.document_definitions();
-    let Some(_) = stage1.ontology_id() else {
-        error!("No ontology ID");
-        return errors;
-    };
+    // let Some(_) = stage.ontology_id() else {
+    //     error!("No ontology ID");
+    //     return diagnostics;
+    // };
 
-    for match_ in stage1.query(&ALL_QUERIES.iri_query) {
-        let capture = match_
-            .captures
-            .into_iter()
-            .exactly_one()
-            .expect("The iri query should have one capture");
+    let uses = &doc.stage2.uses_iris;
+    let defines = &doc.stage2.defines_iris;
 
-        let iri = trim_full_iri(capture.node.text);
-        let iri = stage1.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+    // TODO recurse the imports
 
-        // let is_declared = stage1.query(&ALL_QUERIES.iri_query).iter().any(|match_2| {
-        //     let capture_2 = match_2
-        //         .captures
-        //         .iter()
-        //         .exactly_one()
-        //         .expect("The iri query should have one capture");
-
-        //     let is_declared = declarations
-        //         .iter()
-        //         .any(|(declared_iri, _)| declared_iri == &iri);
-
-        //     capture_2.node.text == iri && is_declared
-        // });
-        let is_declared = all_frame_infos
-            .get(
-                &stage1
-                    .abbreviated_iri_to_full_iri(&iri)
-                    .unwrap_or(iri.clone()),
-            )
-            .is_some();
-
-        // let is_local = iri.starts_with(&ontology_iri);
-        // debug!("{iri} is_local {is_local} because of {ontology_iri}");
-        // is_local &&
-        if !is_declared {
-            errors.push((
-                capture.node.range,
-                "IRI is used but not defined".to_string(),
-            ));
-        }
+    for diff in uses.difference(defines) {
+        debug!("Diff: {diff}");
+        // TODO generate diagnostics from diff
     }
-    errors
+
+    diagnostics
 }
 
 fn node_type_to_string(node_type: &str) -> String {
@@ -2376,9 +2386,9 @@ fn nesting_property_with_keyword_to_frame(
         .chunk_by(|x| x.kind() == "," || x.kind() == "o")
     {
         if is_separator {
-            let n = &chunk
-                .exactly_one()
-                .unwrap_or_else(|_| unreachable!("chunk should contain exactly one separator node"));
+            let n = &chunk.exactly_one().unwrap_or_else(|_| {
+                unreachable!("chunk should contain exactly one separator node")
+            });
 
             if n.kind() == "o" {
                 docs.push(RcDoc::text(" o").append(RcDoc::line()));

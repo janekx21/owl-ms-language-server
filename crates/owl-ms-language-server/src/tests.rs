@@ -986,7 +986,7 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
         .unwrap();
     assert_eq!(
         doc.diagnostics(),
-        &vec![],
+        vec![],
         "doc:\n{}",
         doc.rope().to_string()
     );
@@ -2691,7 +2691,7 @@ async fn assert_empty_diagnostics(service: &LspService<Backend>) {
         for doc in workspace.internal_documents() {
             assert_eq!(
                 doc.diagnostics(),
-                &vec![],
+                vec![],
                 "rope:\n{}",
                 doc.rope().to_string()
             );
