@@ -16,7 +16,7 @@ mod workspace;
 use debugging::timeit;
 use error::{Error, ResultExt, ResultIterator};
 use itertools::Itertools;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use pos::Position;
 use range::Range;
 use std::collections::HashMap;
@@ -28,12 +28,13 @@ use tower_lsp::jsonrpc::Result;
 #[allow(clippy::wildcard_imports)]
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
+use tower_lsp::lsp_types::lsif::Edge::Diagnostic;
 use tree_sitter_c2rust::Language;
-use workspace::{node_text, trim_full_iri, InternalDocument, Workspace};
+use workspace::{node_text, trim_full_iri,  Workspace};
 
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
-
+use crate::workspace::InternalDocument;
 // Constants
 
 pub static LANGUAGE: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_ms::LANGUAGE.into());
@@ -201,14 +202,14 @@ impl LanguageServer for Backend {
             let diagnostics = internal_document
                 .diagnostics()
                 .iter()
-                .map(|(range, msg)| {
-                    Ok(Diagnostic {
+                .map(|workspace::Diagnostic{range, label}| {
+                    Ok(lsp_types::Diagnostic {
                         range: range.into_lsp(internal_document.rope(), self.encoding())?,
                         severity: Some(DiagnosticSeverity::ERROR),
                         code: None,
                         code_description: None,
                         source: Some("owl language server".to_string()),
-                        message: msg.clone(),
+                        message: label.clone(),
                         related_information: None,
                         tags: None,
                         data: None,
@@ -274,14 +275,14 @@ impl LanguageServer for Backend {
             let diagnostics = document
                 .diagnostics()
                 .iter()
-                .map(|(range, msg)| {
-                    Ok(Diagnostic {
+                .map(|workspace::Diagnostic{range, label}| {
+                    Ok(lsp_types::Diagnostic {
                         range: range.into_lsp(document.rope(), self.encoding())?,
                         severity: Some(DiagnosticSeverity::ERROR),
                         code: None,
                         code_description: None,
                         source: Some("owl language server".to_string()),
-                        message: msg.clone(),
+                        message: label.clone(),
                         related_information: None,
                         tags: None,
                         data: None,
@@ -289,11 +290,14 @@ impl LanguageServer for Backend {
                 })
                 .filter_and_log()
                 .collect_vec();
+
+            // Async diagnostics
             let client = self.client.clone();
             let version = Some(document.version);
             task::spawn(async move {
                 client.publish_diagnostics(url, diagnostics, version).await;
             });
+
             Ok(())
         }
         .await
@@ -320,6 +324,17 @@ impl LanguageServer for Backend {
         // We do not close yet :> because of refences
         // TODO should data be deleted if a file is closed?
     }
+
+    // async fn did_save(&self, params: DidSaveTextDocumentParams) {
+    //     let sync = self.read_sync().await;
+    //     let Some(workspace) = sync.get_workspace(&params.text_document.uri) else {
+    //         warn!("Document not found {}", params.text_document.uri);
+    //         return;
+    //     };
+
+    //     workspace.diagnostic();
+    //     self.client.publish_diagnostics(uri, diags, version);
+    // }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         info!("formatting {params:#?}");
