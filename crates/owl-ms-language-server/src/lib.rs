@@ -25,12 +25,12 @@ use tokio::sync::{OnceCell, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
 // There are too many LSP types
+use tower_lsp::lsp_types::lsif::Edge::Diagnostic;
 #[allow(clippy::wildcard_imports)]
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
-use tower_lsp::lsp_types::lsif::Edge::Diagnostic;
 use tree_sitter_c2rust::Language;
-use workspace::{node_text, trim_full_iri,  Workspace};
+use workspace::{node_text, trim_full_iri, Workspace};
 
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
@@ -200,9 +200,9 @@ impl LanguageServer for Backend {
             );
 
             let diagnostics = internal_document
-                .diagnostics()
+                .diagnostics(workspace)
                 .iter()
-                .map(|workspace::Diagnostic{range, label}| {
+                .map(|workspace::Diagnostic { range, label }| {
                     Ok(lsp_types::Diagnostic {
                         range: range.into_lsp(internal_document.rope(), self.encoding())?,
                         severity: Some(DiagnosticSeverity::ERROR),
@@ -265,6 +265,7 @@ impl LanguageServer for Backend {
 
             let url = params.text_document.uri.clone();
 
+            // Do the document edit
             let mut sync = self.write_sync().await;
             let (document, workspace) = sync.take_internal_document(&url)?;
 
@@ -272,29 +273,39 @@ impl LanguageServer for Backend {
 
             let document = workspace.insert_internal_document(new_document);
 
-            let diagnostics = document
-                .diagnostics()
-                .iter()
-                .map(|workspace::Diagnostic{range, label}| {
-                    Ok(lsp_types::Diagnostic {
-                        range: range.into_lsp(document.rope(), self.encoding())?,
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        code: None,
-                        code_description: None,
-                        source: Some("owl language server".to_string()),
-                        message: label.clone(),
-                        related_information: None,
-                        tags: None,
-                        data: None,
-                    })
-                })
-                .filter_and_log()
-                .collect_vec();
-
             // Async diagnostics
             let client = self.client.clone();
             let version = Some(document.version);
+            let sync_ref = self.sync.clone();
+            let encoding = self.encoding().clone();
+
+            // TODO make this join handle one of a kind maybe. So no two diagnostics threads at the same time.
             task::spawn(async move {
+                let sync = sync_ref.read().await;
+
+                let (document, workspace) = sync
+                    .get_internal_document(&url)
+                    .expect("Reborrow of workspace should work");
+
+                let diagnostics = document
+                    .diagnostics(workspace)
+                    .iter()
+                    .map(|workspace::Diagnostic { range, label }| {
+                        Ok(lsp_types::Diagnostic {
+                            range: range.into_lsp(document.rope(), &encoding)?,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            code: None,
+                            code_description: None,
+                            source: Some("owl language server".to_string()),
+                            message: label.clone(),
+                            related_information: None,
+                            tags: None,
+                            data: None,
+                        })
+                    })
+                    .filter_and_log()
+                    .collect_vec();
+
                 client.publish_diagnostics(url, diagnostics, version).await;
             });
 

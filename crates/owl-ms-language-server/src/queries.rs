@@ -107,7 +107,7 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
     ontology: Query::new(
         &LANGUAGE,
         "
-            (ontology iri: (_)@iri )
+            (ontology iri: (_)@iri version_iri: (_)@version_iri ? )
         ",
     )
     .expect("valid query"),

@@ -596,11 +596,19 @@ impl Hash for Stage1Document {
 struct Stage2Document {
     prefixes: HashMap<String, String>,
     all_frame_infos: HashMap<Iri, FrameInfo>,
-    diagnostics: Vec<Diagnostic>, // Not using the LSP type
+    local_diagnostics: Vec<Diagnostic>,
     directly_reachable_urls: Vec<Url>,
     defines_iris: HashSet<Iri>,
     uses_iris: HashSet<Iri>,
+    iri_locations: HashMap<Iri, Vec<Range>>,
     imports: HashSet<Iri>,
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct IriDefinition {
+    pub iri: Iri,
+    pub location: Location,
+    pub kind: FrameType,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -679,13 +687,13 @@ impl InternalDocument {
         &self.stage2.prefixes
     }
 
-    pub fn diagnostics(&self) -> Vec<Diagnostic> {
-        let syntax_errors = &self.stage2.diagnostics;
-        let semantic_err = semantic_errors(self);
-        syntax_errors
+    pub fn diagnostics(&self, workspace: &Workspace) -> Vec<Diagnostic> {
+        let local_diagnostics = &self.stage2.local_diagnostics;
+        let workspace_diagnostics = semantic_errors(self);
+        local_diagnostics
             .iter()
             .cloned()
-            .chain(semantic_err.into_iter())
+            .chain(workspace_diagnostics.into_iter())
             .collect_vec()
     }
 
@@ -697,21 +705,7 @@ impl InternalDocument {
     }
 
     pub fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
-        let mut w = self.tree().walk();
-        loop {
-            if w.node().id() == id {
-                return Some(w.node());
-            }
-
-            // In order traversal
-            if !w.goto_first_child() {
-                while !w.goto_next_sibling() {
-                    if !w.goto_parent() {
-                        return None;
-                    }
-                }
-            }
-        }
+        self.stage1.node_by_id(id)
     }
 
     /// Returns all document URL's that can be reached from this internal document
@@ -1304,22 +1298,44 @@ impl InternalDocument {
 
 impl Stage1Document {
     pub fn analyze(&self) -> Stage2Document {
+        let references = self.document_references();
+
+        let mut iri_locations: HashMap<String, Vec<Range>> = HashMap::new();
+
+        for (iri, range) in &references {
+            iri_locations.entry(iri.clone()).or_default().push(*range);
+        }
+
         Stage2Document {
             prefixes: self.prefixes(),
             all_frame_infos: self.document_all_frame_infos(),
-            diagnostics: syntax_errors(self),
+            local_diagnostics: syntax_errors(self),
             directly_reachable_urls: self.reachable_urls(),
             imports: self.imports().into_iter().collect(),
             defines_iris: self
                 .document_definitions()
                 .into_iter()
-                .map(|(iri, _, _)| iri)
+                .map(|d| d.iri)
                 .collect(),
-            uses_iris: self
-                .document_references()
-                .into_iter()
-                .map(|(iri, _)| iri)
-                .collect(),
+            uses_iris: references.iter().map(|(iri, _)| iri.clone()).collect(),
+            iri_locations,
+        }
+    }
+    pub fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
+        let mut w = self.tree.walk();
+        loop {
+            if w.node().id() == id {
+                return Some(w.node());
+            }
+
+            // In order traversal
+            if !w.goto_first_child() {
+                while !w.goto_next_sibling() {
+                    if !w.goto_parent() {
+                        return None;
+                    }
+                }
+            }
         }
     }
 
@@ -1331,13 +1347,18 @@ impl Stage1Document {
         query_helper(self, query, Some(range))
     }
 
-    pub fn ontology_id(&self) -> Option<String> {
+    /// Returns the ontology IRI if possible and the version IRI if possible.
+    pub fn ontology_id(&self) -> Option<(String, Option<String>)> {
         match &self.query(&ALL_QUERIES.ontology)[..] {
             [] => None,
             [ontology] => match &ontology.captures[..] {
                 [] => None,
                 // This should be a full IRI so lets trim it
-                [iri] => Some(trim_full_iri(iri.node.text.clone())),
+                [iri] => Some((trim_full_iri(iri.node.text.clone()), None)),
+                [iri, version_iri] => Some((
+                    trim_full_iri(iri.node.text.clone()),
+                    Some(trim_full_iri(version_iri.node.text.clone())),
+                )),
                 _ => unreachable!("The query has only one capture"),
             },
             _ => unreachable!("the grammar only parses ontology zero or one time"),
@@ -1400,15 +1421,11 @@ impl Stage1Document {
         for frame_info in self
             .document_definitions()
             .into_iter()
-            .map(|(frame_iri, range, kind)| FrameInfo {
-                iri: frame_iri.clone(),
+            .map(|definiton| FrameInfo {
+                iri: definiton.iri.clone(),
                 annotations: HashMap::new(),
-                frame_type: FrameType::parse(&kind),
-                definitions: vec![Location {
-                    uri: Url::from_file_path(&self.path)
-                        .expect("Filepath should be convertable to URL"),
-                    range,
-                }],
+                frame_type: definiton.kind,
+                definitions: vec![definiton.location],
             })
         {
             if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
@@ -1440,15 +1457,30 @@ impl Stage1Document {
             .collect_vec()
     }
 
-    fn document_definitions(&self) -> Vec<(String, Range, String)> {
+    fn document_definitions(&self) -> Vec<IriDefinition> {
         self.query(&ALL_QUERIES.frame_query)
             .iter()
             .map(|m| match &m.captures[..] {
                 [frame_iri, frame] => {
                     let iri = trim_full_iri(frame_iri.node.text.clone());
+                    let frame_node_id = frame_iri.node.id;
+                    let iri_parent_kind = self
+                        .node_by_id(frame_node_id)
+                        .expect("Node id must be valid after query")
+                        .parent()
+                        .expect("All frame IRIs should have paretns")
+                        .kind();
                     let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
-                    (frame_iri, frame.node.range, frame.node.kind.clone())
+                    IriDefinition {
+                        iri: frame_iri,
+                        location: Location {
+                            uri: Url::from_file_path(&self.path)
+                                .expect("Path should be valid file URL"),
+                            range: frame.node.range,
+                        },
+                        kind: FrameType::parse(iri_parent_kind),
+                    }
                 }
                 _ => unreachable!(),
             })
@@ -1947,7 +1979,7 @@ pub struct FrameInfo {
     pub definitions: Vec<Location>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Location {
     pub uri: Url,
     pub range: Range,
@@ -2186,21 +2218,45 @@ fn syntax_errors(stage1: &Stage1Document) -> Vec<Diagnostic> {
 fn semantic_errors(doc: &InternalDocument) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    // let declarations = stage1.declarations();
-    // let definitions = stage1.document_definitions();
-    // let Some(_) = stage.ontology_id() else {
-    //     error!("No ontology ID");
-    //     return diagnostics;
-    // };
+    // TODO what about `true` as annotation target? This is not in the grammar but oeo uses it for example.
 
     let uses = &doc.stage2.uses_iris;
+    // TODO maybe change this into a hash map?
     let defines = &doc.stage2.defines_iris;
+
+    // TODO this is a quick fix for now. The correct way will be not not include prefixes in the used Iris
+    let prefixes: HashSet<Iri> = doc.stage2.prefixes.values().cloned().collect();
+    let imports = &doc.stage2.imports;
+
+    let ontology_id = doc.stage1.ontology_id();
 
     // TODO recurse the imports
 
-    for diff in uses.difference(defines) {
-        debug!("Diff: {diff}");
-        // TODO generate diagnostics from diff
+    for diff in uses
+        .difference(defines)
+        .filter(|iri| !prefixes.contains(*iri))
+        .filter(|iri| !imports.contains(*iri))
+    {
+        // Skip ontology and version IRIs
+        if let Some((iri, version)) = &ontology_id {
+            if diff == iri {
+                continue;
+            }
+            if let Some(version) = version {
+                if diff == version {
+                    continue;
+                }
+            }
+        }
+
+        if let Some(vec) = doc.stage2.iri_locations.get(diff) {
+            for ele in vec {
+                diagnostics.push(Diagnostic {
+                    range: *ele,
+                    label: "Iri used but not defined".into(),
+                });
+            }
+        }
     }
 
     diagnostics
@@ -2223,7 +2279,7 @@ fn capitalize_string(s: &str) -> String {
 }
 
 /// taken from <https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing>
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug, Hash)]
 pub enum FrameType {
     Class,
     DataType,

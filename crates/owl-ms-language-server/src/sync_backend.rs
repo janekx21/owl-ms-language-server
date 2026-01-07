@@ -65,7 +65,9 @@ impl SyncBackend {
 
     /// This will find a workspace or create one for a given url
     pub fn get_workspace(&self, url: &Url) -> Option<&Workspace> {
-        let path = url.to_file_path().unwrap(); // TODO
+        let path = url
+            .to_file_path()
+            .unwrap_or_else(|()| panic!("Url should be path but was {url}")); // TODO
 
         // TODO there are problems when the workspace is changing
         // - A document could be in its own workspace
