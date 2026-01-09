@@ -305,6 +305,8 @@ impl LanguageServer for Backend {
                     .filter_and_log()
                     .collect_vec();
 
+                // TODO create diagnostics for files that depend on this file
+
                 client.publish_diagnostics(url, diagnostics, version).await;
             });
 

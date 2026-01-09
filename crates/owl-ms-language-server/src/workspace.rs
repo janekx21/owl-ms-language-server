@@ -266,7 +266,7 @@ impl Workspace {
         iri: &Iri,
         doc: &InternalDocument,
     ) -> Option<FrameInfo> {
-        doc.reachable_docs_recursive(workspace)
+        doc.reachable_docs_recursive(workspace, true)
             .iter()
             .filter_map(|url| {
                 if let Some(doc) = workspace.document_by_url(url) {
@@ -585,7 +585,7 @@ struct Stage2Document {
 
     all_frame_infos: HashMap<Iri, FrameInfo>,
     local_diagnostics: Vec<Diagnostic>,
-    directly_reachable_urls: Vec<Url>,
+    directly_reachable_urls: (Vec<Url>, Vec<Url>),
     iri_locations: HashMap<Iri, Vec<Range>>,
 }
 
@@ -679,7 +679,7 @@ impl InternalDocument {
 
     pub fn diagnostics(&self, workspace: &Workspace) -> Vec<Diagnostic> {
         let local_diagnostics = &self.stage2.local_diagnostics;
-        let workspace_diagnostics = semantic_errors(self);
+        let workspace_diagnostics = semantic_errors(self, workspace);
         local_diagnostics
             .iter()
             .cloned()
@@ -698,17 +698,17 @@ impl InternalDocument {
         node_by_id(&self.queried_document.parsed_document, id)
     }
 
-    /// Returns all document URL's that can be reached from this internal document
-    /// Does not load anything
-    // TODO  maybe cache this for some time 1sec or so
-    fn reachable_docs_recursive(&self, workspace: &Workspace) -> Vec<Url> {
-        reachable_docs_recursive_cached(self, workspace)
+    /// Returns all document URL's that can be reached (imports, prefixes, ...) from this internal document.
+    /// Does not load anything.
+    fn reachable_docs_recursive(&self, workspace: &Workspace, include_prefix: bool) -> Vec<Url> {
+        reachable_docs_recursive_cached(self, workspace, include_prefix)
     }
 
     fn reachable_docs_recursive_helper(
         &self,
         result: &mut HashSet<Url>,
         workspace: &Workspace,
+        include_prefix: bool,
     ) -> Result<()> {
         if result.contains(&self.uri) {
             // Do nothing
@@ -717,7 +717,7 @@ impl InternalDocument {
 
         result.insert(self.uri.clone());
 
-        let urls = self.reachable_urls();
+        let urls = self.reachable_urls(include_prefix);
 
         let docs = urls.iter().filter_map(|url| {
             workspace.document_by_url(url)
@@ -730,10 +730,19 @@ impl InternalDocument {
         for doc in docs {
             match doc {
                 DocumentReference::Internal(internal_document) => {
-                    internal_document.reachable_docs_recursive_helper(result, workspace)?;
+                    internal_document.reachable_docs_recursive_helper(
+                        result,
+                        workspace,
+                        include_prefix,
+                    )?;
                 }
                 DocumentReference::External(external_document) => {
-                    external_document.reachable_docs_recursive_helper(workspace, result, 0)?;
+                    external_document.reachable_docs_recursive_helper(
+                        workspace,
+                        result,
+                        0,
+                        include_prefix,
+                    )?;
                 }
             }
         }
@@ -1098,7 +1107,7 @@ impl InternalDocument {
 
                 let document = workspace.get_internal_document(&path).unwrap();
                 document
-                    .reachable_urls()
+                    .reachable_urls(true)
                     .iter()
                     .map(|u| (u.clone(), 1))
                     .collect()
@@ -1148,7 +1157,7 @@ impl InternalDocument {
                 if let Some(doc) = resolved_doc {
                     match doc {
                         Document::Internal(internal_document) => {
-                            for ele in internal_document.reachable_urls() {
+                            for ele in internal_document.reachable_urls(true) {
                                 todo.push_back((ele.clone(), 1));
                             }
                             {
@@ -1185,8 +1194,14 @@ impl InternalDocument {
         })
     }
 
-    pub fn reachable_urls(&self) -> &Vec<Url> {
-        &self.stage2.directly_reachable_urls
+    pub fn reachable_urls(&self, include_prefix: bool) -> Vec<Url> {
+        // TODO please do not clone this thing :>
+        let (imports, prexes) = self.stage2.directly_reachable_urls.clone();
+        if include_prefix {
+            imports.into_iter().chain(prexes.into_iter()).collect_vec()
+        } else {
+            imports
+        }
     }
 
     pub fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<String> {
@@ -1501,7 +1516,7 @@ struct QueriedDocument {
 
 impl QueriedDocument {
     /// Finds flat references to other document URL's in this document
-    pub fn reachable_urls(&self) -> Vec<Url> {
+    pub fn reachable_urls(&self) -> (Vec<Url>, Vec<Url>) {
         let imports = self
             .imports
             .iter()
@@ -1525,9 +1540,10 @@ impl QueriedDocument {
                 } else {
                     url
                 }
-            });
+            })
+            .collect_vec();
 
-        imports.into_iter().chain(prefixes).unique().collect_vec()
+        (imports, prefixes)
     }
 
     pub fn abbreviated_iri_to_full_iri(&self, abbreviated_iri: &str) -> Option<String> {
@@ -1882,6 +1898,7 @@ impl ExternalDocument {
         workspace: &Workspace,
         result: &mut HashSet<Url>,
         depth: u32,
+        include_prefix: bool,
     ) -> Result<()> {
         if depth >= 1 {
             // Do nothing max depth reached
@@ -1909,10 +1926,19 @@ impl ExternalDocument {
         for doc in docs {
             match doc {
                 DocumentReference::Internal(internal_document) => {
-                    internal_document.reachable_docs_recursive_helper(result, workspace)?;
+                    internal_document.reachable_docs_recursive_helper(
+                        result,
+                        workspace,
+                        include_prefix,
+                    )?;
                 }
                 DocumentReference::External(external_document) => {
-                    external_document.reachable_docs_recursive_helper(workspace, result, 0)?;
+                    external_document.reachable_docs_recursive_helper(
+                        workspace,
+                        result,
+                        0,
+                        include_prefix,
+                    )?;
                 }
             }
         }
@@ -2288,8 +2314,7 @@ fn syntax_errors(stage1: &ParsedDocument) -> Vec<Diagnostic> {
     }
 }
 
-/// Generate the diagnostics for a single node, walking recursively down to every child and every syntax error within
-fn semantic_errors(doc: &InternalDocument) -> Vec<Diagnostic> {
+fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     // TODO what about `true` as annotation target? This is not in the grammar but oeo uses it for example.
@@ -2302,12 +2327,34 @@ fn semantic_errors(doc: &InternalDocument) -> Vec<Diagnostic> {
         .collect();
 
     // TODO maybe change this into a hash map?
-    let defines = doc
+    let mut defines: HashSet<String> = doc
         .stage2
         .definitions
         .iter()
         .map(|d| d.iri.clone())
         .collect();
+
+    let imports_recursive = doc.reachable_docs_recursive(workspace, false);
+
+    for url in imports_recursive {
+        if let Some(doc) = workspace.document_by_url(&url) {
+            match doc {
+                DocumentReference::Internal(internal_document) => {
+                    defines.extend(
+                        internal_document
+                            .stage2
+                            .definitions
+                            .iter()
+                            .map(|d| d.iri.clone()),
+                    );
+                }
+                DocumentReference::External(_external_document) => {
+                    // TODO add the definitons later
+                    // do nothing
+                }
+            }
+        }
+    }
 
     // TODO this is a quick fix for now. The correct way will be not not include prefixes in the used Iris
     let prefixes: HashSet<Iri> = doc.queried_document.prefixes.values().cloned().collect();
@@ -2674,12 +2721,17 @@ fn frame_to_doc(node: &Node, rope: &Rope, tab_size: u32, nest_depth: isize) -> R
     convert = r#"{
         let mut hasher = DefaultHasher::new();
         doc.hash(&mut hasher);
+        std::hash::Hash::hash(&include_prefix, &mut hasher);
         hasher.finish()
      } "#
 )]
-fn reachable_docs_recursive_cached(doc: &InternalDocument, workspace: &Workspace) -> Vec<Url> {
+fn reachable_docs_recursive_cached(
+    doc: &InternalDocument,
+    workspace: &Workspace,
+    include_prefix: bool,
+) -> Vec<Url> {
     let mut set: HashSet<Url> = HashSet::new();
-    doc.reachable_docs_recursive_helper(&mut set, workspace)
+    doc.reachable_docs_recursive_helper(&mut set, workspace, include_prefix)
         .log_if_error();
     set.into_iter().collect_vec()
 }

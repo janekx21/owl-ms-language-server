@@ -2,7 +2,9 @@ Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 
 Ontology: <http://a.b/multi-file>
 
+# This is a file that also imports other-2
 Import: <http://a.b/multi-file/other>
+# This is a file in functional owl
 Import: <http://a.b/multi-file/other-func>
 
 Class: class-in-first-file
