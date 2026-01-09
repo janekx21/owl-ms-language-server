@@ -16,7 +16,7 @@ mod workspace;
 use debugging::timeit;
 use error::{Error, ResultExt, ResultIterator};
 use itertools::Itertools;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use pos::Position;
 use range::Range;
 use std::collections::HashMap;
@@ -25,7 +25,6 @@ use tokio::sync::{OnceCell, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::{self};
 use tower_lsp::jsonrpc::Result;
 // There are too many LSP types
-use tower_lsp::lsp_types::lsif::Edge::Diagnostic;
 #[allow(clippy::wildcard_imports)]
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};

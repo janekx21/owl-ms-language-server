@@ -2687,7 +2687,7 @@ async fn assert_empty_diagnostics(service: &LspService<Backend>) {
             // TODO change tests to define all used IRIs
             // Filter out the not defined IRIs for now
             let diagnostics = doc
-                .diagnostics()
+                .diagnostics(workspace)
                 .into_iter()
                 .filter(|d| !d.label.contains("not defined"))
                 .collect_vec();
