@@ -6,7 +6,6 @@ use crate::queries::{
     self, treesitter_highlight_capture_into_semantic_token_type_index, NODE_TYPES,
 };
 use crate::web::{url_to_filename, HttpClient};
-use crate::SyncRef;
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
     rope_provider::RopeProvider, LANGUAGE,
@@ -28,7 +27,6 @@ use sophia::api::MownStr;
 use sophia::inmem::graph::LightGraph;
 use sophia::iri::resolve::Oxiri;
 use sophia::iri::IriRef;
-use std::collections::LinkedList;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter::once;
@@ -43,8 +41,8 @@ use std::{
 };
 use tokio::task::JoinHandle;
 use tower_lsp::lsp_types::{
-    DidChangeTextDocumentParams, InlayHint, InlayHintLabel, PositionEncodingKind, SemanticToken,
-    SymbolKind, Url, WorkspaceFolder,
+    self, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
+    PositionEncodingKind, SemanticToken, SymbolKind, Url, WorkspaceFolder,
 };
 use tree_sitter_c2rust::{InputEdit, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
@@ -544,7 +542,7 @@ fn cache_doc(workspace: &Workspace, doc: &ExternalDocument) {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum DocumentReference<'a> {
     // Not boxing this is fine because the size ratio is just about 1.6
     Internal(&'a InternalDocument),
@@ -1086,119 +1084,13 @@ impl InternalDocument {
         Ok(tokens)
     }
 
-    /// Loads all documents that can be reached by this internal document path
-    pub fn load_dependencies(
-        path: &Path,
-        sync_ref: &SyncRef,
-        http_client: &Arc<dyn HttpClient>,
-    ) -> tokio::task::JoinHandle<()> {
-        let sync_ref_clone = sync_ref.to_owned();
-        let path = path.to_owned();
-        let http_client = http_client.to_owned();
-        tokio::spawn(async move {
-            let mut todo: LinkedList<(Url, u32)> = {
-                let sync = sync_ref_clone.read().await;
-                let workspace = sync
-                    .get_workspace(
-                        &Url::from_file_path(&path)
-                            .expect("File path should be convertable to URL"),
-                    )
-                    .expect("Workspace for document should exist");
-
-                let document = workspace.get_internal_document(&path).unwrap();
-                document
-                    .reachable_urls(true)
-                    .iter()
-                    .map(|u| (u.clone(), 1))
-                    .collect()
-            };
-
-            let mut done = HashSet::<Url>::new();
-
-            debug!(
-                "Loading dependencies of {} len = {}",
-                path.display(),
-                todo.len()
-            );
-
-            while let Some((url, depth)) = todo.pop_front() {
-                debug!("Indexing {url} ...");
-                if done.contains(&url) {
-                    debug!("URL {url} was indexed. Skip");
-                    continue;
-                }
-                if depth > 2 {
-                    debug!("Depth {depth} exceeded 2 for {url}. Skip");
-                    continue;
-                }
-
-                let resolved_doc = {
-                    let sync = sync_ref_clone.read().await;
-                    let workspace = sync
-                        .get_workspace(
-                            &Url::from_file_path(&path)
-                                .expect("File path should be convertable to URL"),
-                        )
-                        .expect("Workspace for document should exist");
-
-                    // TODO well the Error is not Send. That's why we convert to Option
-                    Workspace::resolve_url_to_document(workspace, &url, http_client.clone())
-                        .await
-                        .ok()
-                };
-
-                let resolved_doc = if let Some(resolved_doc) = resolved_doc {
-                    resolved_doc
-                } else {
-                    warn!("Resolving {url} did not work");
-                    None
-                };
-
-                if let Some(doc) = resolved_doc {
-                    match doc {
-                        Document::Internal(internal_document) => {
-                            for ele in internal_document.reachable_urls(true) {
-                                todo.push_back((ele.clone(), 1));
-                            }
-                            {
-                                let mut sync = sync_ref_clone.write().await;
-                                let workspace = sync.get_or_insert_workspace_mut(
-                                    &Url::from_file_path(&path)
-                                        .expect("File path should be convertable to URL"),
-                                );
-                                workspace.insert_internal_document(internal_document);
-                            }
-                        }
-                        Document::External(external_document) => {
-                            // TODO maybe remove this?
-                            // Lets not do that yet
-                            for ele in external_document.reachable_urls() {
-                                todo.push_back((ele, depth + 1));
-                            }
-                            {
-                                let mut sync = sync_ref_clone.write().await;
-                                let workspace = sync.get_or_insert_workspace_mut(
-                                    &Url::from_file_path(&path)
-                                        .expect("File path should be convertable to URL"),
-                                );
-                                workspace.insert_external_document(external_document);
-                            }
-                        }
-                    }
-                } else {
-                    // The doc is already resolved
-                }
-
-                done.insert(url);
-            }
-        })
-    }
-
+    /// What other urls are directly (depth = 1) reachable from this document.
+    /// Contains all import URL's unprocessed.
     pub fn reachable_urls(&self, include_prefix: bool) -> Vec<Url> {
         // TODO please do not clone this thing :>
-        let (imports, prexes) = self.stage2.directly_reachable_urls.clone();
+        let (imports, prefixes) = self.stage2.directly_reachable_urls.clone();
         if include_prefix {
-            imports.into_iter().chain(prexes.into_iter()).collect_vec()
+            imports.into_iter().chain(prefixes).collect_vec()
         } else {
             imports
         }
@@ -1305,6 +1197,40 @@ impl InternalDocument {
             .filter_and_log()
             .flatten()
             .collect_vec()
+    }
+
+    /// Take this document, generate the diagnostics in workspace context and send the results via the client.
+    pub async fn publish_lsp_diagnostics(
+        &self,
+        workspace: &Workspace,
+        encoding: &PositionEncodingKind,
+        client: &tower_lsp::Client,
+    ) {
+        let diagnostics = self
+            .diagnostics(workspace)
+            .iter()
+            .map(|Diagnostic { range, label }| {
+                Ok(lsp_types::Diagnostic {
+                    range: range.into_lsp(self.rope(), encoding)?,
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("owl language server".to_string()),
+                    message: label.clone(),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                })
+            })
+            .filter_and_log()
+            .collect_vec();
+
+        // TODO create diagnostics for files that depend on this file
+        debug!("Publish diagnostics for {}", self.path.display());
+
+        client
+            .publish_diagnostics(self.uri.clone(), diagnostics, Some(self.version))
+            .await;
     }
 }
 
@@ -1718,6 +1644,14 @@ pub struct ExternalDocument {
     pub text: String,
     pub graph: InfoGraph,
 }
+
+impl PartialEq for ExternalDocument {
+    fn eq(&self, other: &Self) -> bool {
+        self.uri == other.uri
+    }
+}
+
+impl Eq for ExternalDocument {}
 
 #[derive(Debug)]
 pub struct InfoGraph(LightGraph, GraphName);
