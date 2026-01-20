@@ -2335,7 +2335,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
             for ele in vec {
                 diagnostics.push(Diagnostic {
                     range: *ele,
-                    label: "Iri used but not defined".into(),
+                    label: format!("Iri {diff} used but not defined"),
                 });
             }
         }

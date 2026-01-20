@@ -19,6 +19,9 @@ impl SyncBackend {
     pub fn workspaces(&self) -> &Vec<Workspace> {
         &self.workspaces
     }
+    pub fn workspaces_mut(&mut self) -> &mut Vec<Workspace> {
+        &mut self.workspaces
+    }
 
     /// This will find a workspace or create one for a given url
     pub fn get_or_insert_workspace_mut(&mut self, url: &Url) -> &mut Workspace {
