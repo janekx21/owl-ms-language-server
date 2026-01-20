@@ -66,11 +66,9 @@ impl Backend {
 
     /// Take a document with the profided file url and generate diagnostics for it.
     /// Then do the same thing with documents that depend on this one.
+    /// # Panics
+    /// If an documents path is not convertable into an URL
     pub fn update_diagnostics_for_url_and_dependent(&self, file_url: Url) {
-        debug!(
-            "Notify update diagnostics for url and dependent {}",
-            file_url
-        );
         let mini_backend = self.clone();
 
         task::spawn(async move {
@@ -84,25 +82,17 @@ impl Backend {
                     .publish_lsp_diagnostics(workspace, encoding, &mini_backend.client)
                     .await;
 
-                // create diagnostics for files that depend on this file
-                for ele in workspace.internal_documents() {
-                    let depends_on_me = ele.reachable_urls(false).iter().any(|u| {
+                // Create diagnostics for files that depend on this file
+                for other_internal_doc in workspace.internal_documents() {
+                    let depends_on_me = other_internal_doc.reachable_urls(false).iter().any(|u| {
                         workspace.document_by_url(u) == Some(DocumentReference::Internal(document))
                     });
 
                     if depends_on_me {
-                        debug!(
-                            "Notify document {} -> {}",
-                            file_url.path_segments().unwrap().last().unwrap(),
-                            ele.path.iter().last().unwrap().to_str().unwrap()
-                        );
-
-                        // TODO is this a good idea?
                         mini_backend.update_diagnostics_for_url_and_dependent(
-                            Url::from_file_path(&ele.path).expect("to work"),
+                            Url::from_file_path(&other_internal_doc.path)
+                                .expect("Document path should be convertable into file url"),
                         );
-                        // ele.publish_lsp_diagnostics(workspace, encoding, &mini_backend.client)
-                        // .await;
                     }
                 }
             }
@@ -110,6 +100,8 @@ impl Backend {
     }
 
     /// Loads all documents that can be reached by this internal document path
+    /// # Panics
+    /// When the path is not a file path
     pub fn load_dependencies(&self, path: &Path) -> tokio::task::JoinHandle<()> {
         let mini_backend = self.clone();
         let path = path.to_owned();
@@ -199,7 +191,7 @@ impl Backend {
                             // TODO maybe remove this?
                             // Lets not do that yet
                             for ele in external_document.reachable_urls() {
-                                todo.push_back((ele, depth + 1));
+                                todo.push_back((ele.clone(), depth + 1));
                             }
                             {
                                 let mut sync = mini_backend.sync.write().await;
@@ -586,13 +578,14 @@ impl LanguageServer for Backend {
             .named_descendant_for_point_range(pos.into(), pos.into())
             .ok_or(Error::PositionOutOfBounds(pos))?;
 
+        let reachable_docs = doc.reachable_docs_recursive(workspace, true);
         if ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind()) {
             let iri = trim_full_iri(node_text(&leaf_node, doc.rope()));
             let iri = doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
             debug!("Try goto definition of {iri}");
 
-            let frame_info = Workspace::get_frame_info_recursive(workspace, &iri, doc);
+            let frame_info = Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs);
 
             if let Some(frame_info) = frame_info {
                 let locations = frame_info

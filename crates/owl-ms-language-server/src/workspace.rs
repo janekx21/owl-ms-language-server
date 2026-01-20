@@ -259,12 +259,13 @@ impl Workspace {
             .tree_reduce(FrameInfo::merge)
     }
 
+    /// This no longer uses a document. Because the reachable documents would be callec way to often. Now it just takes the slice of reachable documents directly. Generate it using `reachable_docs_recursive`.
     pub fn get_frame_info_recursive(
         workspace: &Workspace,
         iri: &Iri,
-        doc: &InternalDocument,
+        reachable_docs: &[Url],
     ) -> Option<FrameInfo> {
-        doc.reachable_docs_recursive(workspace, true)
+        reachable_docs
             .iter()
             .filter_map(|url| {
                 if let Some(doc) = workspace.document_by_url(url) {
@@ -578,8 +579,8 @@ struct Stage2Document {
     // /// URL and location where this document was loaded from
     // uri: Url,
     // version: i32,
-    definitions: Vec<IriDefinition>,
-    references: Vec<(Iri, Range)>,
+    definitions: HashSet<Iri>,
+    references: HashSet<Iri>,
 
     all_frame_infos: HashMap<Iri, FrameInfo>,
     local_diagnostics: Vec<Diagnostic>,
@@ -677,7 +678,7 @@ impl InternalDocument {
 
     pub fn diagnostics(&self, workspace: &Workspace) -> Vec<Diagnostic> {
         let local_diagnostics = &self.stage2.local_diagnostics;
-        let workspace_diagnostics = semantic_errors(self, workspace);
+        let workspace_diagnostics = timeit("semantic errors", || semantic_errors(self, workspace));
         local_diagnostics
             .iter()
             .cloned()
@@ -698,7 +699,11 @@ impl InternalDocument {
 
     /// Returns all document URL's that can be reached (imports, prefixes, ...) from this internal document.
     /// Does not load anything.
-    fn reachable_docs_recursive(&self, workspace: &Workspace, include_prefix: bool) -> Vec<Url> {
+    pub fn reachable_docs_recursive(
+        &self,
+        workspace: &Workspace,
+        include_prefix: bool,
+    ) -> Vec<Url> {
         reachable_docs_recursive_cached(self, workspace, include_prefix)
     }
 
@@ -876,6 +881,7 @@ impl InternalDocument {
         encoding: &PositionEncodingKind,
         workspace: &Workspace,
     ) -> Vec<tower_lsp::lsp_types::InlayHint> {
+        let reachable_docs = self.reachable_docs_recursive(workspace, true);
         // TODO cache this in stage2
         self.queried_document
             .parsed_document
@@ -888,7 +894,7 @@ impl InternalDocument {
 
                 let label =
                 // timeit("get frame info recursive", || {
-                    Workspace::get_frame_info_recursive(workspace, &iri, self)
+                    Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs)
                 // })
                 .and_then(|frame_info| frame_info.label())
                 .unwrap_or_default();
@@ -1226,7 +1232,11 @@ impl InternalDocument {
             .collect_vec();
 
         // TODO create diagnostics for files that depend on this file
-        debug!("Publish diagnostics for {}", self.path.display());
+        debug!(
+            "Publish diagnostics for {} {:#?}",
+            self.path.display(),
+            diagnostics
+        );
 
         client
             .publish_diagnostics(self.uri.clone(), diagnostics, Some(self.version))
@@ -1616,8 +1626,11 @@ impl QueriedDocument {
             local_diagnostics: timeit("syntax errors", || syntax_errors(&self.parsed_document)),
             directly_reachable_urls: timeit("reachable urls", || self.reachable_urls()),
             iri_locations,
-            references,
-            definitions,
+            references: references.into_iter().map(|(iri, _)| iri).collect(),
+            definitions: definitions
+                .into_iter()
+                .map(|IriDefinition { iri, .. }| iri)
+                .collect(),
         }
     }
 }
@@ -1643,6 +1656,8 @@ pub struct ExternalDocument {
     pub uri: Url,
     pub text: String,
     pub graph: InfoGraph,
+    reachable_urls: Vec<Url>,
+    imports: Vec<Url>,
 }
 
 impl PartialEq for ExternalDocument {
@@ -1764,10 +1779,19 @@ impl ExternalDocument {
                 debug!("try rdf...");
                 ExternalDocument::try_parse_owx(&text, &builder)
             })
-            .map(|graph| ExternalDocument {
-                graph,
-                text,
-                uri: url,
+            .map(|graph| {
+                let imports = ExternalDocument::gen_imports(&graph).collect_vec();
+
+                let reachable_urls =
+                    ExternalDocument::gen_reachable_urls(&url, &graph, &imports).collect_vec();
+
+                ExternalDocument {
+                    reachable_urls,
+                    imports,
+                    graph,
+                    text,
+                    uri: url,
+                }
             });
 
         if let Ok(doc) = &doc {
@@ -1808,8 +1832,8 @@ impl ExternalDocument {
         Ok(graph)
     }
 
-    fn imports(&self) -> Box<dyn Iterator<Item = Url> + '_> {
-        let graph = &self.graph.0;
+    fn gen_imports(graph: &InfoGraph) -> Box<dyn Iterator<Item = Url> + '_> {
+        let graph = &graph.0;
 
         // `graph.triples_matching` will exceed the stack size (Stack Overflow) on large graphs
         let iris = graph
@@ -1824,6 +1848,10 @@ impl ExternalDocument {
             .unique();
 
         Box::new(iris)
+    }
+
+    pub fn imports(&self) -> &Vec<Url> {
+        &self.imports
     }
 
     // Because external documents most likely relate to other external ones and because there are many of them in a graph the depth should be limited
@@ -1848,8 +1876,8 @@ impl ExternalDocument {
         result.insert(self.uri.clone());
 
         // TODO shitty child urls :<
-        let docs = urls.filter_map(|url| {
-            workspace.document_by_url(&url)
+        let docs = urls.iter().filter_map(|url| {
+            workspace.document_by_url(url)
             // TODO maybe reactivate but for now lets not log here
             // .ok_or(Error::DocumentNotLoaded(url.clone()))
             // Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
@@ -1880,12 +1908,13 @@ impl ExternalDocument {
         Ok(())
     }
 
-    pub fn reachable_urls(&self) -> Box<dyn Iterator<Item = Url> + '_> {
-        let imports = self.imports();
-
+    fn gen_reachable_urls<'a>(
+        uri: &'a Url,
+        graph: &'a InfoGraph,
+        imports: &'a [Url],
+    ) -> Box<dyn Iterator<Item = Url> + 'a> {
         // TODO this is not that stable yet
-        let child_urls = self
-            .graph
+        let child_urls = graph
             .0
             .iris()
             .filter_map(std::result::Result::ok)
@@ -1896,13 +1925,17 @@ impl ExternalDocument {
             .filter(|url| {
                 // This should be faster than url.make_relative, because url contains a serialized version
                 !url.to_string()
-                    .starts_with(self.uri.to_string().trim_end_matches('#'))
+                    .starts_with(uri.to_string().trim_end_matches('#'))
             })
-            .filter(|url| !url.to_string().contains(&self.graph.1))
+            .filter(|url| !url.to_string().contains(&graph.1))
             .map(iri_to_onology_url)
             .unique();
 
-        Box::new(imports.into_iter().chain(child_urls).unique())
+        Box::new(imports.iter().cloned().chain(child_urls).unique())
+    }
+
+    pub fn reachable_urls(&self) -> &Vec<Url> {
+        &self.reachable_urls
     }
 
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
@@ -2251,36 +2284,21 @@ fn syntax_errors(stage1: &ParsedDocument) -> Vec<Diagnostic> {
 fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    // TODO what about `true` as annotation target? This is not in the grammar but oeo uses it for example.
+    let uses: &HashSet<Iri> = &doc.stage2.references;
 
-    let uses: HashSet<Iri> = doc
-        .stage2
-        .references
-        .iter()
-        .map(|(iri, _)| iri.clone())
-        .collect();
+    let mut defines: HashSet<String> = doc.stage2.definitions.clone();
 
-    // TODO maybe change this into a hash map?
-    let mut defines: HashSet<String> = doc
-        .stage2
-        .definitions
-        .iter()
-        .map(|d| d.iri.clone())
-        .collect();
-
-    let imports_recursive = doc.reachable_docs_recursive(workspace, false);
+    let imports_recursive = timeit("semantic errors  reachable", || {
+        // This takes the longes :<
+        doc.reachable_docs_recursive(workspace, false)
+    });
+    debug!("Imports recursive {} {:#?}", doc.uri, imports_recursive);
 
     for url in imports_recursive {
         if let Some(doc) = workspace.document_by_url(&url) {
             match doc {
                 DocumentReference::Internal(internal_document) => {
-                    defines.extend(
-                        internal_document
-                            .stage2
-                            .definitions
-                            .iter()
-                            .map(|d| d.iri.clone()),
-                    );
+                    defines.extend(internal_document.stage2.definitions.clone());
                 }
                 DocumentReference::External(_external_document) => {
                     // TODO add the definitons later
@@ -2291,12 +2309,10 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
     }
 
     // TODO this is a quick fix for now. The correct way will be not not include prefixes in the used Iris
-    let prefixes: HashSet<Iri> = doc.queried_document.prefixes.values().cloned().collect();
+    let prefixes: HashSet<&Iri> = doc.queried_document.prefixes.values().collect();
     let imports = &doc.queried_document.imports;
 
     let ontology_id = &doc.queried_document.ontology_id;
-
-    // TODO recurse the imports
 
     for diff in uses
         .difference(&defines)
@@ -2649,16 +2665,8 @@ fn frame_to_doc(node: &Node, rope: &Rope, tab_size: u32, nest_depth: isize) -> R
         .group()
 }
 
-#[cached(
-    time = 5,
-    key = "u64",
-    convert = r#"{
-        let mut hasher = DefaultHasher::new();
-        doc.hash(&mut hasher);
-        std::hash::Hash::hash(&include_prefix, &mut hasher);
-        hasher.finish()
-     } "#
-)]
+// This can not be cached, because some dependencies are maybe not loaded.
+// Therefore the result could change indepenent of the document.
 fn reachable_docs_recursive_cached(
     doc: &InternalDocument,
     workspace: &Workspace,
@@ -2982,7 +2990,7 @@ mod tests {
         .unwrap();
 
         // Act
-        let urls = external_doc.imports().collect_vec();
+        let urls = external_doc.imports();
 
         // Assert
         assert!(urls.contains(&Url::parse("http://www.example.com/other-property").unwrap()));
