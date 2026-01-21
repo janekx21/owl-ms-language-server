@@ -535,7 +535,6 @@ async fn backend_hover_in_multi_file_ontology_on_not_imported_iri_should_not_wor
 }
 
 #[test(tokio::test)]
-#[ignore = "The diagnostics do not know of external definitions yet!"] // TODO
 async fn backend_hover_on_external_simple_iri_should_show_external_info() {
     setup();
     // Arrange
@@ -633,7 +632,12 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service).await;
+    let diagnostics = service_diagnostics(&service).await;
+    debug!("{diagnostics:#?}");
+    assert!(
+        diagnostics.len() == 1,
+        "The not defined class B2 should generate a diagnostic"
+    );
     let hover_result = hover_result.unwrap();
 
     let contents = match hover_result.contents {
@@ -647,7 +651,6 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
 }
 
 #[test(tokio::test)]
-#[ignore = "The diagnostics do not know of external definitions yet!"] // TODO
 async fn backend_hover_on_external_full_iri_should_show_external_info() {
     setup();
     // Arrange
@@ -711,6 +714,7 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
                     rdfs:label "Some class in A1"
                 SubClassOf: <http://ontology-a.org/a2.owx#ClassA2>,ClassB2
 
+            AnnotationProperty: rdfs:label
     "#;
 
     service
@@ -743,7 +747,12 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service).await;
+    let diagnostics = service_diagnostics(&service).await;
+    debug!("{diagnostics:#?}");
+    assert!(
+        diagnostics.len() == 1,
+        "The not defined class B2 should generate a diagnostic"
+    );
     let hover_result = hover_result.unwrap();
 
     let contents = match hover_result.contents {
@@ -1021,7 +1030,6 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
 }
 
 #[test(tokio::test)]
-#[ignore = "The diagnostics do not know of external definitions yet!"] // TODO
 async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
     setup();
     // Arrange
@@ -1120,7 +1128,12 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
         .unwrap();
 
     // Assert
-    assert_empty_diagnostics(&service).await;
+    let diagnostics = service_diagnostics(&service).await;
+    debug!("{diagnostics:#?}");
+    assert!(
+        diagnostics.len() == 1,
+        "The not defined class B2 should generate a diagnostic"
+    );
     let result = result.unwrap();
 
     info!("result={result:#?}");

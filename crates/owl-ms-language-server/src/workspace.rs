@@ -1889,7 +1889,7 @@ impl ExternalDocument {
             .flatten()
             .filter_map(|[s, p, o]| {
                 p.iri().map(|iri| {
-                    debug!("{:?} {:?} {:?}", s, iri, o);
+                    debug!("{s:?} {iri:?} {o:?}");
                     if let Some(subject_iri) = s.iri() {
                         if iri.as_str() == IRI_RDF_TYPE {
                             hash_set.insert(subject_iri.as_str().to_string());
