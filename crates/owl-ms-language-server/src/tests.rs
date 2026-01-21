@@ -757,7 +757,6 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
 }
 
 #[test(tokio::test)]
-#[ignore = "The diagnostics do not know of external definitions yet!"] // TODO
 async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_external_info() {
     setup();
     // Arrange
@@ -851,6 +850,7 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
 
     // Assert
     let diagnostics = service_diagnostics(&service).await;
+    debug!("{diagnostics:#?}");
     assert!(
         diagnostics.len() == 1,
         "The not defined class B2 should generate a diagnostic"

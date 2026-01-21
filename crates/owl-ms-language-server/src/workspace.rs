@@ -30,6 +30,7 @@ use sophia::iri::IriRef;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter::once;
+use std::ops::Deref;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
@@ -1658,6 +1659,7 @@ pub struct ExternalDocument {
     pub graph: InfoGraph,
     reachable_urls: Vec<Url>,
     imports: Vec<Url>,
+    definitions: HashSet<Iri>,
 }
 
 impl PartialEq for ExternalDocument {
@@ -1744,6 +1746,23 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
                             .expect("graph should not be full");
                     }
                 }
+                horned_owl::model::Component::DeclareClass(horned_owl::model::DeclareClass(
+                    class,
+                )) => {
+                    let subject = SimpleTerm::Iri(
+                        IriRef::new(MownStr::from_ref(&class.0))
+                            .expect("Class IRI should be valid IRI"),
+                    );
+                    let predicate =
+                        SimpleTerm::Iri(IriRef::new_unchecked(MownStr::from_ref(IRI_RDF_TYPE)));
+
+                    let object = SimpleTerm::Iri(IriRef::new_unchecked(MownStr::from_ref(
+                        "http://www.w3.org/2002/07/owl#Class",
+                    )));
+                    graph
+                        .insert(subject, predicate, object)
+                        .expect("graph should not be full");
+                }
                 _ => (),
             }
         }
@@ -1756,6 +1775,8 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
         Self(graph, graph_name)
     }
 }
+
+const IRI_RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 
 impl Hash for ExternalDocument {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -1787,6 +1808,7 @@ impl ExternalDocument {
 
                 ExternalDocument {
                     reachable_urls,
+                    definitions: ExternalDocument::gen_definitions(&graph),
                     imports,
                     graph,
                     text,
@@ -1852,6 +1874,31 @@ impl ExternalDocument {
 
     pub fn imports(&self) -> &Vec<Url> {
         &self.imports
+    }
+
+    pub fn definitions(&self) -> &HashSet<Iri> {
+        debug!("Definitions of {} are {:#?}", self.uri, self.definitions);
+        &self.definitions
+    }
+
+    pub fn gen_definitions(graph: &InfoGraph) -> HashSet<Iri> {
+        let mut hash_set = HashSet::new();
+        graph
+            .0
+            .triples()
+            .flatten()
+            .filter_map(|[s, p, o]| {
+                p.iri().map(|iri| {
+                    debug!("{:?} {:?} {:?}", s, iri, o);
+                    if let Some(subject_iri) = s.iri() {
+                        if iri.as_str() == IRI_RDF_TYPE {
+                            hash_set.insert(subject_iri.as_str().to_string());
+                        }
+                    }
+                })
+            })
+            .collect_vec();
+        hash_set
     }
 
     // Because external documents most likely relate to other external ones and because there are many of them in a graph the depth should be limited
@@ -2300,9 +2347,8 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
                 DocumentReference::Internal(internal_document) => {
                     defines.extend(internal_document.stage2.definitions.clone());
                 }
-                DocumentReference::External(_external_document) => {
-                    // TODO add the definitons later
-                    // do nothing
+                DocumentReference::External(external_document) => {
+                    defines.extend(external_document.definitions().clone());
                 }
             }
         }
