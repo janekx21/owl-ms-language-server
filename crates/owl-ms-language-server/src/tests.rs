@@ -989,13 +989,6 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
     assert_empty_diagnostics(&service).await;
     let edits = result.unwrap();
 
-    // TODO
-    // let any_overlaps = edits
-    //     .iter()
-    //     .tuple_combinations()
-    //     .any(|(a, b)| range_overlaps(&a.range.into(), &b.range.into()));
-    // assert!(!any_overlaps);
-
     service
         .inner()
         .did_change(DidChangeTextDocumentParams {
@@ -1559,12 +1552,6 @@ async fn backend_did_open_should_load_external_rdf_via_http() {
         .iter()
         .exactly_one()
         .expect("Only one workspace should be crated");
-
-    // TODO move to own function
-    // TODO and implement stuff
-    // while let Some(handle) = workspace.indexing_thread_handle.pop() {
-    //     handle.join().unwrap();
-    // }
 
     assert_eq!(
         workspace.internal_documents().len(),
@@ -2791,17 +2778,6 @@ async fn service_diagnostics(service: &LspService<Backend>) -> Vec<workspace::Di
         })
         .collect_vec()
 }
-
-// TODO well i think this is not needed right? As this waiting is done in the did_open function with a preprocessor condition
-// async fn wait_for_service(service: &LspService<Backend>) {
-//     let mut sync = service.inner().write_sync().await;
-
-//     for workspace in sync.workspaces_mut() {
-//         for ele in workspace.index_handles.iter_mut() {
-//             assert_eq!(ele.await.unwrap(), ());
-//         }
-//     }
-// }
 
 #[derive(Debug)]
 pub struct StaticClient {

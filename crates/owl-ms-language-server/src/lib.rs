@@ -338,7 +338,6 @@ impl LanguageServer for Backend {
         async {
             let file_url = params.text_document.uri;
             info!("Did open {file_url} ...",);
-            // let sync_arc = self.sync.clone();
 
             let mut sync = self.write_sync().await;
 
@@ -353,11 +352,10 @@ impl LanguageServer for Backend {
             let path = doc.path.clone();
 
             let handle = self.load_dependencies(&path);
-            // let handle = InternalDocument::load_dependencies(&path, &self.sync, &self.http_client);
 
             #[cfg(test)]
             {
-                // TODO is this fine?
+                // This is just for tests, so that they dont produce a race condition
                 drop(sync);
                 handle.await.unwrap();
             }
@@ -366,21 +364,7 @@ impl LanguageServer for Backend {
                 workspace.index_handles.push(handle);
             }
 
-            // TODO DEBUG reactivate this as soon as possible !!!!!!!!!!!!!!!
-            // self.update_diagnostics_for_url(file_url);
-            if false {}
-
-            // let client = self.client.clone();
-            // let url_copy = url.clone();
-            // let encoding = self.encoding().clone();
-
-            // tokio::spawn(async move {
-            //     let sync2 = sync_arc.read().await;
-
-            //     if let Some((doc, ws)) = sync2.get_internal_document(&url_copy).ok() {
-            //         doc.publish_lsp_diagnostics(ws, &encoding, &client).await;
-            //     }
-            // });
+            self.update_diagnostics_for_url_and_dependent(file_url);
 
             debug!("Did open!");
 
@@ -414,30 +398,6 @@ impl LanguageServer for Backend {
 
             workspace.insert_internal_document(new_document);
 
-            // let client = self.client.clone();
-            // let sync_ref = self.sync.clone();
-            // let encoding = self.encoding().clone();
-
-            // task::spawn(async move {
-            //     let sync = sync_ref.read().await;
-
-            //     let (document, workspace) = sync
-            //         .get_internal_document(&url)
-            //         .expect("Reborrow of workspace should work");
-
-            //     // TODO create diagnostics for files that depend on this file
-            //     document
-            //         .publish_lsp_diagnostics(workspace, &encoding, &client)
-            //         .await;
-
-            //     for ele in workspace.internal_documents() {
-            //         if ele.reachable_urls(false).contains(&document.uri) {
-            //             ele.publish_lsp_diagnostics(workspace, &encoding, &client)
-            //                 .await;
-            //         }
-            //     }
-            // });
-
             // TODO make this join handle one of a kind maybe. So no two diagnostics threads at the same time.
             // Async diagnostics
             self.update_diagnostics_for_url_and_dependent(url);
@@ -468,17 +428,6 @@ impl LanguageServer for Backend {
         // We do not close yet :> because of refences
         // TODO should data be deleted if a file is closed?
     }
-
-    // async fn did_save(&self, params: DidSaveTextDocumentParams) {
-    //     let sync = self.read_sync().await;
-    //     let Some(workspace) = sync.get_workspace(&params.text_document.uri) else {
-    //         warn!("Document not found {}", params.text_document.uri);
-    //         return;
-    //     };
-
-    //     workspace.diagnostic();
-    //     self.client.publish_diagnostics(uri, diags, version);
-    // }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         info!("formatting {params:#?}");

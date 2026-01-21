@@ -30,7 +30,7 @@
 
         tree-sitter-watch = pkgs.writeShellScriptBin "tree-sitter-watch" ''${pkgs.watchexec}/bin/watchexec --clear -e js -e scm -e txt "${pkgs.tree-sitter}/bin/tree-sitter generate && ${pkgs.tree-sitter}/bin/tree-sitter test"'';
 
-        ls = pkgs.writeShellScriptBin "owl-ms-language-server" ''
+        langaugeServerScript = pkgs.writeShellScriptBin "owl-ms-language-server" ''
           /home/janek/Git/owl-ms-language-server/target/debug/owl-ms-language-server --stdio --offline
         '';
       in
@@ -58,11 +58,8 @@
 
             # Scripts of this repository
             tree-sitter-watch
-            ls
+            langaugeServerScript
           ];
-          # shellHook = ''
-          #   export PATH=$PATH:/home/janek/Git/owl-ms-language-server/target/debug
-          # '';
         };
       }
     );
