@@ -11,8 +11,12 @@ use crate::{
     rope_provider::RopeProvider, LANGUAGE,
 };
 use cached::proc_macro::cached;
-use horned_owl::model::Component::AnnotationAssertion;
-use horned_owl::model::{AnnotationSubject, AnnotationValue, ArcStr, Build, Literal};
+use horned_owl::model::Component::{self, AnnotationAssertion};
+use horned_owl::model::{
+    AnnotationProperty, AnnotationSubject, AnnotationValue, ArcStr, Build, DataProperty, Datatype,
+    DeclareAnnotationProperty, DeclareClass, DeclareDataProperty, DeclareDatatype,
+    DeclareNamedIndividual, DeclareObjectProperty, Literal, NamedIndividual, ObjectProperty,
+};
 use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
@@ -30,7 +34,6 @@ use sophia::iri::IriRef;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter::once;
-use std::ops::Deref;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
@@ -1680,7 +1683,7 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
         let mut graph = LightGraph::new();
 
         let ontology_iri = &value.iter().find_map(|ac| match &ac.component {
-            horned_owl::model::Component::OntologyID(horned_owl::model::OntologyID {
+            Component::OntologyID(horned_owl::model::OntologyID {
                 iri: Some(id),
                 viri: _,
             }) => Some(SimpleTerm::Iri(IriRef::new(MownStr::from_ref(id)).unwrap())),
@@ -1733,7 +1736,7 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
                         // TODO support anonymous individual
                     }
                 },
-                horned_owl::model::Component::Import(horned_owl::model::Import(iri)) => {
+                Component::Import(horned_owl::model::Import(iri)) => {
                     if let Some(subject) = ontology_iri {
                         let predicate = SimpleTerm::Iri(IriRef::new_unchecked(MownStr::from_ref(
                             "http://www.w3.org/2002/07/owl#imports",
@@ -1746,12 +1749,17 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
                             .expect("graph should not be full");
                     }
                 }
-                horned_owl::model::Component::DeclareClass(horned_owl::model::DeclareClass(
-                    class,
-                )) => {
+                Component::DeclareClass(DeclareClass(horned_owl::model::Class(iri)))
+                | Component::DeclareDatatype(DeclareDatatype(Datatype(iri)))
+                | Component::DeclareObjectProperty(DeclareObjectProperty(ObjectProperty(iri)))
+                | Component::DeclareAnnotationProperty(DeclareAnnotationProperty(
+                    AnnotationProperty(iri),
+                ))
+                | Component::DeclareDataProperty(DeclareDataProperty(DataProperty(iri)))
+                | Component::DeclareNamedIndividual(DeclareNamedIndividual(NamedIndividual(iri))) =>
+                {
                     let subject = SimpleTerm::Iri(
-                        IriRef::new(MownStr::from_ref(&class.0))
-                            .expect("Class IRI should be valid IRI"),
+                        IriRef::new(MownStr::from_ref(iri)).expect("Class IRI should be valid IRI"),
                     );
                     let predicate =
                         SimpleTerm::Iri(IriRef::new_unchecked(MownStr::from_ref(IRI_RDF_TYPE)));
