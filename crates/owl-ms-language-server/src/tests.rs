@@ -2629,6 +2629,681 @@ async fn backend_did_open_should_load_external_documents_recursivly() {
     assert_eq!(workspace.external_documents().len(), 2);
 }
 
+///////////////////////////////////////////
+// Missing IRI Diagnostics Tests
+///////////////////////////////////////////
+
+#[test(tokio::test)]
+async fn diagnostics_missing_class_with_external_document_should_report_error() {
+    setup();
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![WorkspaceMember::CatalogFile(
+            Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap()).with_uri(
+                "http://example.org/external",
+                "http://example.org/external.owx",
+            ),
+        )]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test workspace".into(),
+        }),
+        vec![(
+            "http://example.org/external.owx",
+            r##"
+            <?xml version="1.0"?>
+            <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                 xml:base="http://example.org/external"
+                 xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                 ontologyIRI="http://example.org/external">
+
+                <Declaration>
+                    <Class IRI="#DefinedClass"/>
+                </Declaration>
+
+            </Ontology>
+            "##,
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://example.org/main>
+            Import: <http://example.org/external>
+
+            Class: LocalClass
+                SubClassOf: DefinedClass, UndefinedClass
+    "#;
+
+    // Act
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+    let diagnostics = service_diagnostics(&service).await;
+    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label.clone()).collect();
+    let diagnostic_text = diagnostic_labels.join("\n");
+
+    assert!(
+        diagnostics.len() >= 1,
+        "Should have at least one diagnostic for UndefinedClass"
+    );
+    assert!(
+        diagnostic_text.contains("UndefinedClass"),
+        "Diagnostic should mention UndefinedClass. Found diagnostics:\n{}",
+        diagnostic_text
+    );
+    assert!(
+        diagnostic_text.contains("used but not defined"),
+        "Diagnostic should say 'used but not defined'. Found diagnostics:\n{}",
+        diagnostic_text
+    );
+}
+
+#[test(tokio::test)]
+async fn diagnostics_missing_datatype_with_external_document_should_report_error() {
+    setup();
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![WorkspaceMember::CatalogFile(
+            Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap()).with_uri(
+                "http://example.org/external",
+                "http://example.org/external.owx",
+            ),
+        )]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test workspace".into(),
+        }),
+        vec![(
+            "http://example.org/external.owx",
+            r##"
+            <?xml version="1.0"?>
+            <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                 xml:base="http://example.org/external"
+                 xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                 ontologyIRI="http://example.org/external">
+
+                <Declaration>
+                    <Datatype IRI="#DefinedDatatype"/>
+                </Declaration>
+
+            </Ontology>
+            "##,
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://example.org/main>
+            Import: <http://example.org/external>
+
+            Datatype: LocalDatatype
+
+            DataProperty: hasValue
+                Range: DefinedDatatype, UndefinedDatatype
+    "#;
+
+    // Act
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+    let diagnostics = service_diagnostics(&service).await;
+    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label.clone()).collect();
+    let diagnostic_text = diagnostic_labels.join("\n");
+
+    assert!(
+        diagnostics.len() >= 1,
+        "Should have at least one diagnostic for UndefinedDatatype"
+    );
+    assert!(
+        diagnostic_text.contains("UndefinedDatatype"),
+        "Diagnostic should mention UndefinedDatatype. Found diagnostics:\n{}",
+        diagnostic_text
+    );
+    assert!(
+        diagnostic_text.contains("used but not defined"),
+        "Diagnostic should say 'used but not defined'. Found diagnostics:\n{}",
+        diagnostic_text
+    );
+}
+
+#[test(tokio::test)]
+async fn diagnostics_missing_object_property_with_external_document_should_report_error() {
+    setup();
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![WorkspaceMember::CatalogFile(
+            Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap()).with_uri(
+                "http://example.org/external",
+                "http://example.org/external.owx",
+            ),
+        )]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test workspace".into(),
+        }),
+        vec![(
+            "http://example.org/external.owx",
+            r##"
+            <?xml version="1.0"?>
+            <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                 xml:base="http://example.org/external"
+                 xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                 ontologyIRI="http://example.org/external">
+
+                <Declaration>
+                    <ObjectProperty IRI="#definedProperty"/>
+                </Declaration>
+
+            </Ontology>
+            "##,
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://example.org/main>
+            Import: <http://example.org/external>
+
+            Class: MyClass
+                SubClassOf: definedProperty some MyClass, undefinedProperty some MyClass
+    "#;
+
+    // Act
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+    let diagnostics = service_diagnostics(&service).await;
+    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label.clone()).collect();
+    let diagnostic_text = diagnostic_labels.join("\n");
+
+    assert!(
+        diagnostics.len() >= 1,
+        "Should have at least one diagnostic for undefinedProperty"
+    );
+    assert!(
+        diagnostic_text.contains("undefinedProperty"),
+        "Diagnostic should mention undefinedProperty. Found diagnostics:\n{}",
+        diagnostic_text
+    );
+    assert!(
+        diagnostic_text.contains("used but not defined"),
+        "Diagnostic should say 'used but not defined'. Found diagnostics:\n{}",
+        diagnostic_text
+    );
+}
+
+#[test(tokio::test)]
+async fn diagnostics_missing_data_property_with_external_document_should_report_error() {
+    setup();
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![WorkspaceMember::CatalogFile(
+            Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap()).with_uri(
+                "http://example.org/external",
+                "http://example.org/external.owx",
+            ),
+        )]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test workspace".into(),
+        }),
+        vec![(
+            "http://example.org/external.owx",
+            r##"
+            <?xml version="1.0"?>
+            <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                 xml:base="http://example.org/external"
+                 xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                 xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+                 ontologyIRI="http://example.org/external">
+
+                <Declaration>
+                    <DataProperty IRI="#definedDataProperty"/>
+                </Declaration>
+
+            </Ontology>
+            "##,
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://example.org/main>
+            Import: <http://example.org/external>
+
+            DataProperty: localDataProperty
+
+            Class: MyClass
+                SubClassOf: definedDataProperty some xsd:string, undefinedDataProperty some xsd:string
+    "#;
+
+    // Act
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+    let diagnostics = service_diagnostics(&service).await;
+    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label.clone()).collect();
+    let diagnostic_text = diagnostic_labels.join("\n");
+
+    assert!(
+        diagnostics.len() >= 1,
+        "Should have at least one diagnostic for undefinedDataProperty"
+    );
+    assert!(
+        diagnostic_text.contains("undefinedDataProperty"),
+        "Diagnostic should mention undefinedDataProperty. Found diagnostics:\n{}",
+        diagnostic_text
+    );
+    assert!(
+        diagnostic_text.contains("used but not defined"),
+        "Diagnostic should say 'used but not defined'. Found diagnostics:\n{}",
+        diagnostic_text
+    );
+}
+
+#[test(tokio::test)]
+async fn diagnostics_missing_annotation_property_with_external_document_should_report_error() {
+    setup();
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![WorkspaceMember::CatalogFile(
+            Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap()).with_uri(
+                "http://example.org/external",
+                "http://example.org/external.owx",
+            ),
+        )]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test workspace".into(),
+        }),
+        vec![(
+            "http://example.org/external.owx",
+            r##"
+            <?xml version="1.0"?>
+            <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                 xml:base="http://example.org/external"
+                 xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                 ontologyIRI="http://example.org/external">
+
+                <Declaration>
+                    <AnnotationProperty IRI="#definedAnnotation"/>
+                </Declaration>
+
+            </Ontology>
+            "##,
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://example.org/main>
+            Import: <http://example.org/external>
+
+            AnnotationProperty: localAnnotation
+
+            Class: MyClass
+                Annotations:
+                    definedAnnotation "This works",
+                    undefinedAnnotation "This should error"
+    "#;
+
+    // Act
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+    let diagnostics = service_diagnostics(&service).await;
+    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label.clone()).collect();
+    let diagnostic_text = diagnostic_labels.join("\n");
+
+    assert!(
+        diagnostics.len() >= 1,
+        "Should have at least one diagnostic for undefinedAnnotation"
+    );
+    assert!(
+        diagnostic_text.contains("undefinedAnnotation"),
+        "Diagnostic should mention undefinedAnnotation. Found diagnostics:\n{}",
+        diagnostic_text
+    );
+    assert!(
+        diagnostic_text.contains("used but not defined"),
+        "Diagnostic should say 'used but not defined'. Found diagnostics:\n{}",
+        diagnostic_text
+    );
+}
+
+#[test(tokio::test)]
+async fn diagnostics_missing_individual_with_external_document_should_report_error() {
+    setup();
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![WorkspaceMember::CatalogFile(
+            Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap()).with_uri(
+                "http://example.org/external",
+                "http://example.org/external.owx",
+            ),
+        )]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test workspace".into(),
+        }),
+        vec![(
+            "http://example.org/external.owx",
+            r##"
+            <?xml version="1.0"?>
+            <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                 xml:base="http://example.org/external"
+                 xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                 ontologyIRI="http://example.org/external">
+
+                <Declaration>
+                    <NamedIndividual IRI="#definedIndividual"/>
+                </Declaration>
+
+            </Ontology>
+            "##,
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://example.org/main>
+            Import: <http://example.org/external>
+
+            Individual: localIndividual
+
+            Individual: definedIndividual
+                DifferentFrom: undefinedIndividual
+    "#;
+
+    // Act
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+    let diagnostics = service_diagnostics(&service).await;
+    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label.clone()).collect();
+    let diagnostic_text = diagnostic_labels.join("\n");
+
+    assert!(
+        diagnostics.len() >= 1,
+        "Should have at least one diagnostic for undefinedIndividual"
+    );
+    assert!(
+        diagnostic_text.contains("undefinedIndividual"),
+        "Diagnostic should mention undefinedIndividual. Found diagnostics:\n{}",
+        diagnostic_text
+    );
+    assert!(
+        diagnostic_text.contains("used but not defined"),
+        "Diagnostic should say 'used but not defined'. Found diagnostics:\n{}",
+        diagnostic_text
+    );
+}
+
+#[test(tokio::test)]
+async fn diagnostics_all_defined_in_external_document_should_have_no_errors() {
+    setup();
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![WorkspaceMember::CatalogFile(
+            Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap()).with_uri(
+                "http://example.org/external",
+                "http://example.org/external.owx",
+            ),
+        )]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test workspace".into(),
+        }),
+        vec![(
+            "http://example.org/external.owx",
+            r##"
+            <?xml version="1.0"?>
+            <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                 xml:base="http://example.org/external"
+                 xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                 xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+                 xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+                 ontologyIRI="http://example.org/external">
+
+                <Declaration>
+                    <Class IRI="http://example.org/external/ExternalClass"/>
+                </Declaration>
+                <Declaration>
+                    <ObjectProperty IRI="http://example.org/external/externalObjectProperty"/>
+                </Declaration>
+                <Declaration>
+                    <NamedIndividual IRI="http://example.org/external/externalIndividual"/>
+                </Declaration>
+
+            </Ontology>
+            "##,
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://example.org/main>
+            Import: <http://example.org/external>
+
+            Class: <http://example.org/external/ExternalClass>
+
+            Class: LocalClass
+                SubClassOf: <http://example.org/external/ExternalClass>
+
+            ObjectProperty: <http://example.org/external/externalObjectProperty>
+
+            Individual: <http://example.org/external/externalIndividual>
+                Types: LocalClass
+    "#;
+
+    // Act
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+    let diagnostics = service_diagnostics(&service).await;
+    assert_eq!(
+        diagnostics.len(),
+        0,
+        "Should have no diagnostics when all entities are defined in external document. Found: {:#?}",
+        diagnostics
+    );
+}
+
+#[test(tokio::test)]
+async fn diagnostics_multiple_missing_iris_with_external_document_should_report_all_errors() {
+    setup();
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![WorkspaceMember::CatalogFile(
+            Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap()).with_uri(
+                "http://example.org/external",
+                "http://example.org/external.owx",
+            ),
+        )]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test workspace".into(),
+        }),
+        vec![(
+            "http://example.org/external.owx",
+            r##"
+            <?xml version="1.0"?>
+            <Ontology xmlns="http://www.w3.org/2002/07/owl#"
+                 xml:base="http://example.org/external"
+                 xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                 ontologyIRI="http://example.org/external">
+
+                <Declaration>
+                    <Class IRI="#DefinedClass"/>
+                </Declaration>
+
+            </Ontology>
+            "##,
+        )],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    let ontology = r#"
+        Ontology: <http://example.org/main>
+            Import: <http://example.org/external>
+
+            Class: LocalClass
+                SubClassOf: DefinedClass, UndefinedClass1, UndefinedClass2, undefinedProperty some UndefinedClass3
+    "#;
+
+    // Act
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+    let diagnostics = service_diagnostics(&service).await;
+    assert!(
+        diagnostics.len() >= 4,
+        "Should have at least 4 diagnostics for undefined entities. Found: {}",
+        diagnostics.len()
+    );
+
+    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label.clone()).collect();
+    let diagnostic_text = diagnostic_labels.join(", ");
+
+    assert!(
+        diagnostic_text.contains("UndefinedClass1"),
+        "Should report UndefinedClass1"
+    );
+    assert!(
+        diagnostic_text.contains("UndefinedClass2"),
+        "Should report UndefinedClass2"
+    );
+    assert!(
+        diagnostic_text.contains("UndefinedClass3"),
+        "Should report UndefinedClass3"
+    );
+    assert!(
+        diagnostic_text.contains("undefinedProperty"),
+        "Should report undefinedProperty"
+    );
+}
+
 //////////////////////////
 // Setup & Arrange
 //////////////////////////
