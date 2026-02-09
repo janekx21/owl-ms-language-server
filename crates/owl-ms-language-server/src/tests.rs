@@ -1,4 +1,4 @@
-use crate::{catalog::Catalog, error::Result, web::HttpClient, *};
+use crate::{catalog::Catalog, error::Result, queries::ALL_QUERIES, web::HttpClient, *};
 use horned_owl::{
     io::{OWXParserConfiguration, ParserConfiguration, RDFParserConfiguration},
     model::{AnnotatedComponent, Build},
@@ -192,8 +192,8 @@ async fn backend_did_open_should_create_document() {
 
     assert_eq!(doc.uri, url);
     assert_eq!(doc.version, 0);
-    assert_eq!(doc.rope.to_string(), "abc");
-    assert!(doc.tree.root_node().is_error());
+    assert_eq!(doc.rope().to_string(), "abc");
+    assert!(doc.tree().root_node().is_error());
 }
 
 /// This tests if the "did_change" feature works on the lsp. It takes the document DEF and adds two changes resolving in ABCDEFGHI.
@@ -262,7 +262,7 @@ async fn backend_did_change_should_update_internal_rope() -> error::Result<()> {
     info!("{sync:#?}");
     let (doc, _) = sync.get_internal_document(&ontology_url).unwrap();
 
-    let doc_content = doc.rope.to_string();
+    let doc_content = doc.rope().to_string();
 
     assert_eq!(doc_content, "A😊BCDE😊FGH😊I");
     Ok(())
@@ -984,8 +984,13 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
     let doc = workspace
         .get_internal_document(&url.to_file_path().unwrap())
         .unwrap();
-    assert_eq!(doc.diagnostics, vec![], "doc:\n{}", doc.rope.to_string());
-    assert_eq!(doc.rope.to_string(), target);
+    assert_eq!(
+        doc.diagnostics(),
+        &vec![],
+        "doc:\n{}",
+        doc.rope().to_string()
+    );
+    assert_eq!(doc.rope().to_string(), target);
     Ok(())
 }
 
@@ -1221,7 +1226,7 @@ Class: class-in-first-file
         .exactly_one()
         .unwrap_or_else(|_| panic!("Multiple documents"));
     assert_eq!(
-        document.rope.to_string(),
+        document.rope().to_string(),
         r#"Ontology: <http://a.b/multi-file>
 Class: class-in-first-file
 
@@ -1946,6 +1951,78 @@ async fn backend_completion_should_not_panic() {
     // Assert
     // Does not panic!
 }
+#[test(tokio::test)]
+async fn backend_completion_with_iri_should_complete_to_iri() {
+    setup();
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "foo".into(),
+        }),
+        vec![],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("a.omn")).unwrap();
+
+    let ontology = indoc! {r#"
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Ontology: <http://foo.org/a>
+        Class: F_1234
+            Annotations:
+                rdfs:label "Some Class"
+        Class: Other
+            SubClassOf: Som #<--here
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    let res = service
+        .inner()
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url },
+                position: lsp_types::Position::new(6, 19),
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            context: None,
+        })
+        .await;
+
+    // Assert
+
+    let res = res.unwrap();
+    let res = res.unwrap();
+    let items = match res {
+        CompletionResponse::Array(completion_items) => completion_items,
+        CompletionResponse::List(_) => unimplemented!(),
+    };
+
+    let item = items.into_iter().exactly_one().unwrap();
+
+    assert_eq!(item.label, "Some Class");
+    assert_eq!(item.insert_text, Some("F_1234".to_string()));
+}
 
 #[test(tokio::test)]
 async fn backend_references_in_multi_file_ontology_should_work() {
@@ -2307,7 +2384,7 @@ async fn backend_rename_helper(
     let (doc, _) = sync.get_internal_document(&url).unwrap();
 
     let pos = position
-        .into_lsp(&doc.rope, &PositionEncodingKind::UTF16)
+        .into_lsp(doc.rope(), &PositionEncodingKind::UTF16)
         .unwrap();
 
     drop(sync);
@@ -2361,7 +2438,7 @@ async fn backend_rename_helper(
     let doc = workspace
         .get_internal_document(&url.to_file_path().unwrap())
         .unwrap();
-    let doc_content = doc.rope.to_string();
+    let doc_content = doc.rope().to_string();
 
     assert_eq!(doc_content, new_ontology);
 }
@@ -2597,7 +2674,12 @@ async fn assert_empty_diagnostics(service: &LspService<Backend>) {
     let workspaces = sync.workspaces();
     for workspace in workspaces.iter() {
         for doc in workspace.internal_documents() {
-            assert_eq!(doc.diagnostics, vec![], "rope:\n{}", doc.rope.to_string());
+            assert_eq!(
+                doc.diagnostics(),
+                &vec![],
+                "rope:\n{}",
+                doc.rope().to_string()
+            );
         }
     }
 }
