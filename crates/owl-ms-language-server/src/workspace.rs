@@ -6,14 +6,17 @@ use crate::queries::{
     self, treesitter_highlight_capture_into_semantic_token_type_index, NODE_TYPES,
 };
 use crate::web::{url_to_filename, HttpClient};
-use crate::SyncRef;
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
     rope_provider::RopeProvider, LANGUAGE,
 };
 use cached::proc_macro::cached;
-use horned_owl::model::Component::AnnotationAssertion;
-use horned_owl::model::{AnnotationSubject, AnnotationValue, ArcStr, Build, Literal};
+use horned_owl::model::Component::{self, AnnotationAssertion};
+use horned_owl::model::{
+    AnnotationProperty, AnnotationSubject, AnnotationValue, ArcStr, Build, DataProperty, Datatype,
+    DeclareAnnotationProperty, DeclareClass, DeclareDataProperty, DeclareDatatype,
+    DeclareNamedIndividual, DeclareObjectProperty, Literal, NamedIndividual, ObjectProperty,
+};
 use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
@@ -28,7 +31,6 @@ use sophia::api::MownStr;
 use sophia::inmem::graph::LightGraph;
 use sophia::iri::resolve::Oxiri;
 use sophia::iri::IriRef;
-use std::collections::LinkedList;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter::once;
@@ -43,8 +45,8 @@ use std::{
 };
 use tokio::task::JoinHandle;
 use tower_lsp::lsp_types::{
-    DidChangeTextDocumentParams, InlayHint, InlayHintLabel, PositionEncodingKind, SemanticToken,
-    SymbolKind, Url, WorkspaceFolder,
+    self, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
+    PositionEncodingKind, SemanticToken, SymbolKind, Url, WorkspaceFolder,
 };
 use tree_sitter_c2rust::{InputEdit, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
@@ -202,6 +204,15 @@ impl Workspace {
         }
     }
 
+    /// Returns the path for the .owl folder
+    pub fn dot_folder_path(&self) -> PathBuf {
+        self.folder
+            .uri
+            .to_file_path()
+            .expect("Workspace folder url should be file path")
+            .join(".owl")
+    }
+
     // TODO #28 maybe return a reference?
     /// This searches in the frames of internal documents
     pub fn search_frame(&self, partial_text: &str) -> Vec<(String, Iri, FrameInfo)> {
@@ -252,12 +263,13 @@ impl Workspace {
             .tree_reduce(FrameInfo::merge)
     }
 
+    /// This no longer uses a document. Because the reachable documents would be callec way to often. Now it just takes the slice of reachable documents directly. Generate it using `reachable_docs_recursive`.
     pub fn get_frame_info_recursive(
         workspace: &Workspace,
         iri: &Iri,
-        doc: &InternalDocument,
+        reachable_docs: &[Url],
     ) -> Option<FrameInfo> {
-        doc.reachable_docs_recursive(workspace)
+        reachable_docs
             .iter()
             .filter_map(|url| {
                 if let Some(doc) = workspace.document_by_url(url) {
@@ -535,7 +547,7 @@ fn cache_doc(workspace: &Workspace, doc: &ExternalDocument) {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum DocumentReference<'a> {
     // Not boxing this is fine because the size ratio is just about 1.6
     Internal(&'a InternalDocument),
@@ -550,6 +562,7 @@ pub enum Document {
 }
 
 /// Internal documents are OMN files on disk.
+/// Text -> Parsed -> Queried -> Analyzed -> ``InternalDocument``
 #[derive(Debug)]
 pub struct InternalDocument {
     /// File location
@@ -557,45 +570,37 @@ pub struct InternalDocument {
     /// URL and location where this document was loaded from
     pub uri: Url,
     pub version: i32,
-    stage1: Stage1Document,
+    queried_document: QueriedDocument,
     stage2: Stage2Document,
-}
-
-/// An internal document that has no semantic analysis. Just text and syntax tree.
-#[derive(Debug)]
-struct Stage1Document {
-    // TODO remove path and uri maybe
-    /// File location
-    path: PathBuf,
-    /// URL and location where this document was loaded from
-    uri: Url,
-    version: i32,
-    tree: Tree,
-    rope: Rope,
-}
-
-impl Hash for Stage1Document {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.path.hash(state);
-        self.uri.hash(state);
-        Hash::hash(&self.version, state);
-    }
 }
 
 /// An internal document that has analysis results.
 #[derive(Debug)]
 struct Stage2Document {
-    prefixes: HashMap<String, String>,
+    // TODO maybe move everything into Internal document or here
+    // /// File location
+    // path: PathBuf,
+    // /// URL and location where this document was loaded from
+    // uri: Url,
+    // version: i32,
+    definitions: HashSet<Iri>,
+    references: HashSet<Iri>,
+
     all_frame_infos: HashMap<Iri, FrameInfo>,
-    diagnostics: Vec<Diagnostic>, // Not using the LSP type
-    directly_reachable_urls: Vec<Url>,
-    defines_iris: HashSet<Iri>,
-    uses_iris: HashSet<Iri>,
-    imports: HashSet<Iri>,
+    local_diagnostics: Vec<Diagnostic>,
+    directly_reachable_urls: (Vec<Url>, Vec<Url>),
+    iri_locations: HashMap<Iri, Vec<Range>>,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub(crate) struct Diagnostic {
+pub struct IriDefinition {
+    pub iri: Iri,
+    pub location: Location,
+    pub kind: FrameType,
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct Diagnostic {
     pub range: Range,
     pub label: String,
 }
@@ -640,43 +645,48 @@ impl InternalDocument {
         });
 
         let rope = Rope::from(text);
-        let stage1 = Stage1Document {
+        let parsed_document = ParsedDocument {
             path: path.clone(),
             uri: uri.clone(),
             version,
             tree,
             rope,
         };
-        let stage2 = stage1.analyze();
+
+        let queried_document: QueriedDocument = parsed_document.into();
+
+        let stage2: Stage2Document = queried_document.analyze();
+
+        debug!("Stage2Document -> InternalDocument");
 
         InternalDocument {
             path,
             uri,
             version,
-            stage1,
+            queried_document,
             stage2,
         }
     }
 
     pub fn rope(&self) -> &Rope {
-        &self.stage1.rope
+        &self.queried_document.parsed_document.rope
     }
 
     pub fn tree(&self) -> &Tree {
-        &self.stage1.tree
+        &self.queried_document.parsed_document.tree
     }
 
     pub fn prefixes(&self) -> &HashMap<String, String> {
-        &self.stage2.prefixes
+        &self.queried_document.prefixes
     }
 
-    pub fn diagnostics(&self) -> Vec<Diagnostic> {
-        let syntax_errors = &self.stage2.diagnostics;
-        let semantic_err = semantic_errors(self);
-        syntax_errors
+    pub fn diagnostics(&self, workspace: &Workspace) -> Vec<Diagnostic> {
+        let local_diagnostics = &self.stage2.local_diagnostics;
+        let workspace_diagnostics = timeit("semantic errors", || semantic_errors(self, workspace));
+        local_diagnostics
             .iter()
             .cloned()
-            .chain(semantic_err.into_iter())
+            .chain(workspace_diagnostics)
             .collect_vec()
     }
 
@@ -688,34 +698,24 @@ impl InternalDocument {
     }
 
     pub fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
-        let mut w = self.tree().walk();
-        loop {
-            if w.node().id() == id {
-                return Some(w.node());
-            }
-
-            // In order traversal
-            if !w.goto_first_child() {
-                while !w.goto_next_sibling() {
-                    if !w.goto_parent() {
-                        return None;
-                    }
-                }
-            }
-        }
+        node_by_id(&self.queried_document.parsed_document, id)
     }
 
-    /// Returns all document URL's that can be reached from this internal document
-    /// Does not load anything
-    // TODO  maybe cache this for some time 1sec or so
-    fn reachable_docs_recursive(&self, workspace: &Workspace) -> Vec<Url> {
-        reachable_docs_recursive_cached(self, workspace)
+    /// Returns all document URL's that can be reached (imports, prefixes, ...) from this internal document.
+    /// Does not load anything.
+    pub fn reachable_docs_recursive(
+        &self,
+        workspace: &Workspace,
+        include_prefix: bool,
+    ) -> Vec<Url> {
+        reachable_docs_recursive_cached(self, workspace, include_prefix)
     }
 
     fn reachable_docs_recursive_helper(
         &self,
         result: &mut HashSet<Url>,
         workspace: &Workspace,
+        include_prefix: bool,
     ) -> Result<()> {
         if result.contains(&self.uri) {
             // Do nothing
@@ -724,7 +724,7 @@ impl InternalDocument {
 
         result.insert(self.uri.clone());
 
-        let urls = self.reachable_urls();
+        let urls = self.reachable_urls(include_prefix);
 
         let docs = urls.iter().filter_map(|url| {
             workspace.document_by_url(url)
@@ -737,10 +737,19 @@ impl InternalDocument {
         for doc in docs {
             match doc {
                 DocumentReference::Internal(internal_document) => {
-                    internal_document.reachable_docs_recursive_helper(result, workspace)?;
+                    internal_document.reachable_docs_recursive_helper(
+                        result,
+                        workspace,
+                        include_prefix,
+                    )?;
                 }
                 DocumentReference::External(external_document) => {
-                    external_document.reachable_docs_recursive_helper(workspace, result, 0)?;
+                    external_document.reachable_docs_recursive_helper(
+                        workspace,
+                        result,
+                        0,
+                        include_prefix,
+                    )?;
                 }
             }
         }
@@ -830,21 +839,24 @@ impl InternalDocument {
         // Remove all old diagnostics with an overlapping range. They will need to be recreated
         // Move all other diagnostics
 
-        let stage1 = Stage1Document {
+        let parsed_document = ParsedDocument {
             uri: uri.clone(),
             path: path.clone(),
             version: new_version,
             tree: new_tree,
             rope: new_rope,
         };
+        let queried_document: QueriedDocument = parsed_document.into();
 
-        let stage2 = timeit("document.edit / stage1.analyze", || stage1.analyze());
+        let stage2 = timeit("document.edit / stage1.analyze", || {
+            queried_document.analyze()
+        });
 
         let doc = InternalDocument {
             path,
             uri,
             version: new_version,
-            stage1,
+            queried_document,
             stage2,
         };
 
@@ -873,8 +885,10 @@ impl InternalDocument {
         encoding: &PositionEncodingKind,
         workspace: &Workspace,
     ) -> Vec<tower_lsp::lsp_types::InlayHint> {
+        let reachable_docs = self.reachable_docs_recursive(workspace, true);
         // TODO cache this in stage2
-        self.stage1
+        self.queried_document
+            .parsed_document
             .query_range(&ALL_QUERIES.iri_query, range)
             .into_iter()
             .flat_map(|match_| match_.captures)
@@ -884,7 +898,7 @@ impl InternalDocument {
 
                 let label =
                 // timeit("get frame info recursive", || {
-                    Workspace::get_frame_info_recursive(workspace, &iri, self)
+                    Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs)
                 // })
                 .and_then(|frame_info| frame_info.label())
                 .unwrap_or_default();
@@ -1080,120 +1094,20 @@ impl InternalDocument {
         Ok(tokens)
     }
 
-    /// Loads all documents that can be reached by this internal document path
-    pub fn load_dependencies(
-        path: &Path,
-        sync_ref: &SyncRef,
-        http_client: &Arc<dyn HttpClient>,
-    ) -> tokio::task::JoinHandle<()> {
-        let sync_ref_clone = sync_ref.to_owned();
-        let path = path.to_owned();
-        let http_client = http_client.to_owned();
-        tokio::spawn(async move {
-            let mut todo: LinkedList<(Url, u32)> = {
-                let sync = sync_ref_clone.read().await;
-                let workspace = sync
-                    .get_workspace(
-                        &Url::from_file_path(&path)
-                            .expect("File path should be convertable to URL"),
-                    )
-                    .expect("Workspace for document should exist");
-
-                let document = workspace.get_internal_document(&path).unwrap();
-                document
-                    .reachable_urls()
-                    .iter()
-                    .map(|u| (u.clone(), 1))
-                    .collect()
-            };
-
-            let mut done = HashSet::<Url>::new();
-
-            debug!(
-                "Loading dependencies of {} len = {}",
-                path.display(),
-                todo.len()
-            );
-
-            while let Some((url, depth)) = todo.pop_front() {
-                debug!("Indexing {url} ...");
-                if done.contains(&url) {
-                    debug!("URL {url} was indexed. Skip");
-                    continue;
-                }
-                if depth > 2 {
-                    debug!("Depth {depth} exceeded 2 for {url}. Skip");
-                    continue;
-                }
-
-                let resolved_doc = {
-                    let sync = sync_ref_clone.read().await;
-                    let workspace = sync
-                        .get_workspace(
-                            &Url::from_file_path(&path)
-                                .expect("File path should be convertable to URL"),
-                        )
-                        .expect("Workspace for document should exist");
-
-                    // TODO well the Error is not Send. That's why we convert to Option
-                    Workspace::resolve_url_to_document(workspace, &url, http_client.clone())
-                        .await
-                        .ok()
-                };
-
-                let resolved_doc = if let Some(resolved_doc) = resolved_doc {
-                    resolved_doc
-                } else {
-                    warn!("Resolving {url} did not work");
-                    None
-                };
-
-                if let Some(doc) = resolved_doc {
-                    match doc {
-                        Document::Internal(internal_document) => {
-                            for ele in internal_document.reachable_urls() {
-                                todo.push_back((ele.clone(), 1));
-                            }
-                            {
-                                let mut sync = sync_ref_clone.write().await;
-                                let workspace = sync.get_or_insert_workspace_mut(
-                                    &Url::from_file_path(&path)
-                                        .expect("File path should be convertable to URL"),
-                                );
-                                workspace.insert_internal_document(internal_document);
-                            }
-                        }
-                        Document::External(external_document) => {
-                            // TODO maybe remove this?
-                            // Lets not do that yet
-                            for ele in external_document.reachable_urls() {
-                                todo.push_back((ele, depth + 1));
-                            }
-                            {
-                                let mut sync = sync_ref_clone.write().await;
-                                let workspace = sync.get_or_insert_workspace_mut(
-                                    &Url::from_file_path(&path)
-                                        .expect("File path should be convertable to URL"),
-                                );
-                                workspace.insert_external_document(external_document);
-                            }
-                        }
-                    }
-                } else {
-                    // The doc is already resolved
-                }
-
-                done.insert(url);
-            }
-        })
-    }
-
-    pub fn reachable_urls(&self) -> &Vec<Url> {
-        &self.stage2.directly_reachable_urls
+    /// What other urls are directly (depth = 1) reachable from this document.
+    /// Contains all import URL's unprocessed.
+    pub fn reachable_urls(&self, include_prefix: bool) -> Vec<Url> {
+        // TODO please do not clone this thing :>
+        let (imports, prefixes) = self.stage2.directly_reachable_urls.clone();
+        if include_prefix {
+            imports.into_iter().chain(prefixes).collect_vec()
+        } else {
+            imports
+        }
     }
 
     pub fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<String> {
-        self.stage1.abbreviated_iri_to_full_iri(iri)
+        self.queried_document.abbreviated_iri_to_full_iri(iri)
     }
 
     pub fn rename_edits(
@@ -1203,7 +1117,8 @@ impl InternalDocument {
         iri_kind: &String,
         original: &str,
     ) -> Vec<(Range, String)> {
-        self.stage1
+        self.queried_document
+            .parsed_document
             .query(&ALL_QUERIES.iri_query)
             .into_iter()
             .map(|m| {
@@ -1246,7 +1161,9 @@ impl InternalDocument {
     }
 
     pub fn references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range> {
-        self.stage1
+        // TODO change this into using queried_document directly
+        self.queried_document
+            .parsed_document
             .query(&ALL_QUERIES.iri_query)
             .into_iter()
             .map(|m| {
@@ -1291,29 +1208,123 @@ impl InternalDocument {
             .flatten()
             .collect_vec()
     }
+
+    /// Take this document, generate the diagnostics in workspace context and send the results via the client.
+    pub async fn publish_lsp_diagnostics(
+        &self,
+        workspace: &Workspace,
+        encoding: &PositionEncodingKind,
+        client: &tower_lsp::Client,
+    ) {
+        let diagnostics = self
+            .diagnostics(workspace)
+            .iter()
+            .map(|Diagnostic { range, label }| {
+                Ok(lsp_types::Diagnostic {
+                    range: range.into_lsp(self.rope(), encoding)?,
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("owl language server".to_string()),
+                    message: label.clone(),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                })
+            })
+            .filter_and_log()
+            .collect_vec();
+
+        // TODO create diagnostics for files that depend on this file
+        debug!(
+            "Publish diagnostics for {} {:#?}",
+            self.path.display(),
+            diagnostics
+        );
+
+        client
+            .publish_diagnostics(self.uri.clone(), diagnostics, Some(self.version))
+            .await;
+    }
 }
 
-impl Stage1Document {
-    pub fn analyze(&self) -> Stage2Document {
-        Stage2Document {
-            prefixes: self.prefixes(),
-            all_frame_infos: self.document_all_frame_infos(),
-            diagnostics: syntax_errors(self),
-            directly_reachable_urls: self.reachable_urls(),
-            imports: self.imports().into_iter().collect(),
-            defines_iris: self
-                .document_definitions()
-                .into_iter()
-                .map(|(iri, _, _)| iri)
-                .collect(),
-            uses_iris: self
-                .document_references()
-                .into_iter()
-                .map(|(iri, _)| iri)
-                .collect(),
+/// An internal document that has no semantic analysis. Just text and syntax tree.
+#[derive(Debug)]
+struct ParsedDocument {
+    /// File location
+    path: PathBuf,
+    /// URL and location where this document was loaded from
+    uri: Url,
+    version: i32,
+    tree: Tree,
+    rope: Rope,
+}
+
+impl Hash for ParsedDocument {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
+        self.uri.hash(state);
+        Hash::hash(&self.version, state);
+    }
+}
+
+impl From<ParsedDocument> for QueriedDocument {
+    fn from(val: ParsedDocument) -> Self {
+        debug!("ParsedDocument -> QueriedDocument");
+        let ontology_id = val.ontology_id();
+        let prefixes = val.prefixes();
+        let imports = val.imports();
+
+        QueriedDocument {
+            path: val.path.clone(),
+            uri: val.uri.clone(),
+            version: val.version,
+            parsed_document: val,
+            ontology_id,
+            prefixes,
+            imports,
         }
     }
+}
 
+/// This acts the same way as ``node_by_id`` but for all nodes
+pub fn node_by_id_map(tree: &Tree) -> HashMap<usize, Node<'_>> {
+    let mut res = HashMap::new();
+    let mut w = tree.walk();
+    'outer: loop {
+        res.insert(w.node().id(), w.node());
+
+        // In order traversal
+        if !w.goto_first_child() {
+            while !w.goto_next_sibling() {
+                if !w.goto_parent() {
+                    break 'outer;
+                }
+            }
+        }
+    }
+    res
+}
+
+fn node_by_id(parsed_document: &ParsedDocument, id: usize) -> Option<Node<'_>> {
+    let mut w = parsed_document.tree.walk();
+    loop {
+        if w.node().id() == id {
+            return Some(w.node());
+        }
+
+        // In order traversal
+        if !w.goto_first_child() {
+            while !w.goto_next_sibling() {
+                if !w.goto_parent() {
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+impl ParsedDocument {
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
         query_helper(self, query, None)
     }
@@ -1322,13 +1333,18 @@ impl Stage1Document {
         query_helper(self, query, Some(range))
     }
 
-    pub fn ontology_id(&self) -> Option<String> {
+    /// Returns the ontology IRI if possible and the version IRI if possible.
+    pub fn ontology_id(&self) -> Option<(String, Option<String>)> {
         match &self.query(&ALL_QUERIES.ontology)[..] {
             [] => None,
             [ontology] => match &ontology.captures[..] {
                 [] => None,
                 // This should be a full IRI so lets trim it
-                [iri] => Some(trim_full_iri(iri.node.text.clone())),
+                [iri] => Some((trim_full_iri(iri.node.text.clone()), None)),
+                [iri, version_iri] => Some((
+                    trim_full_iri(iri.node.text.clone()),
+                    Some(trim_full_iri(version_iri.node.text.clone())),
+                )),
                 _ => unreachable!("The query has only one capture"),
             },
             _ => unreachable!("the grammar only parses ontology zero or one time"),
@@ -1365,147 +1381,6 @@ impl Stage1Document {
             .collect()
     }
 
-    fn document_all_frame_infos(&self) -> HashMap<Iri, FrameInfo> {
-        let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
-
-        // First we collect the annotations
-        for frame_info in
-            self.document_annotations()
-                .into_iter()
-                .map(|(frame_iri, annotation_iri, literal)| FrameInfo {
-                    iri: frame_iri.clone(),
-                    annotations: HashMap::from([(annotation_iri, vec![literal])]),
-                    frame_type: FrameType::Unknown,
-                    definitions: Vec::new(),
-                })
-        {
-            if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
-                // Merge the frame info for the same IRI
-                frame_info_mut.extend(frame_info);
-            } else {
-                frame_infos.insert(frame_info.iri.clone(), frame_info);
-            }
-        }
-
-        // Second we collect the location and frame type (definitions)
-        for frame_info in self
-            .document_definitions()
-            .into_iter()
-            .map(|(frame_iri, range, kind)| FrameInfo {
-                iri: frame_iri.clone(),
-                annotations: HashMap::new(),
-                frame_type: FrameType::parse(&kind),
-                definitions: vec![Location {
-                    uri: Url::from_file_path(&self.path)
-                        .expect("Filepath should be convertable to URL"),
-                    range,
-                }],
-            })
-        {
-            if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
-                // Merge the frame info for the same IRI
-                frame_info_mut.extend(frame_info);
-            } else {
-                frame_infos.insert(frame_info.iri.clone(), frame_info);
-            }
-        }
-
-        frame_infos
-    }
-
-    fn document_annotations(&self) -> Vec<(String, String, String)> {
-        self.query(&ALL_QUERIES.annotation_query)
-            .iter()
-            .map(|m| match &m.captures[..] {
-                [frame_iri, annotation_iri, literal] => {
-                    let iri = trim_full_iri(frame_iri.node.text.clone());
-                    let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-                    let iri = trim_full_iri(annotation_iri.node.text.clone());
-                    let annotation_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-                    let literal = trim_string_value(&literal.node.text);
-
-                    (frame_iri, annotation_iri, literal)
-                }
-                _ => unreachable!(),
-            })
-            .collect_vec()
-    }
-
-    fn document_definitions(&self) -> Vec<(String, Range, String)> {
-        self.query(&ALL_QUERIES.frame_query)
-            .iter()
-            .map(|m| match &m.captures[..] {
-                [frame_iri, frame] => {
-                    let iri = trim_full_iri(frame_iri.node.text.clone());
-                    let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-
-                    (frame_iri, frame.node.range, frame.node.kind.clone())
-                }
-                _ => unreachable!(),
-            })
-            .collect()
-    }
-
-    fn document_references(&self) -> Vec<(String, Range)> {
-        self.query(&ALL_QUERIES.iri_query)
-            .iter()
-            .map(|m| match &m.captures[..] {
-                [iri_capture] => {
-                    let iri = trim_full_iri(iri_capture.node.text.clone());
-                    let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-
-                    (iri, iri_capture.node.range)
-                }
-                _ => unreachable!(),
-            })
-            .collect()
-    }
-
-    pub fn abbreviated_iri_to_full_iri(&self, abbreviated_iri: &str) -> Option<String> {
-        let prefixes = self.prefixes();
-        if let Some((prefix, simple_iri)) = abbreviated_iri.split_once(':') {
-            prefixes
-                .get(prefix)
-                .map(|resolved_prefix| resolved_prefix.clone() + simple_iri)
-        } else {
-            // Simple IRIs get a free colon prepended
-            // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
-            prefixes
-                .get("")
-                .map(|resolved_prefix| resolved_prefix.clone() + abbreviated_iri)
-        }
-    }
-
-    /// Finds flat references to other document URL's in this document
-    pub fn reachable_urls(&self) -> Vec<Url> {
-        let imports = self
-            .imports()
-            .iter()
-            .filter_map(|iri| Url::parse(iri).ok())
-            .collect_vec();
-
-        let prefixes = self
-            .prefixes()
-            .into_iter()
-            // Filter out the empty prefix ":"
-            .filter_map(|(prefix, url)| if prefix.is_empty() { None } else { Some(url) })
-            .filter_map(|url| Url::parse(&url).ok())
-            // Filter out the current document as a prefix (most likely the empty prefix ":")
-            .filter(|url| url != &self.uri)
-            .map(|url| {
-                // Remove fragments from prefixes
-                if url.fragment().is_some() {
-                    let mut url = url.clone();
-                    url.set_fragment(Some(""));
-                    url
-                } else {
-                    url
-                }
-            });
-
-        imports.into_iter().chain(prefixes).unique().collect_vec()
-    }
-
     pub fn imports(&self) -> Vec<Iri> {
         self.query(&ALL_QUERIES.import_query)
             .iter()
@@ -1532,7 +1407,7 @@ impl Stage1Document {
      } "#
 )]
 fn query_helper(
-    stage1: &Stage1Document,
+    stage1: &ParsedDocument,
     query: &Query,
     range: Option<Range>,
 ) -> Vec<UnwrappedQueryMatch> {
@@ -1565,6 +1440,205 @@ fn query_helper(
         .collect_vec()
 }
 
+#[derive(Debug)]
+struct QueriedDocument {
+    /// File location
+    path: PathBuf,
+    /// URL and location where this document was loaded from
+    uri: Url,
+    version: i32,
+    parsed_document: ParsedDocument,
+
+    ontology_id: Option<(Iri, Option<Iri>)>,
+    prefixes: HashMap<String, Iri>,
+    imports: Vec<Iri>,
+}
+
+impl QueriedDocument {
+    /// Finds flat references to other document URL's in this document
+    pub fn reachable_urls(&self) -> (Vec<Url>, Vec<Url>) {
+        let imports = self
+            .imports
+            .iter()
+            .filter_map(|iri| Url::parse(iri).ok())
+            .collect_vec();
+
+        let prefixes = self
+            .prefixes
+            .iter()
+            // Filter out the empty prefix ":"
+            .filter_map(|(prefix, url)| if prefix.is_empty() { None } else { Some(url) })
+            .filter_map(|url| Url::parse(url).ok())
+            // Filter out the current document as a prefix (most likely the empty prefix ":")
+            .filter(|url| url != &self.uri)
+            .map(|url| {
+                // Remove fragments from prefixes
+                if url.fragment().is_some() {
+                    let mut url = url.clone();
+                    url.set_fragment(Some(""));
+                    url
+                } else {
+                    url
+                }
+            })
+            .collect_vec();
+
+        (imports, prefixes)
+    }
+
+    pub fn abbreviated_iri_to_full_iri(&self, abbreviated_iri: &str) -> Option<String> {
+        let prefixes = &self.prefixes;
+        if let Some((prefix, simple_iri)) = abbreviated_iri.split_once(':') {
+            prefixes
+                .get(prefix)
+                .map(|resolved_prefix| resolved_prefix.clone() + simple_iri)
+        } else {
+            // Simple IRIs get a free colon prepended
+            // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
+            prefixes
+                .get("")
+                .map(|resolved_prefix| resolved_prefix.clone() + abbreviated_iri)
+        }
+    }
+
+    fn document_all_frame_infos<'a>(
+        &self,
+        definitions: impl Iterator<Item = &'a IriDefinition>,
+    ) -> HashMap<Iri, FrameInfo> {
+        let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
+
+        // First we collect the annotations
+        for frame_info in
+            self.document_annotations()
+                .into_iter()
+                .map(|(frame_iri, annotation_iri, literal)| FrameInfo {
+                    iri: frame_iri.clone(),
+                    annotations: HashMap::from([(annotation_iri, vec![literal])]),
+                    frame_type: FrameType::Unknown,
+                    definitions: Vec::new(),
+                })
+        {
+            if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
+                // Merge the frame info for the same IRI
+                frame_info_mut.extend(frame_info);
+            } else {
+                frame_infos.insert(frame_info.iri.clone(), frame_info);
+            }
+        }
+
+        // Second we collect the location and frame type (definitions)
+        for frame_info in definitions.map(|definiton| FrameInfo {
+            iri: definiton.iri.clone(),
+            annotations: HashMap::new(),
+            frame_type: definiton.kind,
+            definitions: vec![definiton.location.clone()],
+        }) {
+            if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
+                // Merge the frame info for the same IRI
+                frame_info_mut.extend(frame_info);
+            } else {
+                frame_infos.insert(frame_info.iri.clone(), frame_info);
+            }
+        }
+
+        frame_infos
+    }
+
+    fn document_annotations(&self) -> Vec<(String, String, String)> {
+        self.parsed_document
+            .query(&ALL_QUERIES.annotation_query)
+            .iter()
+            .map(|m| match &m.captures[..] {
+                [frame_iri, annotation_iri, literal] => {
+                    let iri = trim_full_iri(frame_iri.node.text.clone());
+                    let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                    let iri = trim_full_iri(annotation_iri.node.text.clone());
+                    let annotation_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                    let literal = trim_string_value(&literal.node.text);
+
+                    (frame_iri, annotation_iri, literal)
+                }
+                _ => unreachable!(),
+            })
+            .collect_vec()
+    }
+
+    fn document_definitions(&self) -> Vec<IriDefinition> {
+        let node_by_id = node_by_id_map(&self.parsed_document.tree);
+        self.parsed_document
+            .query(&ALL_QUERIES.frame_query)
+            .iter()
+            .map(|m| match &m.captures[..] {
+                [frame_iri, frame] => {
+                    let iri = trim_full_iri(frame_iri.node.text.clone());
+                    let frame_node_id = frame_iri.node.id;
+                    let iri_parent_kind = node_by_id
+                        .get(&frame_node_id)
+                        .expect("Node id must be valid after query")
+                        .parent()
+                        .expect("All frame IRIs should have paretns")
+                        .kind();
+                    let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+
+                    IriDefinition {
+                        iri: frame_iri,
+                        location: Location {
+                            uri: Url::from_file_path(&self.path)
+                                .expect("Path should be valid file URL"),
+                            range: frame.node.range,
+                        },
+                        kind: FrameType::parse(iri_parent_kind),
+                    }
+                }
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn document_references(&self) -> Vec<(String, Range)> {
+        self.parsed_document
+            .query(&ALL_QUERIES.iri_query)
+            .iter()
+            .map(|m| match &m.captures[..] {
+                [iri_capture] => {
+                    let iri = trim_full_iri(iri_capture.node.text.clone());
+                    let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+
+                    (iri, iri_capture.node.range)
+                }
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn analyze(&self) -> Stage2Document {
+        debug!("QueriedDocument -> Stage2Document");
+
+        let references = timeit("references", || self.document_references());
+        let definitions = timeit("definitions", || self.document_definitions());
+
+        // Find iri locations
+        let mut iri_locations: HashMap<String, Vec<Range>> = HashMap::new();
+        for (iri, range) in &references {
+            iri_locations.entry(iri.clone()).or_default().push(*range);
+        }
+
+        Stage2Document {
+            all_frame_infos: timeit("all frame infos", || {
+                self.document_all_frame_infos(definitions.iter())
+            }),
+            local_diagnostics: timeit("syntax errors", || syntax_errors(&self.parsed_document)),
+            directly_reachable_urls: timeit("reachable urls", || self.reachable_urls()),
+            iri_locations,
+            references: references.into_iter().map(|(iri, _)| iri).collect(),
+            definitions: definitions
+                .into_iter()
+                .map(|IriDefinition { iri, .. }| iri)
+                .collect(),
+        }
+    }
+}
+
 /// Returns the word before the [`character`] position in the [`line`]
 pub fn word_before_character(byte_index: usize, line: &str) -> String {
     line.get(..byte_index)
@@ -1586,7 +1660,18 @@ pub struct ExternalDocument {
     pub uri: Url,
     pub text: String,
     pub graph: InfoGraph,
+    reachable_urls: Vec<Url>,
+    imports: Vec<Url>,
+    definitions: HashSet<Iri>,
 }
+
+impl PartialEq for ExternalDocument {
+    fn eq(&self, other: &Self) -> bool {
+        self.uri == other.uri
+    }
+}
+
+impl Eq for ExternalDocument {}
 
 #[derive(Debug)]
 pub struct InfoGraph(LightGraph, GraphName);
@@ -1598,7 +1683,7 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
         let mut graph = LightGraph::new();
 
         let ontology_iri = &value.iter().find_map(|ac| match &ac.component {
-            horned_owl::model::Component::OntologyID(horned_owl::model::OntologyID {
+            Component::OntologyID(horned_owl::model::OntologyID {
                 iri: Some(id),
                 viri: _,
             }) => Some(SimpleTerm::Iri(IriRef::new(MownStr::from_ref(id)).unwrap())),
@@ -1651,7 +1736,7 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
                         // TODO support anonymous individual
                     }
                 },
-                horned_owl::model::Component::Import(horned_owl::model::Import(iri)) => {
+                Component::Import(horned_owl::model::Import(iri)) => {
                     if let Some(subject) = ontology_iri {
                         let predicate = SimpleTerm::Iri(IriRef::new_unchecked(MownStr::from_ref(
                             "http://www.w3.org/2002/07/owl#imports",
@@ -1663,6 +1748,28 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
                             .insert(subject, predicate, object)
                             .expect("graph should not be full");
                     }
+                }
+                Component::DeclareClass(DeclareClass(horned_owl::model::Class(iri)))
+                | Component::DeclareDatatype(DeclareDatatype(Datatype(iri)))
+                | Component::DeclareObjectProperty(DeclareObjectProperty(ObjectProperty(iri)))
+                | Component::DeclareAnnotationProperty(DeclareAnnotationProperty(
+                    AnnotationProperty(iri),
+                ))
+                | Component::DeclareDataProperty(DeclareDataProperty(DataProperty(iri)))
+                | Component::DeclareNamedIndividual(DeclareNamedIndividual(NamedIndividual(iri))) =>
+                {
+                    let subject = SimpleTerm::Iri(
+                        IriRef::new(MownStr::from_ref(iri)).expect("Class IRI should be valid IRI"),
+                    );
+                    let predicate =
+                        SimpleTerm::Iri(IriRef::new_unchecked(MownStr::from_ref(IRI_RDF_TYPE)));
+
+                    let object = SimpleTerm::Iri(IriRef::new_unchecked(MownStr::from_ref(
+                        "http://www.w3.org/2002/07/owl#Class",
+                    )));
+                    graph
+                        .insert(subject, predicate, object)
+                        .expect("graph should not be full");
                 }
                 _ => (),
             }
@@ -1676,6 +1783,8 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
         Self(graph, graph_name)
     }
 }
+
+const IRI_RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 
 impl Hash for ExternalDocument {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -1699,10 +1808,20 @@ impl ExternalDocument {
                 debug!("try rdf...");
                 ExternalDocument::try_parse_owx(&text, &builder)
             })
-            .map(|graph| ExternalDocument {
-                graph,
-                text,
-                uri: url,
+            .map(|graph| {
+                let imports = ExternalDocument::gen_imports(&graph).collect_vec();
+
+                let reachable_urls =
+                    ExternalDocument::gen_reachable_urls(&url, &graph, &imports).collect_vec();
+
+                ExternalDocument {
+                    reachable_urls,
+                    definitions: ExternalDocument::gen_definitions(&graph),
+                    imports,
+                    graph,
+                    text,
+                    uri: url,
+                }
             });
 
         if let Ok(doc) = &doc {
@@ -1743,8 +1862,8 @@ impl ExternalDocument {
         Ok(graph)
     }
 
-    fn imports(&self) -> Box<dyn Iterator<Item = Url> + '_> {
-        let graph = &self.graph.0;
+    fn gen_imports(graph: &InfoGraph) -> Box<dyn Iterator<Item = Url> + '_> {
+        let graph = &graph.0;
 
         // `graph.triples_matching` will exceed the stack size (Stack Overflow) on large graphs
         let iris = graph
@@ -1761,12 +1880,42 @@ impl ExternalDocument {
         Box::new(iris)
     }
 
+    pub fn imports(&self) -> &Vec<Url> {
+        &self.imports
+    }
+
+    pub fn definitions(&self) -> &HashSet<Iri> {
+        debug!("Definitions of {} are {:#?}", self.uri, self.definitions);
+        &self.definitions
+    }
+
+    pub fn gen_definitions(graph: &InfoGraph) -> HashSet<Iri> {
+        let mut hash_set = HashSet::new();
+        graph
+            .0
+            .triples()
+            .flatten()
+            .filter_map(|[s, p, o]| {
+                p.iri().map(|iri| {
+                    debug!("{s:?} {iri:?} {o:?}");
+                    if let Some(subject_iri) = s.iri() {
+                        if iri.as_str() == IRI_RDF_TYPE {
+                            hash_set.insert(subject_iri.as_str().to_string());
+                        }
+                    }
+                })
+            })
+            .collect_vec();
+        hash_set
+    }
+
     // Because external documents most likely relate to other external ones and because there are many of them in a graph the depth should be limited
     fn reachable_docs_recursive_helper(
         &self,
         workspace: &Workspace,
         result: &mut HashSet<Url>,
         depth: u32,
+        include_prefix: bool,
     ) -> Result<()> {
         if depth >= 1 {
             // Do nothing max depth reached
@@ -1782,8 +1931,8 @@ impl ExternalDocument {
         result.insert(self.uri.clone());
 
         // TODO shitty child urls :<
-        let docs = urls.filter_map(|url| {
-            workspace.document_by_url(&url)
+        let docs = urls.iter().filter_map(|url| {
+            workspace.document_by_url(url)
             // TODO maybe reactivate but for now lets not log here
             // .ok_or(Error::DocumentNotLoaded(url.clone()))
             // Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
@@ -1794,10 +1943,19 @@ impl ExternalDocument {
         for doc in docs {
             match doc {
                 DocumentReference::Internal(internal_document) => {
-                    internal_document.reachable_docs_recursive_helper(result, workspace)?;
+                    internal_document.reachable_docs_recursive_helper(
+                        result,
+                        workspace,
+                        include_prefix,
+                    )?;
                 }
                 DocumentReference::External(external_document) => {
-                    external_document.reachable_docs_recursive_helper(workspace, result, 0)?;
+                    external_document.reachable_docs_recursive_helper(
+                        workspace,
+                        result,
+                        0,
+                        include_prefix,
+                    )?;
                 }
             }
         }
@@ -1805,12 +1963,13 @@ impl ExternalDocument {
         Ok(())
     }
 
-    pub fn reachable_urls(&self) -> Box<dyn Iterator<Item = Url> + '_> {
-        let imports = self.imports();
-
+    fn gen_reachable_urls<'a>(
+        uri: &'a Url,
+        graph: &'a InfoGraph,
+        imports: &'a [Url],
+    ) -> Box<dyn Iterator<Item = Url> + 'a> {
         // TODO this is not that stable yet
-        let child_urls = self
-            .graph
+        let child_urls = graph
             .0
             .iris()
             .filter_map(std::result::Result::ok)
@@ -1821,13 +1980,17 @@ impl ExternalDocument {
             .filter(|url| {
                 // This should be faster than url.make_relative, because url contains a serialized version
                 !url.to_string()
-                    .starts_with(self.uri.to_string().trim_end_matches('#'))
+                    .starts_with(uri.to_string().trim_end_matches('#'))
             })
-            .filter(|url| !url.to_string().contains(&self.graph.1))
+            .filter(|url| !url.to_string().contains(&graph.1))
             .map(iri_to_onology_url)
             .unique();
 
-        Box::new(imports.into_iter().chain(child_urls).unique())
+        Box::new(imports.iter().cloned().chain(child_urls).unique())
+    }
+
+    pub fn reachable_urls(&self) -> &Vec<Url> {
+        &self.reachable_urls
     }
 
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
@@ -1938,7 +2101,7 @@ pub struct FrameInfo {
     pub definitions: Vec<Location>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Location {
     pub uri: Url,
     pub range: Range,
@@ -1985,8 +2148,8 @@ impl FrameInfo {
     const LABEL_IRI: &'static str = "http://www.w3.org/2000/01/rdf-schema#label";
 
     pub fn label(&self) -> Option<String> {
-        self.annotation_display(FrameInfo::LABEL_IRI)
-    }
+    self.annotation_display(FrameInfo::LABEL_IRI)
+}
 
     pub fn annotation_display(&self, iri: &str) -> Option<String> {
         self.annotations
@@ -2106,7 +2269,7 @@ pub fn node_text(node: &Node, rope: &Rope) -> String {
 }
 
 /// Generate the diagnostics for a single node, walking recursively down to every child and every syntax error within
-fn syntax_errors(stage1: &Stage1Document) -> Vec<Diagnostic> {
+fn syntax_errors(stage1: &ParsedDocument) -> Vec<Diagnostic> {
     let mut cursor = stage1.tree.root_node().walk();
     let mut diagnostics = Vec::<Diagnostic>::new();
 
@@ -2173,25 +2336,63 @@ fn syntax_errors(stage1: &Stage1Document) -> Vec<Diagnostic> {
     }
 }
 
-/// Generate the diagnostics for a single node, walking recursively down to every child and every syntax error within
-fn semantic_errors(doc: &InternalDocument) -> Vec<Diagnostic> {
+fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    // let declarations = stage1.declarations();
-    // let definitions = stage1.document_definitions();
-    // let Some(_) = stage.ontology_id() else {
-    //     error!("No ontology ID");
-    //     return diagnostics;
-    // };
+    let uses: &HashSet<Iri> = &doc.stage2.references;
 
-    let uses = &doc.stage2.uses_iris;
-    let defines = &doc.stage2.defines_iris;
+    let mut defines: HashSet<String> = doc.stage2.definitions.clone();
 
-    // TODO recurse the imports
+    let imports_recursive = timeit("semantic errors  reachable", || {
+        // This takes the longes :<
+        doc.reachable_docs_recursive(workspace, false)
+    });
+    debug!("Imports recursive {} {:#?}", doc.uri, imports_recursive);
 
-    for diff in uses.difference(defines) {
-        debug!("Diff: {diff}");
-        // TODO generate diagnostics from diff
+    for url in imports_recursive {
+        if let Some(doc) = workspace.document_by_url(&url) {
+            match doc {
+                DocumentReference::Internal(internal_document) => {
+                    defines.extend(internal_document.stage2.definitions.clone());
+                }
+                DocumentReference::External(external_document) => {
+                    defines.extend(external_document.definitions().clone());
+                }
+            }
+        }
+    }
+
+    // TODO this is a quick fix for now. The correct way will be not not include prefixes in the used Iris
+    let prefixes: HashSet<&Iri> = doc.queried_document.prefixes.values().collect();
+    let imports = &doc.queried_document.imports;
+
+    let ontology_id = &doc.queried_document.ontology_id;
+
+    for diff in uses
+        .difference(&defines)
+        .filter(|iri| !prefixes.contains(*iri))
+        .filter(|iri| !imports.contains(*iri))
+    {
+        // Skip ontology and version IRIs
+        if let Some((iri, version)) = &ontology_id {
+            if diff == iri {
+                continue;
+            }
+            if let Some(version) = version {
+                if diff == version {
+                    continue;
+                }
+            }
+        }
+
+        if let Some(vec) = doc.stage2.iri_locations.get(diff) {
+            for ele in vec {
+                diagnostics.push(Diagnostic {
+                    range: *ele,
+                    label: format!("Iri {diff} used but not defined"),
+                });
+            }
+        }
     }
 
     diagnostics
@@ -2214,7 +2415,7 @@ fn capitalize_string(s: &str) -> String {
 }
 
 /// taken from <https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing>
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug, Hash)]
 pub enum FrameType {
     Class,
     DataType,
@@ -2518,18 +2719,15 @@ fn frame_to_doc(node: &Node, rope: &Rope, tab_size: u32, nest_depth: isize) -> R
         .group()
 }
 
-#[cached(
-    time = 5,
-    key = "u64",
-    convert = r#"{
-        let mut hasher = DefaultHasher::new();
-        doc.hash(&mut hasher);
-        hasher.finish()
-     } "#
-)]
-fn reachable_docs_recursive_cached(doc: &InternalDocument, workspace: &Workspace) -> Vec<Url> {
+// This can not be cached, because some dependencies are maybe not loaded.
+// Therefore the result could change indepenent of the document.
+fn reachable_docs_recursive_cached(
+    doc: &InternalDocument,
+    workspace: &Workspace,
+    include_prefix: bool,
+) -> Vec<Url> {
     let mut set: HashSet<Url> = HashSet::new();
-    doc.reachable_docs_recursive_helper(&mut set, workspace)
+    doc.reachable_docs_recursive_helper(&mut set, workspace, include_prefix)
         .log_if_error();
     set.into_iter().collect_vec()
 }
@@ -2846,7 +3044,7 @@ mod tests {
         .unwrap();
 
         // Act
-        let urls = external_doc.imports().collect_vec();
+        let urls = external_doc.imports();
 
         // Assert
         assert!(urls.contains(&Url::parse("http://www.example.com/other-property").unwrap()));

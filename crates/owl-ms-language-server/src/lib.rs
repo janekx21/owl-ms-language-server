@@ -19,7 +19,8 @@ use itertools::Itertools;
 use log::{debug, error, info, warn};
 use pos::Position;
 use range::Range;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, LinkedList};
+use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::{OnceCell, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::{self};
@@ -28,19 +29,19 @@ use tower_lsp::jsonrpc::Result;
 #[allow(clippy::wildcard_imports)]
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
-use tower_lsp::lsp_types::lsif::Edge::Diagnostic;
 use tree_sitter_c2rust::Language;
-use workspace::{node_text, trim_full_iri,  Workspace};
+use workspace::{node_text, trim_full_iri, Workspace};
 
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
-use crate::workspace::InternalDocument;
+use crate::workspace::{Document, DocumentReference, InternalDocument};
 // Constants
 
 pub static LANGUAGE: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_ms::LANGUAGE.into());
 
 // Model
 
+#[derive(Clone)]
 pub struct Backend {
     pub client: Client,
     pub http_client: Arc<dyn HttpClient>,
@@ -61,6 +62,154 @@ impl Backend {
             position_encoding: OnceCell::new(),
             sync: Arc::new(RwLock::new(SyncBackend::default())),
         }
+    }
+
+    /// Take a document with the profided file url and generate diagnostics for it.
+    /// Then do the same thing with documents that depend on this one.
+    /// # Panics
+    /// If an documents path is not convertable into an URL
+    pub fn update_diagnostics_for_url_and_dependent(&self, file_url: Url) {
+        let mini_backend = self.clone();
+
+        task::spawn(async move {
+            let encoding = mini_backend.encoding();
+            let sync = mini_backend.sync.read().await;
+
+            // So my error type is not send and terefore we need the conversion to ok()
+            #[allow(clippy::match_result_ok)]
+            if let Some((document, workspace)) = sync.get_internal_document(&file_url).ok() {
+                document
+                    .publish_lsp_diagnostics(workspace, encoding, &mini_backend.client)
+                    .await;
+
+                // Create diagnostics for files that depend on this file
+                for other_internal_doc in workspace.internal_documents() {
+                    let depends_on_me = other_internal_doc.reachable_urls(false).iter().any(|u| {
+                        workspace.document_by_url(u) == Some(DocumentReference::Internal(document))
+                    });
+
+                    if depends_on_me {
+                        mini_backend.update_diagnostics_for_url_and_dependent(
+                            Url::from_file_path(&other_internal_doc.path)
+                                .expect("Document path should be convertable into file url"),
+                        );
+                    }
+                }
+            }
+        });
+    }
+
+    /// Loads all documents that can be reached by this internal document path
+    /// # Panics
+    /// When the path is not a file path
+    pub fn load_dependencies(&self, path: &Path) -> tokio::task::JoinHandle<()> {
+        let mini_backend = self.clone();
+        let path = path.to_owned();
+        tokio::spawn(async move {
+            let mut todo: LinkedList<(Url, u32)> = {
+                let sync = mini_backend.sync.read().await;
+                let workspace = sync
+                    .get_workspace(
+                        &Url::from_file_path(&path)
+                            .expect("File path should be convertable to URL"),
+                    )
+                    .expect("Workspace for document should exist");
+
+                let document = workspace.get_internal_document(&path).unwrap();
+                document
+                    .reachable_urls(true)
+                    .iter()
+                    .map(|u| (u.clone(), 1))
+                    .collect()
+            };
+
+            let mut done = HashSet::<Url>::new();
+
+            debug!(
+                "Loading dependencies of {} len = {}",
+                path.display(),
+                todo.len()
+            );
+
+            while let Some((url, depth)) = todo.pop_front() {
+                debug!("Indexing {url} ...");
+                if done.contains(&url) {
+                    debug!("URL {url} was indexed. Skip");
+                    continue;
+                }
+                if depth > 2 {
+                    debug!("Depth {depth} exceeded 2 for {url}. Skip");
+                    continue;
+                }
+
+                let resolved_doc = {
+                    let sync = mini_backend.sync.read().await;
+                    let workspace = sync
+                        .get_workspace(
+                            &Url::from_file_path(&path)
+                                .expect("File path should be convertable to URL"),
+                        )
+                        .expect("Workspace for document should exist");
+
+                    // TODO well the Error is not Send. That's why we convert to Option
+                    Workspace::resolve_url_to_document(
+                        workspace,
+                        &url,
+                        mini_backend.http_client.clone(),
+                    )
+                    .await
+                    .ok()
+                };
+
+                let resolved_doc = if let Some(resolved_doc) = resolved_doc {
+                    resolved_doc
+                } else {
+                    warn!("Resolving {url} did not work");
+                    None
+                };
+
+                if let Some(doc) = resolved_doc {
+                    match doc {
+                        Document::Internal(internal_document) => {
+                            for ele in internal_document.reachable_urls(true) {
+                                todo.push_back((ele.clone(), 1));
+                            }
+                            let file_url = Url::from_file_path(&internal_document.path)
+                                .expect("Path should also be a Url");
+                            {
+                                let mut sync = mini_backend.sync.write().await;
+                                let workspace = sync.get_or_insert_workspace_mut(
+                                    &Url::from_file_path(&path)
+                                        .expect("File path should be convertable to URL"),
+                                );
+                                workspace.insert_internal_document(internal_document);
+                            }
+
+                            mini_backend.update_diagnostics_for_url_and_dependent(file_url);
+                        }
+                        Document::External(external_document) => {
+                            // TODO maybe remove this?
+                            // Lets not do that yet
+                            for ele in external_document.reachable_urls() {
+                                todo.push_back((ele.clone(), depth + 1));
+                            }
+                            {
+                                let mut sync = mini_backend.sync.write().await;
+                                let workspace = sync.get_or_insert_workspace_mut(
+                                    &Url::from_file_path(&path)
+                                        .expect("File path should be convertable to URL"),
+                                );
+                                workspace.insert_external_document(external_document);
+                            }
+                        }
+                    }
+                } else {
+                    // The doc is already resolved
+                }
+
+                done.insert(url);
+            }
+        })
     }
 }
 
@@ -187,52 +336,26 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         async {
-            let url = params.text_document.uri;
-            info!("Did open {url} ...",);
+            let file_url = params.text_document.uri;
+            info!("Did open {file_url} ...",);
 
             let mut sync = self.write_sync().await;
 
-            let workspace = sync.get_or_insert_workspace_mut(&url);
+            let workspace = sync.get_or_insert_workspace_mut(&file_url);
             let internal_document = InternalDocument::new(
-                url.clone(),
+                file_url.clone(),
                 params.text_document.version,
                 params.text_document.text,
             );
 
-            let diagnostics = internal_document
-                .diagnostics()
-                .iter()
-                .map(|workspace::Diagnostic{range, label}| {
-                    Ok(lsp_types::Diagnostic {
-                        range: range.into_lsp(internal_document.rope(), self.encoding())?,
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        code: None,
-                        code_description: None,
-                        source: Some("owl language server".to_string()),
-                        message: label.clone(),
-                        related_information: None,
-                        tags: None,
-                        data: None,
-                    })
-                })
-                .filter_and_log()
-                .collect_vec();
-
-            let client = self.client.clone();
-            let url_cloned = url.clone();
-
-            client
-                .publish_diagnostics(url_cloned, diagnostics, Some(internal_document.version))
-                .await;
-
             let doc = workspace.insert_internal_document(internal_document);
             let path = doc.path.clone();
 
-            let handle = InternalDocument::load_dependencies(&path, &self.sync, &self.http_client);
+            let handle = self.load_dependencies(&path);
 
             #[cfg(test)]
             {
-                // TODO is this fine?
+                // This is just for tests, so that they dont produce a race condition
                 drop(sync);
                 handle.await.unwrap();
             }
@@ -240,6 +363,8 @@ impl LanguageServer for Backend {
             {
                 workspace.index_handles.push(handle);
             }
+
+            self.update_diagnostics_for_url_and_dependent(file_url);
 
             debug!("Did open!");
 
@@ -265,38 +390,17 @@ impl LanguageServer for Backend {
 
             let url = params.text_document.uri.clone();
 
+            // Do the document edit
             let mut sync = self.write_sync().await;
             let (document, workspace) = sync.take_internal_document(&url)?;
 
             let new_document = timeit("document.edit", || document.edit(&params, self.encoding()))?;
 
-            let document = workspace.insert_internal_document(new_document);
+            workspace.insert_internal_document(new_document);
 
-            let diagnostics = document
-                .diagnostics()
-                .iter()
-                .map(|workspace::Diagnostic{range, label}| {
-                    Ok(lsp_types::Diagnostic {
-                        range: range.into_lsp(document.rope(), self.encoding())?,
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        code: None,
-                        code_description: None,
-                        source: Some("owl language server".to_string()),
-                        message: label.clone(),
-                        related_information: None,
-                        tags: None,
-                        data: None,
-                    })
-                })
-                .filter_and_log()
-                .collect_vec();
-
+            // TODO make this join handle one of a kind maybe. So no two diagnostics threads at the same time.
             // Async diagnostics
-            let client = self.client.clone();
-            let version = Some(document.version);
-            task::spawn(async move {
-                client.publish_diagnostics(url, diagnostics, version).await;
-            });
+            self.update_diagnostics_for_url_and_dependent(url);
 
             Ok(())
         }
@@ -324,17 +428,6 @@ impl LanguageServer for Backend {
         // We do not close yet :> because of refences
         // TODO should data be deleted if a file is closed?
     }
-
-    // async fn did_save(&self, params: DidSaveTextDocumentParams) {
-    //     let sync = self.read_sync().await;
-    //     let Some(workspace) = sync.get_workspace(&params.text_document.uri) else {
-    //         warn!("Document not found {}", params.text_document.uri);
-    //         return;
-    //     };
-
-    //     workspace.diagnostic();
-    //     self.client.publish_diagnostics(uri, diags, version);
-    // }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         info!("formatting {params:#?}");
@@ -434,13 +527,14 @@ impl LanguageServer for Backend {
             .named_descendant_for_point_range(pos.into(), pos.into())
             .ok_or(Error::PositionOutOfBounds(pos))?;
 
+        let reachable_docs = doc.reachable_docs_recursive(workspace, true);
         if ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind()) {
             let iri = trim_full_iri(node_text(&leaf_node, doc.rope()));
             let iri = doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
             debug!("Try goto definition of {iri}");
 
-            let frame_info = Workspace::get_frame_info_recursive(workspace, &iri, doc);
+            let frame_info = Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs);
 
             if let Some(frame_info) = frame_info {
                 let locations = frame_info

@@ -111,6 +111,16 @@ impl HttpClient for UreqClient {
     }
 }
 
+/// This client is simply offline
+#[derive(Debug)]
+pub struct OfflineClient;
+
+impl HttpClient for OfflineClient {
+    fn get(&self, url: &str) -> Result<String> {
+        Err(Error::Web(url.to_string(), "You are offline"))
+    }
+}
+
 /// This is a simple URL to Path escape. Changing this will break the web cache.
 #[must_use]
 pub fn url_to_filename(url: &str) -> PathBuf {

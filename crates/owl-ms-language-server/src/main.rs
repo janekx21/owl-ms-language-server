@@ -1,6 +1,10 @@
 use clap::Parser as ClapParser;
 use log::error;
-use owl_ms_language_server::{debugging::init_logging, web::UreqClient, Backend};
+use owl_ms_language_server::{
+    debugging::init_logging,
+    web::{HttpClient, OfflineClient, UreqClient},
+    Backend,
+};
 use std::backtrace::Backtrace;
 use tower_lsp::{LspService, Server};
 
@@ -11,18 +15,24 @@ struct Args {
     /// Use stdin and stdout for communication
     #[arg(long, default_value_t = true)]
     stdio: bool,
+    #[arg(long, default_value_t = false)]
+    offline: bool,
 }
 
 #[tokio::main]
 async fn main() {
-    let _ = Args::parse();
+    let Args { offline, .. } = Args::parse();
 
     std::panic::set_hook(Box::new(|info| {
         let backtrace = Backtrace::force_capture();
         error!("paniced with backtrace:\n{backtrace}\n{info}");
     }));
 
-    let http_client = Box::new(UreqClient::default());
+    let http_client: Box<dyn HttpClient> = if offline {
+        Box::new(OfflineClient)
+    } else {
+        Box::new(UreqClient::default())
+    };
 
     let (service, socket) = LspService::new(|client| Backend::new(client, http_client));
 

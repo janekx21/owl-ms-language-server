@@ -1,4 +1,4 @@
-use log::{debug, warn};
+use log::warn;
 use tower_lsp::lsp_types::{Url, WorkspaceFolder};
 
 use crate::{
@@ -9,15 +9,7 @@ use crate::{
 #[derive(Default, Debug)]
 pub struct SyncBackend {
     workspaces: Vec<Workspace>,
-    // TODO hmmmmmmmmmmmm
-    // parsers: Parsers,
 }
-
-// #[derive(Default)]
-// pub struct Parsers {
-//     build: horned_owl::model::Build<ArcStr>,
-//     omn_parser: Parser,
-// }
 
 impl SyncBackend {
     pub fn push_workspace(&mut self, workspace: Workspace) {
@@ -27,10 +19,12 @@ impl SyncBackend {
     pub fn workspaces(&self) -> &Vec<Workspace> {
         &self.workspaces
     }
+    pub fn workspaces_mut(&mut self) -> &mut Vec<Workspace> {
+        &mut self.workspaces
+    }
 
     /// This will find a workspace or create one for a given url
     pub fn get_or_insert_workspace_mut(&mut self, url: &Url) -> &mut Workspace {
-        debug!("get or insert workspace");
         // TODO there are problems when the workspace is changing
         // - A document could be in its own workspace
         // - Then a catalog file is created or modified that would place a document in that workspace
@@ -65,7 +59,9 @@ impl SyncBackend {
 
     /// This will find a workspace or create one for a given url
     pub fn get_workspace(&self, url: &Url) -> Option<&Workspace> {
-        let path = url.to_file_path().unwrap(); // TODO
+        let path = url
+            .to_file_path()
+            .unwrap_or_else(|()| panic!("Url should be path but was {url}")); // TODO
 
         // TODO there are problems when the workspace is changing
         // - A document could be in its own workspace
