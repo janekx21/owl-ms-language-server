@@ -56,6 +56,7 @@ pub struct AllQueries {
     pub annotation_query: Query,
     pub frame_query: Query,
     pub prefix: Query,
+    pub ontology: Query,
 }
 
 // All queries are in one struct for easy testing. Invalid ones are detected by unit tests.
@@ -100,6 +101,13 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
         &LANGUAGE,
         "
             (prefix_declaration (prefix_name)@name (full_iri)@iri)
+        ",
+    )
+    .expect("valid query"),
+    ontology: Query::new(
+        &LANGUAGE,
+        "
+            (ontology iri: (_)@iri )
         ",
     )
     .expect("valid query"),
@@ -289,6 +297,24 @@ mod tests {
 
         // Act
         let q = &ALL_QUERIES.frame_query;
+        let matches = query_cursor.matches(q, tree.root_node(), text.as_bytes());
+
+        // Assert
+        assert_eq!(matches.count(), 1);
+    }
+
+    #[test]
+    fn query_ontology() {
+        // Arrange
+        let text = "
+            Ontology: OntologyID
+        ";
+        let mut parser_guard = lock_global_parser();
+        let tree = parser_guard.parse(text, None).expect("valid query");
+        let mut query_cursor = QueryCursor::new();
+
+        // Act
+        let q = &ALL_QUERIES.ontology;
         let matches = query_cursor.matches(q, tree.root_node(), text.as_bytes());
 
         // Assert
