@@ -467,12 +467,7 @@ fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
 }
 
 fn read_cached_doc(workspace: &Workspace, url: &Url) -> Result<Option<Document>> {
-    let workspace_path = workspace
-        .folder
-        .uri
-        .to_file_path()
-        .expect("Workspace folder path should be a file path");
-    let owl_dir = workspace_path.join(".owl");
+    let owl_dir = workspace.dot_folder_path();
     let web_cache = owl_dir.join("web_cache");
     let file_name = url_to_filename(url.as_ref());
 
