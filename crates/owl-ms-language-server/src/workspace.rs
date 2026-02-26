@@ -180,6 +180,11 @@ impl Workspace {
         self.folder.uri.make_relative(url).is_some()
     }
 
+    pub fn all_frame_infos(&self) -> impl Iterator<Item = &FrameInfo> {
+        self.internal_documents()
+            .flat_map(InternalDocument::all_frame_infos)
+    }
+
     // TODO #28 maybe return a reference?
     /// This searches in the frames of internal documents
     pub fn search_frame(&self, partial_text: &str) -> Vec<(String, Iri, FrameInfo)> {
@@ -187,7 +192,6 @@ impl Workspace {
             .values()
             .flat_map(|doc| {
                 doc.all_frame_infos()
-                    .iter()
                     .filter_map(|item| {
                         if item.iri.contains(partial_text) {
                             Some((item.iri.clone(), item.iri.clone(), item.clone()))
@@ -335,10 +339,10 @@ impl Workspace {
     // TODO can this be done without two calls?
     /// Resolves/Loads a URL (file or http/https protocol) to a document that is inserted into this workspace
     /// Locks workspace for read
-    pub fn resolve_url_to_document(
+    pub async fn resolve_url_to_document(
         workspace: &Workspace,
         url: &Url,
-        http_client: &dyn HttpClient,
+        http_client: Arc<dyn HttpClient>,
     ) -> Result<Option<Document>> {
         if workspace.document_by_url(url).is_some() {
             return Ok(None);
@@ -348,7 +352,15 @@ impl Workspace {
 
         let Some((catalog, catalog_uri)) = workspace.find_catalog_uri(url) else {
             warn!("Url {url} could not be found in any catalog");
-            let document_text = http_client.get(url.as_str())?;
+
+            let url_copy = url.clone();
+            let document_text = tokio::task::spawn_blocking(move || {
+                let result = http_client.get(url_copy.as_str());
+                result
+            })
+            .await
+            .expect("join should work")?;
+
             let document = ExternalDocument::new(document_text, url.clone())?;
             return Ok(Some(Document::External(document)));
         };
@@ -810,8 +822,8 @@ impl InternalDocument {
         self.stage2.all_frame_infos.get(iri).cloned()
     }
 
-    pub fn all_frame_infos(&self) -> Vec<FrameInfo> {
-        self.stage2.all_frame_infos.values().cloned().collect_vec()
+    pub fn all_frame_infos(&self) -> impl Iterator<Item = &FrameInfo> {
+        self.stage2.all_frame_infos.values()
     }
 
     pub fn try_keywords_at_position(&self, cursor: Position) -> Vec<String> {
@@ -1028,7 +1040,9 @@ impl InternalDocument {
                         .expect("Workspace for document should exsist");
 
                     // TODO well the Error is not Send. Thats why we convert to Option
-                    Workspace::resolve_url_to_document(workspace, &url, http_client.as_ref()).ok()
+                    Workspace::resolve_url_to_document(workspace, &url, http_client.clone())
+                        .await
+                        .ok()
                 };
 
                 let resolved_doc = if let Some(resolved_doc) = resolved_doc {
@@ -1579,16 +1593,14 @@ impl ExternalDocument {
     fn try_parse_owx(text: &str, builder: &Build<ArcStr>) -> Result<InfoGraph> {
         // let builder = lock_global_build_arc().await;
         let mut buffer = text.as_bytes();
-        horned_owl::io::owx::reader::read_with_build::<ArcStr, SetOntology<ArcStr>, _>(
-            &mut buffer,
-            builder,
-        )
-        .map_err(Error::HornedOwl)
-        .map(|(ontology, _)| {
-            let graph: InfoGraph = ontology.into();
+        let (ontology, _) = horned_owl::io::owx::reader::read_with_build::<
+            ArcStr,
+            SetOntology<ArcStr>,
+            _,
+        >(&mut buffer, builder)?;
+        let graph: InfoGraph = ontology.into();
 
-            graph
-        })
+        Ok(graph)
     }
 
     fn imports(&self) -> Box<dyn Iterator<Item = Url> + '_> {
@@ -1830,11 +1842,13 @@ impl FrameInfo {
         };
     }
 
+    const LABEL_IRI: &str = "http://www.w3.org/2000/01/rdf-schema#label";
+
     pub fn label(&self) -> Option<String> {
-        self.annoation_display(&"http://www.w3.org/2000/01/rdf-schema#label".to_string())
+        self.annoation_display(FrameInfo::LABEL_IRI)
     }
 
-    pub fn annoation_display(&self, iri: &Iri) -> Option<String> {
+    pub fn annoation_display(&self, iri: &str) -> Option<String> {
         self.annotations
             .get(iri)
             // TODO #20 make this more usable by providing multiple lines with indentation
@@ -1882,6 +1896,47 @@ impl FrameInfo {
             "{entity} **{label}**\n\n---\n{annotations}\n\nIRI: {}",
             self.iri
         )
+    }
+
+    /// This is a quick and dirty matcher that returns a match score from `0` to ``usize::MAX``
+    pub fn matches(&self, query: &str) -> usize {
+        let mut sum = 0usize;
+        if self.iri.contains(query) {
+            sum += 5000;
+        }
+        for (annotation_iri, values) in &self.annotations {
+            for value in values {
+                if value.contains(query) {
+                    if annotation_iri == FrameInfo::LABEL_IRI {
+                        sum += 1000;
+
+                        if let Some((l, r)) = value.split_once(query) {
+                            // Starts with query
+                            if l.is_empty() {
+                                sum += 100;
+                            }
+                            // Ends with query
+                            if r.is_empty() {
+                                sum += 10;
+                            }
+
+                            // Query found at exact word boundary
+                            if r.starts_with(' ') && l.ends_with(' ') {
+                                sum += 10;
+                            }
+
+                            // Chars not matching query
+                            sum = sum.saturating_sub(l.len() * 10);
+                            sum = sum.saturating_sub(r.len() * 10);
+                            sum += 1;
+                        }
+                    } else {
+                        sum += 1;
+                    }
+                }
+            }
+        }
+        sum
     }
 }
 

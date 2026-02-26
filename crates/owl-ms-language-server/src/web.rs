@@ -1,9 +1,8 @@
 use itertools::Itertools;
 use log::{debug, error};
 use std::{collections::HashMap, sync::Mutex, time::Duration};
+use thiserror::Error;
 use ureq::{http::StatusCode, Agent};
-
-use crate::error::{Error, Result};
 
 /// Trait for simple http get requests. It can be mocked with the static client.
 pub trait HttpClient: Send + Sync + std::fmt::Debug {
@@ -12,6 +11,16 @@ pub trait HttpClient: Send + Sync + std::fmt::Debug {
     /// This function will return an error if the get request is not successfull.
     fn get(&self, url: &str) -> Result<String>;
 }
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Ureq Error: {0}")]
+    Ureq(#[from] ureq::Error),
+    #[error("The request to {0} could not be fulfilled because: {1}")]
+    Web(String, &'static str), // Url and reason
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub struct UreqClient {

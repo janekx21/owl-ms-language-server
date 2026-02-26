@@ -603,17 +603,19 @@ impl LanguageServer for Backend {
         let (doc, _) = sync.get_internal_document(&url)?;
         let infos = doc.all_frame_infos();
         return Ok(Some(DocumentSymbolResponse::Flat(
-            #[allow(deprecated)] // All fields need to be specified
             infos
-                .iter()
                 .flat_map(|info| {
-                    info.definitions.iter().map(|def| {
+                    let name = info.label().unwrap_or_else(|| {
+                        doc.full_iri_to_abbreviated_iri(&info.iri)
+                            .unwrap_or(info.iri.clone())
+                    });
+                    let kind: SymbolKind = info.frame_type.into();
+                    let url = url.clone();
+                    info.definitions.iter().map(move |def| {
+                        #[allow(deprecated)] // All fields need to be specified
                         Ok(SymbolInformation {
-                            name: info.label().unwrap_or_else(|| {
-                                doc.full_iri_to_abbreviated_iri(&info.iri)
-                                    .unwrap_or(info.iri.clone())
-                            }),
-                            kind: info.frame_type.into(),
+                            name: name.clone(),
+                            kind,
                             tags: None,
                             deprecated: None,
                             location: Location {
@@ -642,45 +644,48 @@ impl LanguageServer for Backend {
         let workspaces = sync.workspaces();
         let all_frame_infos = workspaces
             .iter()
-            .flat_map(|workspace| {
-                let ws = workspace;
-                ws.internal_documents()
-                    .flat_map(workspace::InternalDocument::all_frame_infos)
-                    .collect_vec()
-            })
-            .collect_vec();
+            .flat_map(workspace::Workspace::all_frame_infos);
 
         let symbols = all_frame_infos
-            .iter()
-            .filter(|fi| {
-                fi.iri.contains(query.as_str())
-                    || fi
-                        .annotations
-                        .values()
-                        .any(|v| v.iter().any(|l| l.contains(query.as_str())))
+            .filter_map(|fi| {
+                let score = fi.matches(&query);
+                if score > 0 {
+                    Some((score, fi))
+                } else {
+                    None
+                }
             })
-            .flat_map(|fi| {
-                #[allow(deprecated)] // All fields need to be specified
-                fi.definitions.iter().map(|definition| {
-                    let url = &definition.uri;
-                    let location = sync
-                        .get_internal_document(url)
-                        .map(|(doc, _)| definition.clone().into_lsp(doc.rope(), self.encoding()))
-                        .and_then(|r| r.inspect_err(|e| error!("{e}")))
-                        .unwrap_or(Location {
-                            uri: url.clone(),
-                            range: lsp_types::Range::default(),
-                        });
+            .sorted_by_key(|(score, _)| *score)
+            .rev()
+            .flat_map(|(_, fi)| {
+                let name = fi.label().unwrap_or(fi.iri.clone());
 
-                    SymbolInformation {
-                        name: fi.iri.clone(),
-                        kind: fi.frame_type.into(),
-                        tags: None,
-                        deprecated: None,
-                        location,
-                        container_name: None,
-                    }
-                })
+                #[allow(deprecated)] // All fields need to be specified
+                fi.definitions
+                    .iter()
+                    .map(|definition| {
+                        let url = &definition.uri;
+                        let location = sync
+                            .get_internal_document(url)
+                            .map(|(doc, _)| {
+                                definition.clone().into_lsp(doc.rope(), self.encoding())
+                            })
+                            .and_then(|r| r.inspect_err(|e| error!("{e}")))
+                            .unwrap_or(Location {
+                                uri: url.clone(),
+                                range: lsp_types::Range::default(),
+                            });
+
+                        SymbolInformation {
+                            name: name.clone(),
+                            kind: fi.frame_type.into(),
+                            tags: None,
+                            deprecated: None,
+                            location,
+                            container_name: None,
+                        }
+                    })
+                    .collect_vec()
             })
             .collect_vec();
 

@@ -33,11 +33,7 @@ pub enum Error {
     PositionOutOfBoundsTowerLsp(tower_lsp::lsp_types::Position),
     #[error("The LSP Feature is not supported at the moment: {0}")]
     LspFeatureNotSupported(&'static str),
-    #[error("The request to {0} could not be fulfilled because: {1}")]
-    Web(String, &'static str), // Url and reason
     // From other error types
-    #[error("Ureq Error: {0}")]
-    Ureq(#[from] ureq::Error),
     #[error("Horned Owl Error: {0}")]
     HornedOwl(#[from] horned_owl::error::HornedError),
     #[error("IO Error: {0}")]
@@ -48,6 +44,8 @@ pub enum Error {
     Rope(#[from] ropey::Error),
     #[error("Sophia Error: {0}")]
     Sophia(String), // I could not crate a streaming error type, because one of the generics is not importable, because of a foreign crate
+    #[error("Web Error: {0}")]
+    Web(#[from] crate::web::Error),
 }
 
 impl From<Error> for tower_lsp::jsonrpc::Error {
