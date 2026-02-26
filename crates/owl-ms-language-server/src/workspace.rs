@@ -186,13 +186,18 @@ impl Workspace {
             .flat_map(InternalDocument::all_frame_infos)
     }
 
-    /// Returns the path for the .owl folder
-    pub fn dot_folder_path(&self) -> PathBuf {
-        self.folder
-            .uri
-            .to_file_path()
-            .expect("Workspace folder url should be file path")
-            .join(".owl")
+    /// Returns the path for the cache folder
+    pub fn cache_folder_path(&self) -> PathBuf {
+        if let Some(dir) = dirs::cache_dir() {
+            dir.join("owl-ms-language-server")
+        } else {
+            // If the cache folder can not be accessed then lets just use a local folder
+            self.folder
+                .uri
+                .to_file_path()
+                .expect("Workspace folder url should be file path")
+                .join(".owl")
+        }
     }
 
     // TODO #28 maybe return a reference?
@@ -467,7 +472,12 @@ fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
 }
 
 fn read_cached_doc(workspace: &Workspace, url: &Url) -> Result<Option<Document>> {
-    let owl_dir = workspace.dot_folder_path();
+    if cfg!(test) {
+        // Do not cache in tests
+        return Ok(None);
+    }
+
+    let owl_dir = workspace.cache_folder_path();
     let web_cache = owl_dir.join("web_cache");
     let file_name = url_to_filename(url.as_ref());
 
@@ -483,8 +493,13 @@ fn read_cached_doc(workspace: &Workspace, url: &Url) -> Result<Option<Document>>
 }
 
 fn cache_doc(workspace: &Workspace, doc: &ExternalDocument) {
+    if cfg!(test) {
+        // Do not cache in tests
+        return;
+    }
+
     let file_name = url_to_filename(doc.uri.as_ref());
-    let owl_dir = workspace.dot_folder_path();
+    let owl_dir = workspace.cache_folder_path();
 
     if let Err(err) = fs::create_dir_all(&owl_dir) {
         error!("Dir create Error: {err}");
