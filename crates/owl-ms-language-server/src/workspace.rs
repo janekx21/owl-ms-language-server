@@ -34,6 +34,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter::once;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
+use std::time::{Duration, SystemTime};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Display,
@@ -187,8 +188,9 @@ impl Workspace {
     }
 
     /// Returns the path for the cache folder
-    pub fn cache_folder_path(&self) -> PathBuf {
+    pub fn shared_cache_folder_path(&self) -> PathBuf {
         if let Some(dir) = dirs::cache_dir() {
+            // Well all projects can even share a cache dir
             dir.join("owl-ms-language-server")
         } else {
             // If the cache folder can not be accessed then lets just use a local folder
@@ -477,11 +479,25 @@ fn read_cached_doc(workspace: &Workspace, url: &Url) -> Result<Option<Document>>
         return Ok(None);
     }
 
-    let owl_dir = workspace.cache_folder_path();
+    let owl_dir = workspace.shared_cache_folder_path();
     let web_cache = owl_dir.join("web_cache");
     let file_name = url_to_filename(url.as_ref());
 
     debug!("try read cached doc {}", file_name.display());
+
+    let mut cache_valid = true;
+    if let Ok(file) = fs::File::open(web_cache.join(&file_name)) {
+        let modified_time = file.metadata()?.modified()?;
+        if modified_time + Duration::from_secs(60 * 60 * 24 * 30) < SystemTime::now() {
+            // invalidate cache
+            warn!("Cached document is stale (older then 30 days) {url}");
+            cache_valid = false;
+        }
+    }
+    if !cache_valid {
+        fs::remove_file(&file_name)?;
+        return Ok(None);
+    }
 
     if let Ok(some) = fs::read(web_cache.join(file_name)) {
         let text = String::from_utf8(some).expect("Cached file should be valid UTF-8");
@@ -499,7 +515,7 @@ fn cache_doc(workspace: &Workspace, doc: &ExternalDocument) {
     }
 
     let file_name = url_to_filename(doc.uri.as_ref());
-    let owl_dir = workspace.cache_folder_path();
+    let owl_dir = workspace.shared_cache_folder_path();
 
     if let Err(err) = fs::create_dir_all(&owl_dir) {
         error!("Dir create Error: {err}");
