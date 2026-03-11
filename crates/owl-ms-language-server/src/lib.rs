@@ -9,6 +9,9 @@ pub mod rope_provider;
 mod sync_backend;
 #[cfg(test)]
 #[allow(clippy::pedantic)]
+mod test_helpers;
+#[cfg(test)]
+#[allow(clippy::pedantic)]
 mod tests;
 pub mod web;
 mod workspace;
@@ -528,32 +531,49 @@ impl LanguageServer for Backend {
             .ok_or(Error::PositionOutOfBounds(pos))?;
 
         let reachable_docs = doc.reachable_docs_recursive(workspace, true);
-        if ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind()) {
+
+        let node_is_iri = ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind());
+        if node_is_iri {
             let iri = trim_full_iri(node_text(&leaf_node, doc.rope()));
             let iri = doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
             debug!("Try goto definition of {iri}");
 
-            let frame_info = Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs);
+            let iri_is_import_iri = leaf_node
+                .parent()
+                .expect("iri node should have parent")
+                .kind()
+                == "import";
 
-            if let Some(frame_info) = frame_info {
-                let locations = frame_info
-                    .definitions
-                    .iter()
-                    .sorted_by_key(|l| {
-                        if l.range == Range::ZERO {
-                            u32::MAX // No range? Then put this at the end
-                        } else {
-                            l.range.start.line()
-                        }
-                    })
-                    .map(|l| l.clone().into_lsp(doc.rope(), self.encoding()))
-                    .filter_and_log()
-                    .collect_vec();
+            if iri_is_import_iri {
+                let url = Url::parse(&iri).map_err(|_| Error::InvalidUrl(url.clone()))?;
+                // This does not work for external documents from prefixes
+                let path = workspace.url_to_path_with_catalog(&url);
+                if let Some(path) = path {
+                    return Ok(Some(single_path_response(&path)));
+                }
+            } else {
+                let frame_info =
+                    Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs);
 
-                return Ok(Some(GotoDefinitionResponse::Array(locations)));
+                if let Some(frame_info) = frame_info {
+                    let locations = frame_info
+                        .definitions
+                        .iter()
+                        .sorted_by_key(|l| {
+                            if l.range == Range::ZERO {
+                                u32::MAX // No range? Then put this at the end
+                            } else {
+                                l.range.start.line()
+                            }
+                        })
+                        .map(|l| l.clone().into_lsp(doc.rope(), self.encoding()))
+                        .filter_and_log()
+                        .collect_vec();
+
+                    return Ok(Some(GotoDefinitionResponse::Array(locations)));
+                }
             }
-            return Ok(None);
         }
         Ok(None)
     }
@@ -769,7 +789,6 @@ impl LanguageServer for Backend {
             .flat_map(|(_, fi)| {
                 let name = fi.label().unwrap_or(fi.iri.clone());
 
-                
                 #[allow(deprecated)] // All fields need to be specified
                 fi.definitions
                     .iter()
@@ -1013,6 +1032,22 @@ impl LanguageServer for Backend {
         // workspaces.clear();
         Ok(())
     }
+}
+
+fn single_path_response(path: &Path) -> GotoDefinitionResponse {
+    GotoDefinitionResponse::Scalar(Location {
+        uri: Url::from_file_path(path).expect("path should be valid url"),
+        range: lsp_types::Range {
+            start: lsp_types::Position {
+                line: 0,
+                character: 0,
+            },
+            end: lsp_types::Position {
+                line: 0,
+                character: 0,
+            },
+        },
+    })
 }
 
 type IriKindName = Option<(String, Option<String>, String, String)>;

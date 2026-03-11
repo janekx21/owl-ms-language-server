@@ -204,15 +204,6 @@ impl Workspace {
         }
     }
 
-    /// Returns the path for the .owl folder
-    pub fn dot_folder_path(&self) -> PathBuf {
-        self.folder
-            .uri
-            .to_file_path()
-            .expect("Workspace folder url should be file path")
-            .join(".owl")
-    }
-
     // TODO #28 maybe return a reference?
     /// This searches in the frames of internal documents
     pub fn search_frame(&self, partial_text: &str) -> Vec<(String, Iri, FrameInfo)> {
@@ -427,6 +418,7 @@ impl Workspace {
         }
     }
 
+    /// Convert an URL that is in the catalog into the file path
     pub fn url_to_path_with_catalog(&self, url: &Url) -> Option<PathBuf> {
         if let Some((catalog, catalog_uri)) = self.find_catalog_uri(url) {
             if let Ok(url) = Url::parse(&catalog_uri.uri) {
@@ -555,8 +547,8 @@ pub enum DocumentReference<'a> {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)] // Not boxing this is fine because the size ratio is just about 1.6
 pub enum Document {
-    // Not boxing this is fine because the size ratio is just about 1.6
     Internal(InternalDocument),
     External(ExternalDocument),
 }
@@ -1278,7 +1270,7 @@ impl From<ParsedDocument> for QueriedDocument {
         QueriedDocument {
             path: val.path.clone(),
             uri: val.uri.clone(),
-            version: val.version,
+            _version: val.version,
             parsed_document: val,
             ontology_id,
             prefixes,
@@ -1446,7 +1438,7 @@ struct QueriedDocument {
     path: PathBuf,
     /// URL and location where this document was loaded from
     uri: Url,
-    version: i32,
+    _version: i32,
     parsed_document: ParsedDocument,
 
     ontology_id: Option<(Iri, Option<Iri>)>,
@@ -2148,8 +2140,8 @@ impl FrameInfo {
     const LABEL_IRI: &'static str = "http://www.w3.org/2000/01/rdf-schema#label";
 
     pub fn label(&self) -> Option<String> {
-    self.annotation_display(FrameInfo::LABEL_IRI)
-}
+        self.annotation_display(FrameInfo::LABEL_IRI)
+    }
 
     pub fn annotation_display(&self, iri: &str) -> Option<String> {
         self.annotations
