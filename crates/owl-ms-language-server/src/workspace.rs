@@ -204,15 +204,6 @@ impl Workspace {
         }
     }
 
-    /// Returns the path for the .owl folder
-    pub fn dot_folder_path(&self) -> PathBuf {
-        self.folder
-            .uri
-            .to_file_path()
-            .expect("Workspace folder url should be file path")
-            .join(".owl")
-    }
-
     // TODO #28 maybe return a reference?
     /// This searches in the frames of internal documents
     pub fn search_frame(&self, partial_text: &str) -> Vec<(String, Iri, FrameInfo)> {
@@ -2148,8 +2139,8 @@ impl FrameInfo {
     const LABEL_IRI: &'static str = "http://www.w3.org/2000/01/rdf-schema#label";
 
     pub fn label(&self) -> Option<String> {
-    self.annotation_display(FrameInfo::LABEL_IRI)
-}
+        self.annotation_display(FrameInfo::LABEL_IRI)
+    }
 
     pub fn annotation_display(&self, iri: &str) -> Option<String> {
         self.annotations
