@@ -418,6 +418,7 @@ impl Workspace {
         }
     }
 
+    /// Convert an URL that is in the catalog into the file path
     pub fn url_to_path_with_catalog(&self, url: &Url) -> Option<PathBuf> {
         if let Some((catalog, catalog_uri)) = self.find_catalog_uri(url) {
             if let Ok(url) = Url::parse(&catalog_uri.uri) {

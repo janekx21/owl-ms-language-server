@@ -544,30 +544,10 @@ impl LanguageServer for Backend {
 
             if iri_is_import_iri {
                 let url = Url::parse(&iri).map_err(|_| Error::InvalidUrl(url.clone()))?;
-                let target_doc = workspace
-                    .document_by_url(&url)
-                    .ok_or(Error::DocumentNotFound(url.clone()))?;
-
-                match target_doc {
-                    DocumentReference::Internal(internal_document) => {
-                        return Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                            uri: Url::from_file_path(&internal_document.path)
-                                .expect("path should be valid url"),
-                            range: lsp_types::Range {
-                                start: lsp_types::Position {
-                                    line: 0,
-                                    character: 0,
-                                },
-                                end: lsp_types::Position {
-                                    line: 0,
-                                    character: 0,
-                                },
-                            },
-                        })));
-                    }
-                    DocumentReference::External(_) => {
-                        // TODO link to cached doc maybe
-                    }
+                // This does not work for external documents from prefixes
+                let path = workspace.url_to_path_with_catalog(&url);
+                if let Some(path) = path {
+                    return Ok(Some(single_path_response(&path)));
                 }
             } else {
                 let frame_info =
@@ -1049,6 +1029,22 @@ impl LanguageServer for Backend {
         // workspaces.clear();
         Ok(())
     }
+}
+
+fn single_path_response(path: &Path) -> GotoDefinitionResponse {
+    GotoDefinitionResponse::Scalar(Location {
+        uri: Url::from_file_path(path).expect("path should be valid url"),
+        range: lsp_types::Range {
+            start: lsp_types::Position {
+                line: 0,
+                character: 0,
+            },
+            end: lsp_types::Position {
+                line: 0,
+                character: 0,
+            },
+        },
+    })
 }
 
 type IriKindName = Option<(String, Option<String>, String, String)>;
