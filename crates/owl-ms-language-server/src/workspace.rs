@@ -547,8 +547,8 @@ pub enum DocumentReference<'a> {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)] // Not boxing this is fine because the size ratio is just about 1.6
 pub enum Document {
-    // Not boxing this is fine because the size ratio is just about 1.6
     Internal(InternalDocument),
     External(ExternalDocument),
 }
@@ -1270,7 +1270,7 @@ impl From<ParsedDocument> for QueriedDocument {
         QueriedDocument {
             path: val.path.clone(),
             uri: val.uri.clone(),
-            version: val.version,
+            _version: val.version,
             parsed_document: val,
             ontology_id,
             prefixes,
@@ -1438,7 +1438,7 @@ struct QueriedDocument {
     path: PathBuf,
     /// URL and location where this document was loaded from
     uri: Url,
-    version: i32,
+    _version: i32,
     parsed_document: ParsedDocument,
 
     ontology_id: Option<(Iri, Option<Iri>)>,

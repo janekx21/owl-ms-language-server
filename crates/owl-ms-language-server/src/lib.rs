@@ -9,6 +9,9 @@ pub mod rope_provider;
 mod sync_backend;
 #[cfg(test)]
 #[allow(clippy::pedantic)]
+mod test_helpers;
+#[cfg(test)]
+#[allow(clippy::pedantic)]
 mod tests;
 pub mod web;
 mod workspace;
