@@ -359,8 +359,8 @@ fn bench_hover(c: &mut Criterion) {
                     let target_line = (line_count / 4).max(7) as u32;
                     (rt, service, url, dir, target_line)
                 },
-                |(rt, service, url, _dir, target_line)| {
-                    rt.block_on(async {
+                |(rt, service, url, dir, target_line)| {
+                    let result = rt.block_on(async {
                         black_box(
                             service
                                 .inner()
@@ -375,7 +375,8 @@ fn bench_hover(c: &mut Criterion) {
                                 })
                                 .await,
                         )
-                    })
+                    });
+                    (result, rt, service, dir)
                 },
                 BatchSize::PerIteration,
             );
@@ -404,8 +405,8 @@ fn bench_goto_definition(c: &mut Criterion) {
                     let target_line = (line_count / 3).max(10) as u32;
                     (rt, service, url, dir, target_line)
                 },
-                |(rt, service, url, _dir, target_line)| {
-                    rt.block_on(async {
+                |(rt, service, url, dir, target_line)| {
+                    let result = rt.block_on(async {
                         black_box(
                             service
                                 .inner()
@@ -423,7 +424,8 @@ fn bench_goto_definition(c: &mut Criterion) {
                                 })
                                 .await,
                         )
-                    })
+                    });
+                    (result, rt, service, dir)
                 },
                 BatchSize::PerIteration,
             );
@@ -452,8 +454,8 @@ fn bench_completion(c: &mut Criterion) {
                     let target_line = (line_count / 3).max(10) as u32;
                     (rt, service, url, dir, target_line)
                 },
-                |(rt, service, url, _dir, target_line)| {
-                    rt.block_on(async {
+                |(rt, service, url, dir, target_line)| {
+                    let result = rt.block_on(async {
                         black_box(
                             service
                                 .inner()
@@ -472,7 +474,8 @@ fn bench_completion(c: &mut Criterion) {
                                 })
                                 .await,
                         )
-                    })
+                    });
+                    (result, rt, service, dir)
                 },
                 BatchSize::PerIteration,
             );
@@ -501,8 +504,8 @@ fn bench_references(c: &mut Criterion) {
                     let target_line = (line_count / 4).max(7) as u32;
                     (rt, service, url, dir, target_line)
                 },
-                |(rt, service, url, _dir, target_line)| {
-                    rt.block_on(async {
+                |(rt, service, url, dir, target_line)| {
+                    let result = rt.block_on(async {
                         black_box(
                             service
                                 .inner()
@@ -523,7 +526,8 @@ fn bench_references(c: &mut Criterion) {
                                 })
                                 .await,
                         )
-                    })
+                    });
+                    (result, rt, service, dir)
                 },
                 BatchSize::PerIteration,
             );
@@ -552,8 +556,8 @@ fn bench_prepare_rename(c: &mut Criterion) {
                     let target_line = (line_count / 4).max(7) as u32;
                     (rt, service, url, dir, target_line)
                 },
-                |(rt, service, url, _dir, target_line)| {
-                    rt.block_on(async {
+                |(rt, service, url, dir, target_line)| {
+                    let result = rt.block_on(async {
                         black_box(
                             service
                                 .inner()
@@ -563,7 +567,8 @@ fn bench_prepare_rename(c: &mut Criterion) {
                                 })
                                 .await,
                         )
-                    })
+                    });
+                    (result, rt, service, dir)
                 },
                 BatchSize::PerIteration,
             );
@@ -592,8 +597,8 @@ fn bench_rename(c: &mut Criterion) {
                     let target_line = (line_count / 4).max(7) as u32;
                     (rt, service, url, dir, target_line)
                 },
-                |(rt, service, url, _dir, target_line)| {
-                    rt.block_on(async {
+                |(rt, service, url, dir, target_line)| {
+                    let result = rt.block_on(async {
                         black_box(
                             service
                                 .inner()
@@ -609,7 +614,8 @@ fn bench_rename(c: &mut Criterion) {
                                 })
                                 .await,
                         )
-                    })
+                    });
+                    (result, rt, service, dir)
                 },
                 BatchSize::PerIteration,
             );
@@ -636,8 +642,8 @@ fn bench_document_symbol(c: &mut Criterion) {
                     let (service, url, dir) = rt.block_on(setup_backend_with_ontology(ontology));
                     (rt, service, url, dir)
                 },
-                |(rt, service, url, _dir)| {
-                    rt.block_on(async {
+                |(rt, service, url, dir)| {
+                    let result = rt.block_on(async {
                         black_box(
                             service
                                 .inner()
@@ -652,7 +658,8 @@ fn bench_document_symbol(c: &mut Criterion) {
                                 })
                                 .await,
                         )
-                    })
+                    });
+                    (result, rt, service, dir)
                 },
                 BatchSize::PerIteration,
             );
@@ -679,8 +686,8 @@ fn bench_formatting(c: &mut Criterion) {
                     let (service, url, dir) = rt.block_on(setup_backend_with_ontology(ontology));
                     (rt, service, url, dir)
                 },
-                |(rt, service, url, _dir)| {
-                    rt.block_on(async {
+                |(rt, service, url, dir)| {
+                    let result = rt.block_on(async {
                         black_box(
                             service
                                 .inner()
@@ -697,7 +704,8 @@ fn bench_formatting(c: &mut Criterion) {
                                 })
                                 .await,
                         )
-                    })
+                    });
+                    (result, rt, service, dir)
                 },
                 BatchSize::PerIteration,
             );
@@ -724,8 +732,8 @@ fn bench_semantic_tokens_full(c: &mut Criterion) {
                     let (service, url, dir) = rt.block_on(setup_backend_with_ontology(ontology));
                     (rt, service, url, dir)
                 },
-                |(rt, service, url, _dir)| {
-                    rt.block_on(async {
+                |(rt, service, url, dir)| {
+                    let result = rt.block_on(async {
                         black_box(
                             service
                                 .inner()
@@ -740,7 +748,8 @@ fn bench_semantic_tokens_full(c: &mut Criterion) {
                                 })
                                 .await,
                         )
-                    })
+                    });
+                    (result, rt, service, dir)
                 },
                 BatchSize::PerIteration,
             );
@@ -770,8 +779,8 @@ fn bench_semantic_tokens_range(c: &mut Criterion) {
                     let end_line = (line_count / 4).max(20) as u32;
                     (rt, service, url, dir, end_line)
                 },
-                |(rt, service, url, _dir, end_line)| {
-                    rt.block_on(async {
+                |(rt, service, url, dir, end_line)| {
+                    let result = rt.block_on(async {
                         black_box(
                             service
                                 .inner()
@@ -790,7 +799,8 @@ fn bench_semantic_tokens_range(c: &mut Criterion) {
                                 })
                                 .await,
                         )
-                    })
+                    });
+                    (result, rt, service, dir)
                 },
                 BatchSize::PerIteration,
             );
@@ -819,8 +829,8 @@ fn bench_code_action(c: &mut Criterion) {
                     let target_line = (line_count / 4).max(7) as u32;
                     (rt, service, url, dir, target_line)
                 },
-                |(rt, service, url, _dir, target_line)| {
-                    rt.block_on(async {
+                |(rt, service, url, dir, target_line)| {
+                    let result = rt.block_on(async {
                         black_box(
                             service
                                 .inner()
@@ -844,7 +854,9 @@ fn bench_code_action(c: &mut Criterion) {
                                 })
                                 .await,
                         )
-                    })
+                    });
+                    // Return heavy items so they're dropped outside measurement
+                    (result, rt, service, dir)
                 },
                 BatchSize::PerIteration,
             );
@@ -872,8 +884,8 @@ fn bench_inlay_hint(c: &mut Criterion) {
                     let (service, url, dir) = rt.block_on(setup_backend_with_ontology(ontology));
                     (rt, service, url, dir, line_count as u32)
                 },
-                |(rt, service, url, _dir, line_count)| {
-                    rt.block_on(async {
+                |(rt, service, url, dir, line_count)| {
+                    let result = rt.block_on(async {
                         black_box(
                             service
                                 .inner()
@@ -889,7 +901,8 @@ fn bench_inlay_hint(c: &mut Criterion) {
                                 })
                                 .await,
                         )
-                    })
+                    });
+                    (result, rt, service, dir)
                 },
                 BatchSize::PerIteration,
             );
@@ -916,8 +929,8 @@ fn bench_symbol(c: &mut Criterion) {
                     let (service, url, dir) = rt.block_on(setup_backend_with_ontology(ontology));
                     (rt, service, url, dir)
                 },
-                |(rt, service, _url, _dir)| {
-                    rt.block_on(async {
+                |(rt, service, url, dir)| {
+                    let result = rt.block_on(async {
                         black_box(
                             service
                                 .inner()
@@ -932,7 +945,8 @@ fn bench_symbol(c: &mut Criterion) {
                                 })
                                 .await,
                         )
-                    })
+                    });
+                    (result, rt, service, url, dir)
                 },
                 BatchSize::PerIteration,
             );
@@ -969,8 +983,8 @@ fn bench_completion_keywords(c: &mut Criterion) {
                     let target_line = (line_count - 1) as u32;
                     (rt, service, url, dir, target_line)
                 },
-                |(rt, service, url, _dir, target_line)| {
-                    rt.block_on(async {
+                |(rt, service, url, dir, target_line)| {
+                    let result = rt.block_on(async {
                         black_box(
                             service
                                 .inner()
@@ -989,7 +1003,8 @@ fn bench_completion_keywords(c: &mut Criterion) {
                                 })
                                 .await,
                         )
-                    })
+                    });
+                    (result, rt, service, dir)
                 },
                 BatchSize::PerIteration,
             );
