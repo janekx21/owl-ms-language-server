@@ -47,5 +47,9 @@ cc = "1.0"
 name = "my_benchmark"
 harness = false
 
+[[bench]]
+name = "requests"
+harness = false
+
 [lints.clippy]
 pedantic = "warn"
