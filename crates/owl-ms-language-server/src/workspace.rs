@@ -2148,8 +2148,8 @@ impl FrameInfo {
     const LABEL_IRI: &'static str = "http://www.w3.org/2000/01/rdf-schema#label";
 
     pub fn label(&self) -> Option<String> {
-    self.annotation_display(FrameInfo::LABEL_IRI)
-}
+        self.annotation_display(FrameInfo::LABEL_IRI)
+    }
 
     pub fn annotation_display(&self, iri: &str) -> Option<String> {
         self.annotations
@@ -2689,12 +2689,25 @@ fn ontology_to_doc(node: &Node, rope: &Rope, tab_size: u32, nest_depth: isize) -
             // frames
             RcDoc::intersperse(
                 node.children_by_field_name("frame", &mut cursor)
+                    .sorted_by_key(|n| frame_order(n.kind()))
                     .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
                 RcDoc::hardline(),
             ),
         ],
         RcDoc::hardline(),
     )
+}
+
+fn frame_order(frame_kind: &str) -> u32 {
+    match frame_kind {
+        "annotation_property_frame" => 1,
+        "datatype_frame" => 2,
+        "object_property_frame" => 3,
+        "data_property_frame" => 4,
+        "class_frame" => 5,
+        "individual_frame" => 6,
+        _ => u32::MAX,
+    }
 }
 
 fn frame_to_doc(node: &Node, rope: &Rope, tab_size: u32, nest_depth: isize) -> RcDoc<'static> {
