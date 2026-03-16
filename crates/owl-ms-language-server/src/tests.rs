@@ -908,26 +908,12 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
     Class: p
     "};
 
+    // Reordering frames is disabled on default
     let target = indoc! {"
     Prefix: a: <http://a.b/c/>
     Prefix: b: <http://a.b/b/>
 
     Ontology: foo ver
-
-
-    AnnotationProperty: E
-
-
-    AnnotationProperty: rdfs:label
-
-    
-    Datatype: B
-        EquivalentTo: Y
-
-    ObjectProperty: D
-
-
-    DataProperty: C
 
 
     Class: A
@@ -937,6 +923,21 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
         DisjointWith: Y
         DisjointUnionOf: Y, Z
         HasKey: Y
+
+    Datatype: B
+        EquivalentTo: Y
+
+    DataProperty: C
+
+
+    ObjectProperty: D
+
+
+    AnnotationProperty: E
+
+
+    Individual: F
+
 
     Class: C
         SubClassOf: p some ( A and B )
@@ -949,11 +950,11 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
     Class: Z
 
     
+    AnnotationProperty: rdfs:label
+
+
     Class: p
     
-
-    Individual: F
-
     "};
 
     let tmp_dir = arrange_workspace_folders(|_| vec![]);

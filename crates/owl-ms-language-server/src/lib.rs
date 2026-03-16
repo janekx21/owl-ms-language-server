@@ -34,7 +34,7 @@ use workspace::{node_text, trim_full_iri, Workspace};
 
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
-use crate::workspace::{Document, DocumentReference, InternalDocument};
+use crate::workspace::{Document, DocumentReference, FormattingSettings, InternalDocument};
 // Constants
 
 pub static LANGUAGE: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_ms::LANGUAGE.into());
@@ -46,6 +46,7 @@ pub struct Backend {
     pub client: Client,
     pub http_client: Arc<dyn HttpClient>,
     position_encoding: OnceCell<PositionEncodingKind>,
+    options: OnceCell<Options>,
     sync: SyncRef,
 }
 
@@ -61,6 +62,7 @@ impl Backend {
             http_client: http_client.into(),
             position_encoding: OnceCell::new(),
             sync: Arc::new(RwLock::new(SyncBackend::default())),
+            options: OnceCell::new(),
         }
     }
 
@@ -211,6 +213,100 @@ impl Backend {
             }
         })
     }
+
+    fn server_capabilities(position_encoding_kind: PositionEncodingKind) -> ServerCapabilities {
+        ServerCapabilities {
+            text_document_sync: Some(TextDocumentSyncCapability::Kind(
+                TextDocumentSyncKind::INCREMENTAL,
+            )),
+            hover_provider: Some(HoverProviderCapability::Simple(true)),
+            document_formatting_provider: Some(OneOf::Left(true)),
+            position_encoding: Some(position_encoding_kind),
+            inlay_hint_provider: Some(OneOf::Left(true)),
+            definition_provider: Some(OneOf::Left(true)),
+            code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+            completion_provider: Some(CompletionOptions {
+                ..Default::default()
+            }),
+            semantic_tokens_provider: Some(
+                SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
+                    legend: SemanticTokensLegend {
+                        token_types: vec![
+                            SemanticTokenType::NAMESPACE,
+                            SemanticTokenType::TYPE,
+                            SemanticTokenType::CLASS,
+                            SemanticTokenType::ENUM,
+                            SemanticTokenType::INTERFACE,
+                            SemanticTokenType::STRUCT,
+                            SemanticTokenType::TYPE_PARAMETER,
+                            SemanticTokenType::PARAMETER,
+                            SemanticTokenType::VARIABLE,
+                            SemanticTokenType::PROPERTY,
+                            SemanticTokenType::ENUM_MEMBER,
+                            SemanticTokenType::EVENT,
+                            SemanticTokenType::FUNCTION,
+                            SemanticTokenType::METHOD,
+                            SemanticTokenType::MACRO,
+                            SemanticTokenType::KEYWORD,
+                            SemanticTokenType::MODIFIER,
+                            SemanticTokenType::COMMENT,
+                            SemanticTokenType::STRING,
+                            SemanticTokenType::NUMBER,
+                            SemanticTokenType::REGEXP,
+                            SemanticTokenType::OPERATOR,
+                            SemanticTokenType::DECORATOR,
+                        ],
+                        token_modifiers: vec![],
+                    },
+                    full: Some(SemanticTokensFullOptions::Bool(true)),
+                    range: Some(true),
+                    ..Default::default()
+                }),
+            ),
+            document_symbol_provider: Some(OneOf::Left(true)),
+            workspace_symbol_provider: Some(OneOf::Right(WorkspaceSymbolOptions {
+                work_done_progress_options: WorkDoneProgressOptions {
+                    work_done_progress: Some(false),
+                },
+                resolve_provider: Some(false),
+            })),
+            references_provider: Some(OneOf::Left(true)),
+            rename_provider: Some(OneOf::Right(RenameOptions {
+                prepare_provider: Some(true),
+                work_done_progress_options: WorkDoneProgressOptions {
+                    work_done_progress: None,
+                },
+            })),
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Options {
+    order_frames: bool,
+}
+
+fn parse_options(options: Option<serde_json::Value>) -> Options {
+    {
+        let mut is_order_frames = false;
+        if let Some(o) = options {
+            if let Some(root) = o.as_object() {
+                if let Some(omn) = root.get("omn") {
+                    if let Some(omn) = omn.as_object() {
+                        if let Some(order_frames) = omn.get("orderFrames") {
+                            if let Some(order_frames) = order_frames.as_bool() {
+                                is_order_frames = order_frames;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Options {
+            order_frames: is_order_frames,
+        }
+    }
 }
 
 /// This is the main language server implamentation. It is the entry point for all requests to the language server.
@@ -223,6 +319,14 @@ impl LanguageServer for Backend {
         info!("Initialize language server -----------------------------");
         info!("Client info:\n{:#?}", params.client_info);
         debug!("Client capabilities:\n{:#?}", params.capabilities);
+        debug!("Options: {:#?}", params.initialization_options);
+
+        let options = params.initialization_options;
+        let options = parse_options(options);
+        debug!("Parsed Options: {options:?}");
+        self.options
+            .set(options)
+            .expect("options should not be set");
 
         let encodings = params
             .capabilities
@@ -244,82 +348,20 @@ impl LanguageServer for Backend {
             sync.push_workspace(Workspace::new(wf.clone()));
         }
 
+        // Done with init, lets return the findings
+
+        let position_encoding_kind = self
+            .position_encoding
+            .get()
+            .expect("encoding should be set")
+            .clone();
+
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "owl-ms-language-server".to_string(),
                 version: None,
             }),
-            capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::INCREMENTAL,
-                )),
-                hover_provider: Some(HoverProviderCapability::Simple(true)),
-                document_formatting_provider: Some(OneOf::Left(true)),
-                position_encoding: Some(
-                    self.position_encoding
-                        .get()
-                        .expect("encoding should be set")
-                        .clone(),
-                ),
-                inlay_hint_provider: Some(OneOf::Left(true)),
-                definition_provider: Some(OneOf::Left(true)),
-                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
-                completion_provider: Some(CompletionOptions {
-                    ..Default::default()
-                }),
-                semantic_tokens_provider: Some(
-                    SemanticTokensServerCapabilities::SemanticTokensOptions(
-                        SemanticTokensOptions {
-                            legend: SemanticTokensLegend {
-                                token_types: vec![
-                                    SemanticTokenType::NAMESPACE,
-                                    SemanticTokenType::TYPE,
-                                    SemanticTokenType::CLASS,
-                                    SemanticTokenType::ENUM,
-                                    SemanticTokenType::INTERFACE,
-                                    SemanticTokenType::STRUCT,
-                                    SemanticTokenType::TYPE_PARAMETER,
-                                    SemanticTokenType::PARAMETER,
-                                    SemanticTokenType::VARIABLE,
-                                    SemanticTokenType::PROPERTY,
-                                    SemanticTokenType::ENUM_MEMBER,
-                                    SemanticTokenType::EVENT,
-                                    SemanticTokenType::FUNCTION,
-                                    SemanticTokenType::METHOD,
-                                    SemanticTokenType::MACRO,
-                                    SemanticTokenType::KEYWORD,
-                                    SemanticTokenType::MODIFIER,
-                                    SemanticTokenType::COMMENT,
-                                    SemanticTokenType::STRING,
-                                    SemanticTokenType::NUMBER,
-                                    SemanticTokenType::REGEXP,
-                                    SemanticTokenType::OPERATOR,
-                                    SemanticTokenType::DECORATOR,
-                                ],
-                                token_modifiers: vec![],
-                            },
-                            full: Some(SemanticTokensFullOptions::Bool(true)),
-                            range: Some(true),
-                            ..Default::default()
-                        },
-                    ),
-                ),
-                document_symbol_provider: Some(OneOf::Left(true)),
-                workspace_symbol_provider: Some(OneOf::Right(WorkspaceSymbolOptions {
-                    work_done_progress_options: WorkDoneProgressOptions {
-                        work_done_progress: Some(false),
-                    },
-                    resolve_provider: Some(false),
-                })),
-                references_provider: Some(OneOf::Left(true)),
-                rename_provider: Some(OneOf::Right(RenameOptions {
-                    prepare_provider: Some(true),
-                    work_done_progress_options: WorkDoneProgressOptions {
-                        work_done_progress: None,
-                    },
-                })),
-                ..Default::default()
-            },
+            capabilities: Backend::server_capabilities(position_encoding_kind),
         })
     }
 
@@ -438,8 +480,17 @@ impl LanguageServer for Backend {
         let sync = self.read_sync().await;
         let (doc, _) = sync.get_internal_document(&url)?;
 
+        let options = FormattingSettings {
+            tab_size: if tab_size == 0 { 4 } else { tab_size },
+            ruler_width: 80,
+            order_frames: self
+                .options
+                .get()
+                .expect("options should be initilized")
+                .order_frames,
+        };
         // TODO just send the diff
-        let text = doc.formatted(if tab_size == 0 { 4 } else { tab_size }, 80);
+        let text = doc.formatted(&options);
 
         let range: Range = doc.tree().root_node().range().into();
 
@@ -769,7 +820,6 @@ impl LanguageServer for Backend {
             .flat_map(|(_, fi)| {
                 let name = fi.label().unwrap_or(fi.iri.clone());
 
-                
                 #[allow(deprecated)] // All fields need to be specified
                 fi.definitions
                     .iter()

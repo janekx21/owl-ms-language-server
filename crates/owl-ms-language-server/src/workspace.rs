@@ -690,11 +690,11 @@ impl InternalDocument {
             .collect_vec()
     }
 
-    pub fn formatted(&self, tab_size: u32, ruler_width: usize) -> String {
+    pub fn formatted(&self, options: &FormattingSettings) -> String {
         let root = self.tree().root_node();
-        let doc = to_doc(&root, self.rope(), tab_size);
+        let doc = to_doc(&root, self.rope(), options);
         debug!("doc:\n{doc:#?}");
-        doc.pretty(ruler_width).to_string()
+        doc.pretty(options.ruler_width as usize).to_string()
     }
 
     pub fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
@@ -1246,6 +1246,13 @@ impl InternalDocument {
             .publish_diagnostics(self.uri.clone(), diagnostics, Some(self.version))
             .await;
     }
+}
+
+#[derive(Debug)]
+pub struct FormattingSettings {
+    pub tab_size: u32,
+    pub ruler_width: u32,
+    pub order_frames: bool,
 }
 
 /// An internal document that has no semantic analysis. Just text and syntax tree.
@@ -2499,10 +2506,10 @@ pub fn trim_full_iri(untrimmed_iri: String) -> Iri {
 //     ("xsd:", "http://www.w3.org/2001/XMLSchema#"),
 // ];
 
-fn to_doc(node: &Node, rope: &Rope, tab_size: u32) -> RcDoc<'static, ()> {
+fn to_doc(node: &Node, rope: &Rope, options: &FormattingSettings) -> RcDoc<'static, ()> {
     // I do not target 32 systems
     #[allow(clippy::cast_possible_wrap)]
-    let nest_depth = tab_size as isize;
+    let nest_depth = options.tab_size as isize;
     let text = node_text(node, rope);
     debug!(
         "to_doc for {text} that is {} at {:?}",
@@ -2519,14 +2526,14 @@ fn to_doc(node: &Node, rope: &Rope, tab_size: u32) -> RcDoc<'static, ()> {
 
     match node.kind() {
         "source_file" => {
-            source_file_to_doc(node, rope, tab_size)
+            source_file_to_doc(node, rope, options)
         },
         "ontology" =>
-            ontology_to_doc(node, rope, tab_size, nest_depth)
+            ontology_to_doc(node, rope,options, nest_depth)
         ,
         "prefix_declaration" | "import" | "annotation" => RcDoc::intersperse(
             node.children(&mut cursor)
-                .map(|n| to_doc(&n, rope, tab_size)),
+                .map(|n| to_doc(&n, rope,options)),
             RcDoc::line(),
         )
         .nest(nest_depth)
@@ -2548,7 +2555,7 @@ fn to_doc(node: &Node, rope: &Rope, tab_size: u32) -> RcDoc<'static, ()> {
         // misc
         |"equivalent_classes" |"disjoint_classes" |"equivalent_object_properties" |"disjoint_object_properties" |"equivalent_data_properties" |"disjoint_data_properties" |"same_individual" |"different_individuals"
          => {
-            nesting_property_with_keyword_to_frame(node, rope, tab_size, nest_depth)
+            nesting_property_with_keyword_to_frame(node, rope, options, nest_depth)
         },
         "description"
          => {
@@ -2557,7 +2564,7 @@ fn to_doc(node: &Node, rope: &Rope, tab_size: u32) -> RcDoc<'static, ()> {
                      RcDoc::line().append(RcDoc::text("or").append(RcDoc::space()))
                  } else {
                      let conjunction_node = chunks.exactly_one().unwrap_or_else(|_| unreachable!("chunk should contain exactly one separator node"));
-                     to_doc(&conjunction_node, rope, tab_size)
+                     to_doc(&conjunction_node, rope, options)
                  }
              }).collect_vec();
             RcDoc::concat(subs)
@@ -2568,18 +2575,18 @@ fn to_doc(node: &Node, rope: &Rope, tab_size: u32) -> RcDoc<'static, ()> {
                  if is_or {
                      RcDoc::line().append(RcDoc::text("and").append(RcDoc::space()))
                  } else {
-                     RcDoc::intersperse(chunks.map(|n| to_doc(&n, rope, tab_size)), RcDoc::space())
+                     RcDoc::intersperse(chunks.map(|n| to_doc(&n, rope, options)), RcDoc::space())
                  }
              }).collect_vec();
             RcDoc::concat(subs)
         },
         "primary"=>{
-            RcDoc::intersperse(node.children(&mut cursor).map(|n|to_doc(&n, rope, tab_size)), RcDoc::space())
+            RcDoc::intersperse(node.children(&mut cursor).map(|n|to_doc(&n, rope, options)), RcDoc::space())
         },
         "nested_description"
          => {
             RcDoc::text("(").append(RcDoc::line()).append(
-                to_doc(&node.named_child(0).expect("open parentheses to have sibling"), rope, tab_size)
+                to_doc(&node.named_child(0).expect("open parentheses to have sibling"), rope, options)
             ).nest(nest_depth).append(RcDoc::line()).append(")")
         },
         "class_frame"
@@ -2588,7 +2595,7 @@ fn to_doc(node: &Node, rope: &Rope, tab_size: u32) -> RcDoc<'static, ()> {
         | "object_property_frame"
         | "annotation_property_frame"
         | "individual_frame"
-         => frame_to_doc(node, rope, tab_size, nest_depth),
+         => frame_to_doc(node, rope, options, nest_depth),
         _ => RcDoc::text(text), // this applies also to "ERROR" nodes!
     }
 }
@@ -2596,7 +2603,7 @@ fn to_doc(node: &Node, rope: &Rope, tab_size: u32) -> RcDoc<'static, ()> {
 fn nesting_property_with_keyword_to_frame(
     node: &Node,
     rope: &Rope,
-    tab_size: u32,
+    options: &FormattingSettings,
     nest_depth: isize,
 ) -> RcDoc<'static> {
     let mut cursor = node.walk();
@@ -2604,7 +2611,7 @@ fn nesting_property_with_keyword_to_frame(
 
     // This should be the keyword
     if let Some(child) = node.child(0) {
-        docs.push(to_doc(&child, rope, tab_size).append(RcDoc::line()));
+        docs.push(to_doc(&child, rope, options).append(RcDoc::line()));
     }
 
     for (is_separator, chunk) in &node
@@ -2624,7 +2631,7 @@ fn nesting_property_with_keyword_to_frame(
             }
         } else {
             docs.push(RcDoc::intersperse(
-                chunk.map(|n| to_doc(&n, rope, tab_size)),
+                chunk.map(|n| to_doc(&n, rope, options)),
                 RcDoc::line(),
             ));
         }
@@ -2633,15 +2640,19 @@ fn nesting_property_with_keyword_to_frame(
     RcDoc::concat(docs).nest(nest_depth).group()
 }
 
-fn source_file_to_doc(node: &Node, rope: &Rope, tab_size: u32) -> RcDoc<'static, ()> {
+fn source_file_to_doc(
+    node: &Node,
+    rope: &Rope,
+    options: &FormattingSettings,
+) -> RcDoc<'static, ()> {
     let mut cursor = node.walk();
     let prefix_docs = node
         .children_by_field_name("prefix", &mut cursor)
-        .map(|n| to_doc(&n, rope, tab_size))
+        .map(|n| to_doc(&n, rope, options))
         .collect_vec();
     let ontology_doc = node
         .child_by_field_name("ontology")
-        .map_or(RcDoc::nil(), |n| to_doc(&n, rope, tab_size));
+        .map_or(RcDoc::nil(), |n| to_doc(&n, rope, options));
     if prefix_docs.is_empty() {
         ontology_doc
     } else {
@@ -2655,7 +2666,12 @@ fn source_file_to_doc(node: &Node, rope: &Rope, tab_size: u32) -> RcDoc<'static,
     }
 }
 
-fn ontology_to_doc(node: &Node, rope: &Rope, tab_size: u32, nest_depth: isize) -> RcDoc<'static> {
+fn ontology_to_doc(
+    node: &Node,
+    rope: &Rope,
+    options: &FormattingSettings,
+    nest_depth: isize,
+) -> RcDoc<'static> {
     let mut cursor = node.walk();
     RcDoc::intersperse(
         [
@@ -2664,11 +2680,11 @@ fn ontology_to_doc(node: &Node, rope: &Rope, tab_size: u32, nest_depth: isize) -
                 .append(RcDoc::intersperse(
                     node.child_by_field_name("iri")
                         .into_iter()
-                        .map(|n| to_doc(&n, rope, tab_size))
+                        .map(|n| to_doc(&n, rope, options))
                         .chain(
                             node.child_by_field_name("version_iri")
                                 .into_iter()
-                                .map(|n| to_doc(&n, rope, tab_size)),
+                                .map(|n| to_doc(&n, rope, options)),
                         ),
                     RcDoc::line(),
                 ))
@@ -2677,20 +2693,28 @@ fn ontology_to_doc(node: &Node, rope: &Rope, tab_size: u32, nest_depth: isize) -
             // imports
             RcDoc::intersperse(
                 node.children_by_field_name("import", &mut cursor.clone())
-                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
+                    .map(|n| to_doc(&n, rope, options).append(RcDoc::hardline())),
                 RcDoc::nil(),
             ),
             // annotations
             RcDoc::intersperse(
                 node.children_by_field_name("annotations", &mut cursor.clone())
-                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
+                    .map(|n| to_doc(&n, rope, options).append(RcDoc::hardline())),
                 RcDoc::nil(),
             ),
             // frames
             RcDoc::intersperse(
-                node.children_by_field_name("frame", &mut cursor)
-                    .sorted_by_key(|n| frame_order(n.kind()))
-                    .map(|n| to_doc(&n, rope, tab_size).append(RcDoc::hardline())),
+                {
+                    let frame_nodes = node.children_by_field_name("frame", &mut cursor);
+
+                    let maybe_sorted: Box<dyn Iterator<Item = Node<'_>>> = if options.order_frames {
+                        Box::new(frame_nodes.sorted_by_key(|n| frame_order(n.kind())))
+                    } else {
+                        Box::new(frame_nodes)
+                    };
+
+                    maybe_sorted.map(|n| to_doc(&n, rope, options).append(RcDoc::hardline()))
+                },
                 RcDoc::hardline(),
             ),
         ],
@@ -2710,14 +2734,19 @@ fn frame_order(frame_kind: &str) -> u32 {
     }
 }
 
-fn frame_to_doc(node: &Node, rope: &Rope, tab_size: u32, nest_depth: isize) -> RcDoc<'static> {
+fn frame_to_doc(
+    node: &Node,
+    rope: &Rope,
+    options: &FormattingSettings,
+    nest_depth: isize,
+) -> RcDoc<'static> {
     let mut cursor = node.walk();
     node.child(0)
-        .map_or(RcDoc::nil(), |n| to_doc(&n, rope, tab_size))
+        .map_or(RcDoc::nil(), |n| to_doc(&n, rope, options))
         .append(RcDoc::line())
         .append(
             node.child(1)
-                .map_or(RcDoc::nil(), |n| to_doc(&n, rope, tab_size)),
+                .map_or(RcDoc::nil(), |n| to_doc(&n, rope, options)),
         )
         .nest(nest_depth)
         .group()
@@ -2725,7 +2754,7 @@ fn frame_to_doc(node: &Node, rope: &Rope, tab_size: u32, nest_depth: isize) -> R
         .append(RcDoc::intersperse(
             node.children(&mut cursor)
                 .skip(2)
-                .map(|n| to_doc(&n, rope, tab_size)),
+                .map(|n| to_doc(&n, rope, options)),
             RcDoc::hardline(),
         ))
         .nest(nest_depth)
@@ -2789,7 +2818,11 @@ mod tests {
 
         info!("sexp:\n{}", doc.tree().root_node().to_sexp());
 
-        let result = doc.formatted(4, 35);
+        let result = doc.formatted(&FormattingSettings {
+            tab_size: 4,
+            ruler_width: 35,
+            order_frames: true,
+        });
 
         assert_eq!(
             result,
@@ -2842,7 +2875,11 @@ mod tests {
 
         info!("sexp:\n{}", doc.tree().root_node().to_sexp());
 
-        let result = doc.formatted(4, 35);
+        let result = doc.formatted(&FormattingSettings {
+            tab_size: 4,
+            ruler_width: 35,
+            order_frames: true,
+        });
 
         assert_eq!(
             result,
@@ -2864,6 +2901,41 @@ mod tests {
                                 or eeeeeeeee
                             )
                         )
+            "}
+        );
+    }
+
+    #[test(tokio::test)]
+    async fn internal_document_formatted_without_frame_order_should_format_correctly() {
+        let tmp_url = TmpUrl::new();
+        let doc = InternalDocument::new(
+            tmp_url.url(),
+            -1,
+            indoc! {r"
+                Ontology:a
+                Class: a
+                AnnotationProperty: a
+            "}
+            .into(),
+        );
+
+        let result = doc.formatted(&FormattingSettings {
+            tab_size: 4,
+            ruler_width: 35,
+            order_frames: false,
+        });
+
+        assert_eq!(
+            result,
+            indoc! {r"
+                Ontology: a
+
+                
+                Class: a
+
+                
+                AnnotationProperty: a
+
             "}
         );
     }
