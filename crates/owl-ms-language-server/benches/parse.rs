@@ -78,7 +78,7 @@ fn ontology_change_bench(c: &mut Criterion) {
         group.warm_up_time(Duration::from_millis(100));
         // group.measurement_time(Duration::from_millis(5000));
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
-            b.iter_batched_ref(
+            b.iter_batched(
                 || {
                     let mut source_code = "Ontology: <http://foo.bar>\n".to_string();
                     source_code.push_str(
@@ -109,7 +109,10 @@ fn ontology_change_bench(c: &mut Criterion) {
 
                     (rope, parser, old_tree)
                 },
-                |(source, parser, old_tree)| re_parse_helper(source, parser, old_tree),
+                |(source, mut parser, old_tree)| {
+                    black_box(re_parse_helper(&source, &mut parser, &old_tree));
+                    (source, parser, old_tree)
+                },
                 criterion::BatchSize::SmallInput,
             );
         });
