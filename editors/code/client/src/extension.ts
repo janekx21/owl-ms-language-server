@@ -25,21 +25,6 @@ import {
 
 let client: LanguageClient;
 
-// class F implements StaticFeature {
-// 	fillInitializeParams?: (params: InitializeParams) => void;
-// 	fillClientCapabilities(capabilities: ClientCapabilities): void {
-// 		capabilities.general = { positionEncodings: ['utf-8', 'utf-16'] };
-// 	}
-// 	preInitialize?: (capabilities: ServerCapabilities<any>, documentSelector: DocumentSelector) => void;
-// 	initialize(capabilities: ServerCapabilities<any>, documentSelector: DocumentSelector): void {
-// 	}
-// 	getState(): FeatureState {
-// 		return { kind: 'static' };
-// 	}
-// 	dispose(): void {
-// 	}
-// }
-
 export function activate(context: ExtensionContext) {
 	// The server is implemented in rust
 	//const command = "/home/janek/Git/owl-ms-language-server/target/debug/owl-ms-language-server";
@@ -50,6 +35,10 @@ export function activate(context: ExtensionContext) {
 			run: { command, transport: TransportKind.stdio },
 			debug: { command, transport: TransportKind.stdio }
 		};
+
+		// Get configuration
+		const config = workspace.getConfiguration('omn');
+		const orderFrames = config.get<boolean>('orderFrames', false);
 
 		// Options to control the language client
 		const clientOptions: LanguageClientOptions = {
@@ -63,6 +52,11 @@ export function activate(context: ExtensionContext) {
 			},
 			markdown: {
 				isTrusted: true
+			},
+			initializationOptions: {
+				omn: {
+					orderFrames: orderFrames
+				}
 			}
 		};
 
