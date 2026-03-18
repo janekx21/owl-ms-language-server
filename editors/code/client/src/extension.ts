@@ -1,79 +1,88 @@
-/* --------------------------------------------------------------------------------------------
- * Copyright (c) Microsoft Corporation. All rights reserved.
- * Licensed under the MIT License. See License.txt in the project root for license information.
- * ------------------------------------------------------------------------------------------ */
-
-
 import { spawnSync } from "child_process";
 import * as os from "os";
-import * as path from 'path';
 import { workspace, ExtensionContext, Uri, window } from 'vscode';
 import { SemanticTokensFeature } from 'vscode-languageclient/lib/common/semanticTokens';
 
 import {
-	ClientCapabilities,
-	DocumentSelector,
-	FeatureState,
-	InitializeParams,
 	LanguageClient,
 	LanguageClientOptions,
-	ServerCapabilities,
 	ServerOptions,
-	StaticFeature,
 	TransportKind
 } from 'vscode-languageclient/node';
 
-let client: LanguageClient;
+let client: LanguageClient | undefined;
 
 export function activate(context: ExtensionContext) {
-	// The server is implemented in rust
-	//const command = "/home/janek/Git/owl-ms-language-server/target/debug/owl-ms-language-server";
-	getServerCommand(context).then(command => {
-		// If the extension is launched in debug mode then the debug server options are used
-		// Otherwise the run options are used
-		const serverOptions: ServerOptions = {
-			run: { command, transport: TransportKind.stdio },
-			debug: { command, transport: TransportKind.stdio }
-		};
+	// Start the language server
+	startClient(context);
 
-		// Get configuration
-		const config = workspace.getConfiguration('omn');
-		const orderFrames = config.get<boolean>('orderFrames', false);
-
-		// Options to control the language client
-		const clientOptions: LanguageClientOptions = {
-			// Register the server for plain text documents
-			documentSelector: [{ scheme: 'file', language: 'owl-ms', }], // dont use pattern. this would break everything.
-			synchronize: {
-				// Notify the server about file changes to '.clientrc files contained in the workspace
-				// TODO replace with useful
-				fileEvents: workspace.createFileSystemWatcher('**/.clientrc')
-
-			},
-			markdown: {
-				isTrusted: true
-			},
-			initializationOptions: {
-				omn: {
-					orderFrames: orderFrames
-				}
+	// Restart the language server when configuration changes
+	context.subscriptions.push(
+		workspace.onDidChangeConfiguration(async (e) => {
+			if (e.affectsConfiguration('omn')) {
+				await restartClient(context);
 			}
-		};
+		})
+	);
+}
 
-		// Create the language client and start the client.
-		client = new LanguageClient(
-			'owl-ms-language-server',
-			'OWL Manchester Syntax Language Server',
-			serverOptions,
-			clientOptions
-		);
+async function startClient(context: ExtensionContext): Promise<void> {
+	const command = await getServerCommand(context);
+	if (!command) {
+		return;
+	}
 
-		//client.registerFeature(new F());
-		client.registerFeature(new SemanticTokensFeature(client));
+	// If the extension is launched in debug mode then the debug server options are used
+	// Otherwise the run options are used
+	const serverOptions: ServerOptions = {
+		run: { command, transport: TransportKind.stdio },
+		debug: { command, transport: TransportKind.stdio }
+	};
 
-		// Start the client. This will also launch the server
-		client.start();
-	})
+	// Get configuration
+	const config = workspace.getConfiguration('omn');
+	const orderFrames = config.get<boolean>('orderFrames', false);
+
+	// Options to control the language client
+	const clientOptions: LanguageClientOptions = {
+		// Register the server for plain text documents
+		documentSelector: [{ scheme: 'file', language: 'owl-ms', }], // dont use pattern. this would break everything.
+		synchronize: {
+			// Notify the server about file changes to '.clientrc files contained in the workspace
+			// TODO replace with useful
+			fileEvents: workspace.createFileSystemWatcher('**/.clientrc')
+
+		},
+		markdown: {
+			isTrusted: true
+		},
+		initializationOptions: {
+			omn: {
+				orderFrames: orderFrames
+			}
+		}
+	};
+
+	// Create the language client and start the client.
+	client = new LanguageClient(
+		'owl-ms-language-server',
+		'OWL Manchester Syntax Language Server',
+		serverOptions,
+		clientOptions
+	);
+
+	client.registerFeature(new SemanticTokensFeature(client));
+
+	// Start the client. This will also launch the server
+	await client.start();
+}
+
+async function restartClient(context: ExtensionContext): Promise<void> {
+	if (client) {
+		await client.stop();
+		client = undefined;
+	}
+	await startClient(context);
 }
 
 export function deactivate(): Thenable<void> | undefined {
