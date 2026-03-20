@@ -106,22 +106,7 @@ impl Backend {
         let mini_backend = self.clone();
         let path = path.to_owned();
         tokio::spawn(async move {
-            let mut todo: LinkedList<(Url, u32)> = {
-                let sync = mini_backend.sync.read().await;
-                let workspace = sync
-                    .get_workspace(
-                        &Url::from_file_path(&path)
-                            .expect("File path should be convertable to URL"),
-                    )
-                    .expect("Workspace for document should exist");
-
-                let document = workspace.get_internal_document(&path).unwrap();
-                document
-                    .reachable_urls(true)
-                    .iter()
-                    .map(|u| (u.clone(), 1))
-                    .collect()
-            };
+            let mut todo: LinkedList<(Url, u32)> = { build_todo_list(&mini_backend, &path).await };
 
             let mut done = HashSet::<Url>::new();
 
@@ -142,7 +127,7 @@ impl Backend {
                     continue;
                 }
 
-                let resolved_doc = {
+                let resolved_doc_or_err = {
                     let sync = mini_backend.sync.read().await;
                     let workspace = sync
                         .get_workspace(
@@ -161,9 +146,10 @@ impl Backend {
                     .ok()
                 };
 
-                let resolved_doc = if let Some(resolved_doc) = resolved_doc {
+                let resolved_doc = if let Some(resolved_doc) = resolved_doc_or_err {
                     resolved_doc
                 } else {
+                    // This is the error case
                     warn!("Resolving {url} did not work");
                     None
                 };
@@ -207,10 +193,45 @@ impl Backend {
                     // The doc is already resolved
                 }
 
+                // Refresh the inline hints, because we got new information now
+                refresh_inlay_hints(&mini_backend).await;
+
                 done.insert(url);
             }
+
+            // Every dependency is loaded
         })
     }
+}
+
+async fn refresh_inlay_hints(mini_backend: &Backend) {
+    match mini_backend.client.inline_value_refresh().await {
+        Ok(()) => {
+            debug!("Refresh inline hints");
+        }
+        // Looks like I dont have a specific tower lsp error variant.
+        // Buts thats not that bad. Just log it.
+        Err(err) => {
+            error!("{err}");
+        }
+    }
+}
+
+async fn build_todo_list(
+    mini_backend: &Backend,
+    path: &std::path::PathBuf,
+) -> LinkedList<(Url, u32)> {
+    let sync = mini_backend.sync.read().await;
+    let workspace = sync
+        .get_workspace(&Url::from_file_path(path).expect("File path should be convertable to URL"))
+        .expect("Workspace for document should exist");
+
+    let document = workspace.get_internal_document(path).unwrap();
+    document
+        .reachable_urls(true)
+        .iter()
+        .map(|u| (u.clone(), 1))
+        .collect()
 }
 
 /// This is the main language server implamentation. It is the entry point for all requests to the language server.
@@ -769,7 +790,6 @@ impl LanguageServer for Backend {
             .flat_map(|(_, fi)| {
                 let name = fi.label().unwrap_or(fi.iri.clone());
 
-                
                 #[allow(deprecated)] // All fields need to be specified
                 fi.definitions
                     .iter()
