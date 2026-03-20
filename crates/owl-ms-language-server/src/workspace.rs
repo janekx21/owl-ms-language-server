@@ -205,20 +205,23 @@ impl Workspace {
     }
 
     // TODO #28 maybe return a reference?
-    /// This searches in the frames of internal documents
+    /// This searches in the frames of internal documents (case-insensitive)
     pub fn search_frame(&self, partial_text: &str) -> Vec<(String, Iri, FrameInfo)> {
+        let partial_lower = partial_text.to_lowercase();
         self.internal_documents
             .values()
             .flat_map(|doc| {
                 doc.all_frame_infos()
                     .filter_map(|item| {
-                        if item.iri.contains(partial_text) {
+                        if item.iri.to_lowercase().contains(&partial_lower) {
                             Some((item.iri.clone(), item.iri.clone(), item.clone()))
                         } else {
                             item.annotations
                                 .values()
                                 .find_map(|values| {
-                                    values.iter().find(|value| value.starts_with(partial_text))
+                                    values.iter().find(|value| {
+                                        value.to_lowercase().starts_with(&partial_lower)
+                                    })
                                 })
                                 .map(|full| (full.clone(), item.iri.clone(), item.clone()))
                         }

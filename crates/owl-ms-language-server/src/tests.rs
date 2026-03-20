@@ -2081,6 +2081,81 @@ async fn backend_completion_with_iri_should_complete_to_iri() {
 }
 
 #[test(tokio::test)]
+async fn backend_completion_with_iri_should_be_case_insensitive() {
+    setup();
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "foo".into(),
+        }),
+        vec![],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("a.omn")).unwrap();
+
+    // Use lowercase "som" to match "Some Class" (case-insensitive)
+    let ontology = indoc! {r#"
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Ontology: <http://foo.org/a>
+        Class: F_1234
+            Annotations:
+                rdfs:label "Some Class"
+        Class: Other
+            SubClassOf: som #<--here (lowercase)
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    let res = service
+        .inner()
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url },
+                position: lsp_types::Position::new(6, 19),
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            context: None,
+        })
+        .await;
+
+    // Assert
+
+    let res = res.unwrap();
+    let res = res.unwrap();
+    let items = match res {
+        CompletionResponse::Array(completion_items) => completion_items,
+        CompletionResponse::List(_) => unimplemented!(),
+    };
+
+    let item = items.into_iter().exactly_one().unwrap();
+
+    // Should match "Some Class" even though we typed "som" (lowercase)
+    assert_eq!(item.label, "Some Class");
+    assert_eq!(item.insert_text, Some("F_1234".to_string()));
+}
+
+#[test(tokio::test)]
 async fn backend_references_in_multi_file_ontology_should_work() {
     setup();
     // Arrange
