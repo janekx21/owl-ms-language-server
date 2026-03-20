@@ -906,6 +906,7 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
     Class: p
     "};
 
+    // Reordering frames is disabled on default
     let target = indoc! {"
     Prefix: a: <http://a.b/c/>
     Prefix: b: <http://a.b/b/>
@@ -949,7 +950,7 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
     
     AnnotationProperty: rdfs:label
 
-    
+
     Class: p
     
     "};

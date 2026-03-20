@@ -14,9 +14,9 @@ An incremental analysis assistant for writing ontologies with the [OWL 2 Web Ont
 
 ## Structure of this repository
 
-- [The Language Server](crates/owl-ms-language-server/)
-- [The Grammar written in tree-sitter](crates/tree-sitter-owl-ms/)
-- [Visual Studio Code Extension](editors/code/)
+- [crates/owl-ms-language-server/](crates/owl-ms-language-server/) The Language Server
+- [crates/tree-sitter-owl-ms/](crates/tree-sitter-owl-ms/) The Grammar written in tree-sitter
+- [editors/code/](editors/code/) Visual Studio Code Extension
 
 ## Getting Started / Editor integration
 
@@ -107,21 +107,31 @@ To integrate the language server into an editor not listed above use the documen
 
 - Distributed via [crates.io](https://crates.io/crates/owl-ms-language-server)
 
+## Configuration
+
+This server contributes the following LSP settings:
+
+| Setting              | Description                                | Default |
+| -------------------- | ------------------------------------------ | ------- |
+| omn.orderFrames      | Enables ordering frames when formating     | false   |
+
+Settings may need a restart to be applied.
+
 ## FAQ
 
 ### Where can i find logs?
 Logs can be found under `<tempdir>/owl-ms-lanugage-server.log`. On Windows `<tempdir>` is most likely `C:\Users\<username>\AppData\Local\Temp`, on Linux `/tmp` and on MacOS `/private/var/tmp`.
 
-### Do renames work for non .omn files like .owl or .xml?
+### Do renames work across all OWL file types like .owl or .xml?
 
-No. Only .omn files.
+No. Only .omn files are supported.
 
 ## Roadmap
 
 - [x] Basic Grammar
 - [x] Basic Language Server
 - [x] VS Code plugin
-- [ ] making the LS more practical
+- [x] making the LS more practical
 
 ## Contributing
 
