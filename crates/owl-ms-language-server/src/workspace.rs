@@ -386,8 +386,8 @@ impl Workspace {
             let url_copy = url.clone();
             let document_text =
                 tokio::task::spawn_blocking(move || http_client.get(url_copy.as_str()))
-                    .await?
-                    .expect("Should not be canceled");
+                    .await
+                    .expect("Should not be canceled")?;
 
             let document = timeit("external doc new", || {
                 ExternalDocument::new(document_text, url.clone())

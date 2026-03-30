@@ -17,3 +17,4 @@ editors/code/server/owl-ms-language-server.exe
 **/*.profdata
 **/*.owl/
 
+profile.json.gz

@@ -57,3 +57,7 @@ pedantic = "warn"
 
 [profile.bench]
 debug = true
+
+# Enable this for profileing (I dont know why a profile for profiling does not work)
+# [profile.release]
+# debug = true
