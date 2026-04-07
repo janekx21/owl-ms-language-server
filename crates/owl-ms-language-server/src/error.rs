@@ -33,6 +33,9 @@ pub enum Error {
     PositionOutOfBoundsTowerLsp(tower_lsp::lsp_types::Position),
     #[error("The LSP Feature is not supported at the moment: {0}")]
     LspFeatureNotSupported(&'static str),
+    #[error("Frame Info for IRI not found {0}")]
+    FrameInfoNotFound(String),
+
     // From other error types
     #[error("Horned Owl Error: {0}")]
     HornedOwl(#[from] horned_owl::error::HornedError),
