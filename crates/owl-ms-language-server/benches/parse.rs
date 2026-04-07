@@ -11,16 +11,16 @@ fn parse_helper(source_code: &String, parser: &mut Parser) {
     parser.parse(source_code, None).unwrap();
 }
 
-fn re_parse_helper(source_code: &Rope, parser: &mut Parser, old_tree: &Tree) {
+fn re_parse_helper(source_code: &Rope, parser: &mut Parser, old_tree: &Tree) -> Tree {
     let rope_provider = RopeProvider::new(source_code);
-    parser.reset();
+    // parser.reset();
     parser
         .parse_with_options(
             &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
             Some(old_tree),
             None,
         )
-        .unwrap();
+        .unwrap()
 }
 
 fn parse_bench(c: &mut Criterion) {

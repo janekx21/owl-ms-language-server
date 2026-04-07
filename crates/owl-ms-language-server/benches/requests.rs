@@ -1,5 +1,6 @@
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use owl_ms_language_server::{clear_caches, web::HttpClient, Backend};
+#[cfg(unix)]
 use pprof::criterion::{Output, PProfProfiler};
 use std::{collections::HashMap, hint::black_box, time::Duration};
 use tempdir::TempDir;
@@ -1050,6 +1051,8 @@ criterion_group!(
     bench_symbol,
 );
 
+// Profiling benchmarks group
+#[cfg(unix)]
 criterion_group!(
     name = profiling;
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
