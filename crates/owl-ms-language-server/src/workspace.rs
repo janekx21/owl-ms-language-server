@@ -795,38 +795,7 @@ impl InternalDocument {
 
         // This range is relative to the *old* document not the new one
         for change in &params.content_changes {
-            let range = change.range.expect("range to be defined");
-            // LSP ranges are in bytes when encoding is utf-8!!!
-            let old_range: Range = Range::from_lsp(&range, &new_rope, encoding)?;
-            let start_byte = old_range.start.byte_index(&new_rope);
-            let old_end_byte = old_range.end.byte_index(&new_rope);
-
-            // must come before the rope is changed!
-            let start_char = new_rope.try_byte_to_char(start_byte)?;
-            let old_end_char = new_rope.try_byte_to_char(old_end_byte)?;
-
-            debug!(
-                "change range in chars {start_byte}..{old_end_byte} og range {range:?} and text {}",
-                change.text
-            );
-
-            // rope replace
-            new_rope.try_remove(start_char..old_end_char)?;
-            new_rope.try_insert(start_char, &change.text)?;
-
-            // this must come after the rope was changed!
-            let new_end_byte = start_byte + change.text.len();
-            let new_end_position = Position::new_from_byte_index(&new_rope, new_end_byte);
-
-            let edit = InputEdit {
-                start_byte,
-                old_end_byte,
-                new_end_byte,
-                start_position: old_range.start.into(),
-                old_end_position: old_range.end.into(),
-                new_end_position: new_end_position.into(),
-            };
-            timeit("tree edit", || new_tree.edit(&edit));
+            apply_change_to_rope_and_tree(encoding, &mut new_tree, &mut new_rope, change)?;
         }
         let new_version = params.text_document.version;
 
@@ -1256,6 +1225,47 @@ impl InternalDocument {
             .publish_diagnostics(self.uri.clone(), diagnostics, Some(self.version))
             .await;
     }
+}
+
+/// .
+///
+/// # Panics
+///
+/// Panics if change has no range.
+///
+/// # Errors
+///
+/// This function will return an error if the change is out of range.
+pub fn apply_change_to_rope_and_tree(
+    encoding: &PositionEncodingKind,
+    new_tree: &mut Tree,
+    new_rope: &mut Rope,
+    change: &lsp_types::TextDocumentContentChangeEvent,
+) -> Result<()> {
+    let range = change.range.expect("range to be defined");
+    let old_range: Range = Range::from_lsp(&range, &*new_rope, encoding)?;
+    let start_byte = old_range.start.byte_index(&*new_rope);
+    let old_end_byte = old_range.end.byte_index(&*new_rope);
+    let start_char = new_rope.try_byte_to_char(start_byte)?;
+    let old_end_char = new_rope.try_byte_to_char(old_end_byte)?;
+    debug!(
+        "change range in chars {start_byte}..{old_end_byte} og range {range:?} and text {}",
+        change.text
+    );
+    new_rope.try_remove(start_char..old_end_char)?;
+    new_rope.try_insert(start_char, &change.text)?;
+    let new_end_byte = start_byte + change.text.len();
+    let new_end_position = Position::new_from_byte_index(&*new_rope, new_end_byte);
+    let edit = InputEdit {
+        start_byte,
+        old_end_byte,
+        new_end_byte,
+        start_position: old_range.start.into(),
+        old_end_position: old_range.end.into(),
+        new_end_position: new_end_position.into(),
+    };
+    timeit("tree edit", || new_tree.edit(&edit));
+    Ok(())
 }
 
 #[derive(Debug)]

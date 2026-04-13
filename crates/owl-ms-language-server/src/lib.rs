@@ -40,6 +40,7 @@ use crate::web::HttpClient;
 use crate::workspace::{Document, DocumentReference, FormattingSettings, InternalDocument};
 
 // Re-export for benchmarks
+pub use crate::workspace::apply_change_to_rope_and_tree;
 pub use crate::workspace::clear_caches;
 
 // Constants

@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use owl_ms_language_server::{clear_caches, web::HttpClient, Backend};
-#[cfg(unix)]
+// #[cfg(unix)]
 use pprof::criterion::{Output, PProfProfiler};
 use std::{collections::HashMap, hint::black_box, time::Duration};
 use tempdir::TempDir;
@@ -71,7 +71,7 @@ fn sample_size_for(ontology_size: usize) -> usize {
 
 /// Generate an ontology with approximately `target_lines` lines.
 /// Uses a fixed seed for reproducibility.
-fn generate_ontology(target_lines: usize) -> String {
+pub fn generate_ontology(target_lines: usize) -> String {
     let mut rng = SeededRng::new(RNG_SEED);
     let mut lines = Vec::with_capacity(target_lines + 100);
 
@@ -112,7 +112,8 @@ fn generate_ontology(target_lines: usize) -> String {
     let mut entity_counter = 0;
 
     while lines.len() < target_lines {
-        let frame_type = rng.next_usize(6);
+        // let frame_type = rng.next_usize(6);
+        let frame_type = rng.next_usize(1);
         entity_counter += 1;
 
         match frame_type {
@@ -314,36 +315,36 @@ fn generate_class(
     // Class frame (~4-8 lines each)
     let class_name = format!("Class{entity_counter}");
     lines.push(format!("    Class: {class_name}"));
-    lines.push("        Annotations:".to_string());
-    lines.push(format!("            rdfs:label \"{class_name} Label\"@en"));
+    // lines.push("        Annotations:".to_string());
+    // lines.push(format!("            rdfs:label \"{class_name} Label\"@en"));
 
-    if rng.next_usize(2) == 0 {
-        lines.push(format!(
-            "            rdfs:comment \"Description of {class_name}\"@en"
-        ));
-    }
+    // if rng.next_usize(2) == 0 {
+    //     lines.push(format!(
+    //         "            rdfs:comment \"Description of {class_name}\"@en"
+    //     ));
+    // }
 
-    // SubClassOf
-    if !classes.is_empty() && rng.next_usize(3) > 0 {
-        let parent = rng.choose(&*classes).clone();
-        lines.push(format!("        SubClassOf: {parent}"));
-    }
+    // // SubClassOf
+    // if !classes.is_empty() && rng.next_usize(3) > 0 {
+    //     let parent = rng.choose(&*classes).clone();
+    //     lines.push(format!("        SubClassOf: {parent}"));
+    // }
 
-    // EquivalentTo (occasionally)
-    if classes.len() > 2 && rng.next_usize(5) == 0 {
-        let equiv = rng.choose(&*classes).clone();
-        if equiv != class_name {
-            lines.push(format!("        EquivalentTo: {equiv}"));
-        }
-    }
+    // // EquivalentTo (occasionally)
+    // if classes.len() > 2 && rng.next_usize(5) == 0 {
+    //     let equiv = rng.choose(&*classes).clone();
+    //     if equiv != class_name {
+    //         lines.push(format!("        EquivalentTo: {equiv}"));
+    //     }
+    // }
 
-    // DisjointWith (occasionally)
-    if classes.len() > 3 && rng.next_usize(6) == 0 {
-        let disjoint = rng.choose(&*classes).clone();
-        if disjoint != class_name && disjoint != "owl:Thing" {
-            lines.push(format!("        DisjointWith: {disjoint}"));
-        }
-    }
+    // // DisjointWith (occasionally)
+    // if classes.len() > 3 && rng.next_usize(6) == 0 {
+    //     let disjoint = rng.choose(&*classes).clone();
+    //     if disjoint != class_name && disjoint != "owl:Thing" {
+    //         lines.push(format!("        DisjointWith: {disjoint}"));
+    //     }
+    // }
 
     lines.push(String::new());
     classes.push(class_name);
@@ -1034,6 +1035,51 @@ fn bench_symbol(c: &mut Criterion) {
     clear_caches();
 }
 
+fn bench_did_change(c: &mut Criterion) {
+    let mut group = c.benchmark_group("did_change");
+
+    for &size in &BENCHMARK_SIZES {
+        group.throughput(Throughput::Elements(size as u64));
+        group.warm_up_time(Duration::from_millis(100));
+        group.measurement_time(Duration::from_millis(500));
+        let setup = setup_with_size(size);
+
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &_size| {
+            b.iter(|| {
+                let (rt, service, url, dir, _) = &setup;
+                rt.block_on(async {
+                    service
+                        .inner()
+                        .did_change(DidChangeTextDocumentParams {
+                            text_document: VersionedTextDocumentIdentifier {
+                                uri: url.clone(),
+                                version: 0,
+                            },
+                            content_changes: vec![TextDocumentContentChangeEvent {
+                                range: Some(Range {
+                                    start: Position {
+                                        line: 10,
+                                        character: 0,
+                                    },
+                                    end: Position {
+                                        line: 10,
+                                        character: 0,
+                                    },
+                                }),
+                                text: String::from("Class: InsertedClass\n"),
+                                range_length: None,
+                            }],
+                        })
+                        .await;
+                });
+                (rt, service, dir)
+            });
+        });
+    }
+    group.finish();
+    clear_caches();
+}
+
 criterion_group!(
     benches,
     bench_hover,
@@ -1049,10 +1095,11 @@ criterion_group!(
     bench_semantic_tokens_range,
     bench_inlay_hint,
     bench_symbol,
+    bench_did_change,
 );
 
 // Profiling benchmarks group
-#[cfg(unix)]
+// #[cfg(unix)]
 criterion_group!(
     name = profiling;
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));

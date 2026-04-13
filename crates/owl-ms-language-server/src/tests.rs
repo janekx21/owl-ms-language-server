@@ -1,4 +1,6 @@
-use crate::{catalog::Catalog, queries::ALL_QUERIES, test_helpers::*, *};
+use crate::{
+    catalog::Catalog, queries::ALL_QUERIES, rope_provider::RopeProvider, test_helpers::*, *,
+};
 use horned_owl::{
     io::{OWXParserConfiguration, ParserConfiguration, RDFParserConfiguration},
     model::{AnnotatedComponent, Build},
@@ -10,6 +12,7 @@ use ropey::Rope;
 use sophia::api::term::SimpleTerm;
 use tempdir::TempDir;
 use test_log::test;
+use tower_lsp::lsp_types::{self, *};
 use tower_lsp::LspService;
 
 /// This module contains tests.
@@ -32,6 +35,71 @@ fn parse_ontology_should_work() {
 
     // Assert
     assert_eq!(tree.root_node().has_error(), false);
+}
+
+#[test]
+fn reparse_ontology_should_work() {
+    setup();
+    // Arrange
+    let mut parser = arrange_parser();
+    parser.set_logger(Some(Box::new(|type_, str| match type_ {
+        tree_sitter_c2rust::LogType::Parse => debug!(target: "tree-sitter-parse", "{str}"),
+        tree_sitter_c2rust::LogType::Lex => debug!(target: "tree-sitter-lex", "{str}"),
+    })));
+
+    let mut source_code = Rope::from_str(indoc! {"
+        Ontology: O
+            Class: A
+            Class: B
+            Class: C
+    "});
+    let rope_provider = RopeProvider::new(&source_code);
+    let mut old_tree = parser
+        .parse_with_options(
+            &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+            None,
+            None,
+        )
+        .unwrap();
+
+    println!("--------------------- reparse ---------------");
+
+    let text = "    Class: D";
+    let line = 2;
+    apply_change_to_rope_and_tree(
+        &PositionEncodingKind::UTF8,
+        &mut old_tree,
+        &mut source_code,
+        &TextDocumentContentChangeEvent {
+            range: Some(lsp_types::Range {
+                start: lsp_types::Position {
+                    line: line.try_into().unwrap(),
+                    character: 0,
+                },
+                end: lsp_types::Position {
+                    line: line.try_into().unwrap(),
+                    character: 0,
+                },
+            }),
+            text: text.to_string(),
+            range_length: None,
+        },
+    )
+    .unwrap();
+
+    // Act
+    let rope_provider = RopeProvider::new(&source_code);
+    let new_tree = parser
+        .parse_with_options(
+            &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+            Some(&old_tree),
+            None,
+        )
+        .unwrap();
+
+    // Assert
+    assert_eq!(new_tree.root_node().has_error(), false);
+    panic!()
 }
 
 #[test]
@@ -1662,7 +1730,7 @@ async fn backend_hover_should_use_external_rdf_info() {
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url },
-                position: tower_lsp::lsp_types::Position {
+                position: lsp_types::Position {
                     line: 2,
                     character: 13,
                 },

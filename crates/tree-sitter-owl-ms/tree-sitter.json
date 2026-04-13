@@ -7,7 +7,12 @@
       "path": ".",
       "file-types": [
         "omn"
-      ]
+      ],
+      "external-scanner": {
+        "c-sources": [
+          "src/scanner.c"
+        ]
+      }
     }
   ],
   "metadata": {

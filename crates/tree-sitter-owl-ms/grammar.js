@@ -1,14 +1,34 @@
 module.exports = grammar({
   name: 'owl_ms',
-  conflicts: $ => [
-    [$.datatype_frame],
-    [$.data_property_iri, $.object_property_iri],
-    [$.datatype_iri, $.class_iri],
-  ],
+  word: $ => $._pn_local,
+  // conflicts: $ => [[$.data_or_object_property_iri, $.data_or_object_property_iri]],
+  // externals: $ => [
+  //   $._pname_ln, // replaces the internal token version
+  //   $._pn_local, // replaces the internal token version
+  // ],
   extras: $ => [/[ \t\n\r]/, $.comment],
+  supertypes: $ => [$._frame],
   rules: {
     // My rules
-    source_file: $ => $._ontology_document,
+    source_file: $ =>
+      seq($._prefix_ontology_header, field('frame', repeat($._frame))),
+
+    _prefix_ontology_header: $ =>
+      seq(field('prefix', repeat($.prefix_declaration)), $._ontology_header),
+
+    _ontology_header: $ =>
+      seq(
+        $.keyword_ontology,
+        optional(
+          seq(
+            field('iri', $.ontology_iri),
+            optional(field('version_iri', $.version_iri)),
+          ),
+        ),
+        field('import', repeat($.import)),
+        field('annotations', repeat($.annotations)),
+      ),
+
     comment: _ => token(seq('#', /.*/)), // https://github.com/tree-sitter/tree-sitter-rust/blob/master/grammar.js
 
     // https://www.w3.org/TR/owl2-manchester-syntax/
@@ -34,9 +54,8 @@ module.exports = grammar({
     class_iri: $ => $._iri,
     annotation_property_iri: $ => $._iri,
     ontology_iri: $ => $._iri,
-    data_property_iri: $ => $._iri,
+    data_or_object_property_iri: $ => $._iri,
     version_iri: $ => $._iri,
-    object_property_iri: $ => $._iri,
     annotation_property_iri_annotated_list: $ => $._iri,
     individual_iri: $ => $._iri,
 
@@ -83,26 +102,8 @@ module.exports = grammar({
     _lexial_value: $ => $._quoted_string,
 
     // 2.2 Ontologies and Annotations
-    _ontology_document: $ =>
-      seq(
-        field('prefix', repeat($.prefix_declaration)),
-        field('ontology', $.ontology),
-      ),
+    // ontology_document is the source file
     prefix_declaration: $ => seq($.keyword_prefix, $.prefix_name, $.full_iri),
-
-    ontology: $ =>
-      seq(
-        $.keyword_ontology,
-        optional(
-          seq(
-            field('iri', $.ontology_iri),
-            optional(field('version_iri', $.version_iri)),
-          ),
-        ),
-        field('import', repeat($.import)),
-        field('annotations', repeat($.annotations)),
-        field('frame', repeat($._frame)),
-      ),
 
     import: $ => seq($.keyword_import, $._iri),
 
@@ -124,11 +125,14 @@ module.exports = grammar({
 
     // 2.3  Property and Datatype Expressions
     _object_property_expression: $ =>
-      choice($.object_property_iri, $._inverse_object_property),
+      prec(
+        2,
+        choice($.data_or_object_property_iri, $._inverse_object_property),
+      ),
     _inverse_object_property: $ =>
-      seq($.keyword_inverse, $.object_property_iri),
+      seq($.keyword_inverse, $.data_or_object_property_iri),
 
-    _data_property_expression: $ => $.data_property_iri,
+    _data_property_expression: $ => $.data_or_object_property_iri,
 
     data_range: $ => sep1($._data_conjunction, 'or'),
     _data_conjunction: $ => sep1($._data_primary, 'and'),
@@ -243,8 +247,7 @@ module.exports = grammar({
         $.keyword_datatype,
         field('iri', $._datatype),
         repeat($.annotations),
-        optional($.datatype_equavalent_to),
-        repeat($.annotations),
+        optional(seq($.datatype_equavalent_to, repeat($.annotations))),
       ),
 
     datatype_equavalent_to: $ =>
@@ -294,7 +297,7 @@ module.exports = grammar({
     object_property_frame: $ =>
       seq(
         $.keyword_object_property,
-        field('iri', $.object_property_iri),
+        field('iri', $.data_or_object_property_iri),
         repeat(
           choice(
             $.annotations,
@@ -361,7 +364,7 @@ module.exports = grammar({
     data_property_frame: $ =>
       seq(
         $.keyword_data_property,
-        field('iri', $.data_property_iri),
+        field('iri', $.data_or_object_property_iri),
         repeat(
           choice(
             $.annotations,
@@ -448,8 +451,9 @@ module.exports = grammar({
         optional('not'),
         choice($._object_property_fact, $._data_property_fact),
       ),
-    _object_property_fact: $ => seq($.object_property_iri, $._individual),
-    _data_property_fact: $ => seq($.data_property_iri, $._literal),
+    _object_property_fact: $ =>
+      seq($.data_or_object_property_iri, $._individual),
+    _data_property_fact: $ => seq($.data_or_object_property_iri, $._literal),
 
     _misc: $ =>
       choice(
@@ -559,11 +563,11 @@ module.exports = grammar({
     // https://www.w3.org/TR/2008/REC-rdf-sparql-query-20080115/
     // TODO make more strict
     // _pn_local: $ => /[A-Za-z0-9_\-\.]+/,
-    _pname_ln: $ => token(seq(pname_ns(), pn_local())), // old= /[A-Za-z0-9_\-\.]*:[A-Za-z0-9_\-\.]+/,
+    _pname_ln: $ => token(prec(2, seq(pname_ns(), pn_local()))), // old= /[A-Za-z0-9_\-\.]*:[A-Za-z0-9_\-\.]+/, // TODO
     // _pn_prefix: $ => /[A-Za-z0-9_\-\.]+/,
     // _pname_ln: $ => seq(optional($._pn_prefix), ':', $._pn_local),
 
-    _pn_local: $ => token(pn_local()),
+    _pn_local: $ => token(pn_local()), // TODO
 
     // Keywords
 
@@ -652,6 +656,7 @@ function pn_chars_base() {
 }
 
 ///([A-Z])|([a-z])|([\u00C0-\u00D6])|([\u00D8-\u00F6])|([\u00F8-\u02FF])|([\u0370-\u037D])|([\u037F-\u1FFF])|([\u200C-\u200D])|([\u2070-\u218F])|([\u2C00-\u2FEF])|([\u3001-\uD7FF])|([\uF900-\uFDCF])|([\uFDF0-\uFFFD])|([\u10000-\uEFFFF])/
+// ([A-Z])|([a-z])|([\x{00C0}-\x{00D6}])|([\x{00D8}-\x{00F6}])|([\x{00F8}-\x{02FF}])|([\x{0370}-\x{037D}])|([\x{037F}-\x{1FFF}])|([\x{200C}-\x{200D}])|([\x{2070}-\x{218F}])|([\x{2C00}-\x{2FEF}])|([\x{3001}-\x{D7FF}])|([\x{F900}-\x{FDCF}])|([\x{FDF0}-\x{FFFD}])|([\x{10000}-\x{EFFFF}])
 
 function pn_chars_u() {
   return choice(pn_chars_base(), '_')
