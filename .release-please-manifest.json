@@ -1,0 +1,7 @@
+{
+  "crates/tree-sitter-owl-ms/": "0.10.0",
+  "editors/code": "0.10.0",
+  "editors/code/client/": "0.10.0",
+  "crates/tree-sitter-owl-ms": "0.10.0",
+  "crates/owl-ms-language-server": "0.10.0"
+}

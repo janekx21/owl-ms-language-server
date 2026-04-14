@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "packages": {
+    "crates/tree-sitter-owl-ms/": {
+      "release-type": "node"
+    },
+    "editors/code": {
+      "release-type": "node"
+    },
+    "editors/code/client/": {
+      "release-type": "node"
+    },
+    "crates/tree-sitter-owl-ms": {
+      "release-type": "rust"
+    },
+    "crates/owl-ms-language-server": {
+      "release-type": "rust"
+    }
+  }
+}
