@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/janekx21/owl-ms-language-server/compare/v0.11.0...v0.12.0) (2026-04-14)
+
+
+### Features
+
+* update changelog.md & test release ([#141](https://github.com/janekx21/owl-ms-language-server/issues/141)) ([016f6d2](https://github.com/janekx21/owl-ms-language-server/commit/016f6d26dc4ee3e1a704a02001c2222fd6c7a957))
+
 ## [0.11.0](https://github.com/janekx21/owl-ms-language-server/compare/v0.10.0...v0.11.0) (2026-04-14)
 
 
