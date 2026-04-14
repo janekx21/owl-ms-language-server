@@ -2,9 +2,9 @@
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "release-type": "simple",
   "extra-files": [
-    "editors/code",
-    "editors/code/client",
-    "crates/tree-sitter-owl-ms",
+    "editors/code/package.json",
+    "editors/code/client/package.json",
+    "crates/tree-sitter-owl-ms/package.json",
     {
       "type": "generic",
       "path": "Cargo.toml"
