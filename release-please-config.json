@@ -6,14 +6,8 @@
     "editors/code/client",
     "crates/tree-sitter-owl-ms",
     {
-      "type": "toml",
-      "path": "./Cargo.toml",
-      "jsonpath": "$.workspace.package.version"
-    },
-    {
       "type": "generic",
-      "path": "./Cargo.toml",
-      "searchPath": "tree-sitter-owl-ms = \\{ path = \"crates/tree-sitter-owl-ms\", version=\""
+      "path": "Cargo.toml"
     }
   ],
   "packages": {
