@@ -1,21 +1,22 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
-  "release-type": "node",
-  "packages": {
-    "crates/tree-sitter-owl-ms/": {
-      "release-type": "node"
+  "release-type": "simple",
+  "extra-files": [
+    "editors/code",
+    "editors/code/client",
+    "crates/tree-sitter-owl-ms",
+    {
+      "type": "toml",
+      "path": "./Cargo.toml",
+      "jsonpath": "$.workspace.package.version"
     },
-    "editors/code": {
-      "release-type": "node"
-    },
-    "editors/code/client/": {
-      "release-type": "node"
-    },
-    "crates/tree-sitter-owl-ms": {
-      "release-type": "rust"
-    },
-    "crates/owl-ms-language-server": {
-      "release-type": "rust"
+    {
+      "type": "toml",
+      "path": "./Cargo.toml",
+      "jsonpath": "$.workspace.dependencies['tree-sitter-owl-ms'].version"
     }
+  ],
+  "packages": {
+    ".": {}
   }
 }
