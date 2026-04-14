@@ -11,9 +11,9 @@
       "jsonpath": "$.workspace.package.version"
     },
     {
-      "type": "toml",
+      "type": "generic",
       "path": "./Cargo.toml",
-      "jsonpath": "$.workspace.dependencies['tree-sitter-owl-ms'].version"
+      "searchPath": "tree-sitter-owl-ms = \\{ path = \"crates/tree-sitter-owl-ms\", version=\""
     }
   ],
   "packages": {
