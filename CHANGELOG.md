@@ -5,6 +5,14 @@
 
 ### Features
 
+* minor version bump ([#131](https://github.com/janekx21/owl-ms-language-server/issues/131)) ([a01cb84](https://github.com/janekx21/owl-ms-language-server/commit/a01cb845d9c596e643c4b30458f4880af1e5e173))
+
+
+
+## Historical Notes (merged)
+
+### Features
+
 * add annotation property info ([72fce65](https://github.com/janekx21/owl-ms-language-server/commit/72fce6522dbc13b7a56d237e36656a9cd1a4f1b4))
 * add case insensitive label completions & test ([#123](https://github.com/janekx21/owl-ms-language-server/issues/123)) ([a07576e](https://github.com/janekx21/owl-ms-language-server/commit/a07576e84dc882e6104c47b1314a3a03820720c8))
 * add conditional filter for declarations ([#96](https://github.com/janekx21/owl-ms-language-server/issues/96)) ([283e258](https://github.com/janekx21/owl-ms-language-server/commit/283e25883beb444bfcccbdfda681f6421bc29831))
@@ -46,7 +54,6 @@
 * logging, better diagnostics, performance upgrades ([737bb1d](https://github.com/janekx21/owl-ms-language-server/commit/737bb1d56dcb52e1ef46417f18d1675447213d5a))
 * major version bump ([#100](https://github.com/janekx21/owl-ms-language-server/issues/100)) ([07428ac](https://github.com/janekx21/owl-ms-language-server/commit/07428acf4c37af1c05d85881ad69657490a73e94))
 * merge repositories ([872fce6](https://github.com/janekx21/owl-ms-language-server/commit/872fce61601f3fee082c9c14f35432c764995473))
-* minor version bump ([#131](https://github.com/janekx21/owl-ms-language-server/issues/131)) ([a01cb84](https://github.com/janekx21/owl-ms-language-server/commit/a01cb845d9c596e643c4b30458f4880af1e5e173))
 * minor version bump to 0.9.0 ([#117](https://github.com/janekx21/owl-ms-language-server/issues/117)) ([ce8d135](https://github.com/janekx21/owl-ms-language-server/commit/ce8d135eed98a5e5ab1ebf2ead415265e8dfb1ef))
 * more hover info ([f37feb7](https://github.com/janekx21/owl-ms-language-server/commit/f37feb73d3596142154c723336d60a077ed45aaa))
 * optimize "all frame infos" ([17dc3ef](https://github.com/janekx21/owl-ms-language-server/commit/17dc3ef17d597a7de4b6059becd619f5c8a79986))
