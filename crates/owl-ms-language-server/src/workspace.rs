@@ -597,7 +597,30 @@ pub struct IriDefinition {
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct Diagnostic {
     pub range: Range,
-    pub label: String,
+    pub kind: DiagnosticKind,
+}
+
+impl Diagnostic {
+    pub fn label(&self) -> String {
+        match &self.kind {
+            DiagnosticKind::MissingIri(iri) => format!("Iri {iri} used but not defined"),
+            DiagnosticKind::SyntaxError {
+                valid_children,
+                parent,
+            } => {
+                format!("Syntax Error. expected {valid_children} inside {parent}")
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub enum DiagnosticKind {
+    MissingIri(Iri),
+    SyntaxError {
+        valid_children: String, // add some nicer info here if needed
+        parent: String,
+    },
 }
 
 impl Display for InternalDocument {
@@ -874,6 +897,12 @@ impl InternalDocument {
             .next()
     }
 
+    /// Converts a full IRI maybe into an abbreviated IRI or just adds < >
+    pub fn full_iri_to_shorter_iri(&self, full_iri: &str) -> String {
+        self.full_iri_to_abbreviated_iri(full_iri)
+            .unwrap_or(format!("<{full_iri}>"))
+    }
+
     pub fn inlay_hint(
         &self,
         range: Range,
@@ -884,7 +913,7 @@ impl InternalDocument {
         // TODO cache this in stage2
         self.queried_document
             .parsed_document
-            .query_range(&ALL_QUERIES.iri_query, range)
+            .query_range(&ALL_QUERIES.iri_query_all, range)
             .into_iter()
             .flat_map(|match_| match_.captures)
             .map(|capture| {
@@ -1114,7 +1143,7 @@ impl InternalDocument {
     ) -> Vec<(Range, String)> {
         self.queried_document
             .parsed_document
-            .query(&ALL_QUERIES.iri_query)
+            .query(&ALL_QUERIES.iri_query_all)
             .into_iter()
             .map(|m| {
                 let (iri, range, parent_kind) = match &m.captures[..] {
@@ -1140,10 +1169,7 @@ impl InternalDocument {
                     Ok(Some((
                         range,
                         new_iri
-                            .map(|new_iri| {
-                                self.full_iri_to_abbreviated_iri(new_iri)
-                                    .unwrap_or(format!("<{new_iri}>"))
-                            })
+                            .map(|new_iri| self.full_iri_to_shorter_iri(new_iri))
                             .unwrap_or(original.to_string()),
                     )))
                 } else {
@@ -1159,7 +1185,7 @@ impl InternalDocument {
         // TODO change this into using queried_document directly
         self.queried_document
             .parsed_document
-            .query(&ALL_QUERIES.iri_query)
+            .query(&ALL_QUERIES.iri_query_references)
             .into_iter()
             .map(|m| {
                 let (iri, range, node_id) = match &m.captures[..] {
@@ -1214,14 +1240,14 @@ impl InternalDocument {
         let diagnostics = self
             .diagnostics(workspace)
             .iter()
-            .map(|Diagnostic { range, label }| {
+            .map(|diagnostic| {
                 Ok(lsp_types::Diagnostic {
-                    range: range.into_lsp(self.rope(), encoding)?,
+                    range: diagnostic.range.into_lsp(self.rope(), encoding)?,
                     severity: Some(DiagnosticSeverity::ERROR),
                     code: None,
                     code_description: None,
                     source: Some("owl language server".to_string()),
-                    message: label.clone(),
+                    message: diagnostic.label(),
                     related_information: None,
                     tags: None,
                     data: None,
@@ -1599,7 +1625,7 @@ impl QueriedDocument {
 
     fn document_references(&self) -> Vec<(String, Range)> {
         self.parsed_document
-            .query(&ALL_QUERIES.iri_query)
+            .query(&ALL_QUERIES.iri_query_references)
             .iter()
             .map(|m| match &m.captures[..] {
                 [iri_capture] => {
@@ -2297,11 +2323,13 @@ fn syntax_errors(stage1: &ParsedDocument) -> Vec<Diagnostic> {
                 .collect();
 
                 let parent = node_type_to_string(parent_kind);
-                let msg = format!("Syntax Error. expected {valid_children} inside {parent}");
 
                 diagnostics.push(Diagnostic {
                     range,
-                    label: msg.to_string(),
+                    kind: DiagnosticKind::SyntaxError {
+                        valid_children,
+                        parent,
+                    },
                 });
             }
             // move along
@@ -2391,7 +2419,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
             for ele in vec {
                 diagnostics.push(Diagnostic {
                     range: *ele,
-                    label: format!("Iri {diff} used but not defined"),
+                    kind: DiagnosticKind::MissingIri(diff.clone()),
                 });
             }
         }
@@ -2446,9 +2474,22 @@ impl FrameType {
             "object_property_iri" | "object_property_frame" => FrameType::ObjectProperty,
             "class_frame" | "class_iri" => FrameType::Class,
             kind => {
-                error!("Implement {kind}");
+                error!("FrameType parse failed: Implement frame type for {kind}");
                 FrameType::Invalid
             }
+        }
+    }
+
+    pub fn to_definition(self) -> Option<String> {
+        match self {
+            FrameType::Class => Some("Class:".to_string()),
+            FrameType::DataType => Some("Datatype:".to_string()),
+            FrameType::ObjectProperty => Some("ObjectProperty:".to_string()),
+            FrameType::DataProperty => Some("DataProperty:".to_string()),
+            FrameType::AnnotationProperty => Some("AnnotationProperty:".to_string()),
+            FrameType::Individual => Some("Individual:".to_string()),
+            FrameType::Ontology => Some("Ontology:".to_string()),
+            FrameType::Invalid | FrameType::Unknown => None,
         }
     }
 }

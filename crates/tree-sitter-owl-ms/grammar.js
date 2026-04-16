@@ -1,11 +1,8 @@
 module.exports = grammar({
   name: 'owl_ms',
-  conflicts: $ => [
-    [$.datatype_frame],
-    [$.data_property_iri, $.object_property_iri],
-    [$.datatype_iri, $.class_iri],
-  ],
+  conflicts: $ => [[$.data_property_iri, $.object_property_iri]],
   extras: $ => [/[ \t\n\r]/, $.comment],
+  supertypes: $ => [$.iri],
   rules: {
     // My rules
     source_file: $ => $._ontology_document,
@@ -14,7 +11,8 @@ module.exports = grammar({
     // https://www.w3.org/TR/owl2-manchester-syntax/
 
     // 2.1 IRIs, Integers, Literals, and Entities
-    _iri: $ => choice($.full_iri, $.abbreviated_iri, $.simple_iri),
+    // TODO create supertype
+    iri: $ => choice($.full_iri, $.abbreviated_iri, $.simple_iri),
     full_iri: $ => token(seq('<', iri_rfc3987(), '>')),
     abbreviated_iri: $ => $._pname_ln,
     simple_iri: $ => $._pn_local,
@@ -30,25 +28,24 @@ module.exports = grammar({
       ),
 
     // Iri Types
-    datatype_iri: $ => $._iri,
-    class_iri: $ => $._iri,
-    annotation_property_iri: $ => $._iri,
-    ontology_iri: $ => $._iri,
-    data_property_iri: $ => $._iri,
-    version_iri: $ => $._iri,
-    object_property_iri: $ => $._iri,
-    annotation_property_iri_annotated_list: $ => $._iri,
-    individual_iri: $ => $._iri,
+    ontology_iri: $ => $.iri,
+    version_iri: $ => $.iri,
+
+    // Typical frame IRIs
+    datatype_iri: $ => $.iri,
+    class_iri: $ => $.iri,
+    annotation_property_iri: $ => $.iri,
+    data_property_iri: $ => $.iri,
+    object_property_iri: $ => $.iri,
+    individual_iri: $ => $.iri,
+
+    //  What the hell is this rule?
+    // annotation_property_iri_annotated_list: $ => $.iri,
 
     _individual: $ => choice($.individual_iri, $.node_id),
     node_id: $ => seq('_:', $._pn_local),
 
-    non_negative_integer: $ => choice($._zero, $._positive_integer),
-    _positive_integer: $ => seq($._non_zero, repeat($._digit)),
-    _digits: $ => repeat1($._digit),
-    _digit: $ => choice($._zero, $._non_zero),
-    _non_zero: $ => /[1-9]/,
-    _zero: $ => '0',
+    non_negative_integer: $ => choice(_zero(), _positive_integer()),
 
     _literal: $ =>
       choice(
@@ -62,21 +59,24 @@ module.exports = grammar({
     typed_literal: $ => seq($._lexial_value, '^^', $._datatype),
     string_literal_no_language: $ => $._quoted_string,
     string_literal_with_language: $ => seq($._quoted_string, $._language_tag),
-    integer_literal: $ => seq(optional(choice('+', '-')), $._digits),
+    integer_literal: $ => token(seq(optional(choice('+', '-')), _digits())),
     decimal_literal: $ =>
-      seq(optional(choice('+', '-')), $._digits, '.', $._digits),
+      token(seq(optional(choice('+', '-')), _digits(), '.', _digits())),
     floating_point_literal: $ =>
-      seq(
-        optional(choice('+', '-')),
-        choice(
-          seq($._digits, optional(seq('.', $._digits)), optional($._exponent)),
-          seq('.', $._digits, optional($._exponent)),
+      token(
+        seq(
+          optional(choice('+', '-')),
+          choice(
+            seq(
+              _digits(),
+              optional(seq('.', _digits())),
+              optional(_exponent()),
+            ),
+            seq('.', _digits(), optional(_exponent())),
+          ),
+          choice('f', 'F'),
         ),
-        choice('f', 'F'),
       ),
-
-    _exponent: $ =>
-      seq(choice('e', 'E'), optional(choice('+', '-')), $._digits),
 
     _quoted_string: $ => /"([^"\\]|\\\\|\\")*"/,
     _language_tag: $ => /@[a-zA-Z\-]+/, // TODO make more strict https://www.rfc-editor.org/rfc/bcp/bcp47.txt
@@ -104,8 +104,9 @@ module.exports = grammar({
         field('frame', repeat($._frame)),
       ),
 
-    import: $ => seq($.keyword_import, $._iri),
+    import: $ => seq($.keyword_import, $.iri),
 
+    // TODO create supertype
     _frame: $ =>
       choice(
         $.datatype_frame,
@@ -120,7 +121,7 @@ module.exports = grammar({
     annotations: $ => seq($.keyword_annotations, $._annotation_annotated_list),
 
     annotation: $ => seq($.annotation_property_iri, $._annotation_target),
-    _annotation_target: $ => choice($._iri, $._literal, $.node_id),
+    _annotation_target: $ => choice($.iri, $._literal, $.node_id),
 
     // 2.3  Property and Datatype Expressions
     _object_property_expression: $ =>
@@ -243,8 +244,7 @@ module.exports = grammar({
         $.keyword_datatype,
         field('iri', $._datatype),
         repeat($.annotations),
-        optional($.datatype_equavalent_to),
-        repeat($.annotations),
+        optional(seq($.datatype_equavalent_to, repeat($.annotations))),
       ),
 
     datatype_equavalent_to: $ =>
@@ -446,7 +446,9 @@ module.exports = grammar({
     fact: $ =>
       seq(
         optional('not'),
-        choice($._object_property_fact, $._data_property_fact),
+        // _data_property_fact should have higher prec, because pn_local does accept leadign
+        // digit, therefore just a number is a valid IRI :'>
+        choice(prec(1, $._data_property_fact), $._object_property_fact),
       ),
     _object_property_fact: $ => seq($.object_property_iri, $._individual),
     _data_property_fact: $ => seq($.data_property_iri, $._literal),
@@ -525,7 +527,7 @@ module.exports = grammar({
       annotated_list($.annotations, $.data_range),
     _data_property_expression_annotated_list: $ =>
       annotated_list($.annotations, $._data_property_expression),
-    _iri_annotated_list: $ => annotated_list($.annotations, $._iri),
+    _iri_annotated_list: $ => annotated_list($.annotations, $.iri),
     _annotation_property_iri_annotated_list: $ =>
       annotated_list($.annotations, $.annotation_property_iri),
     _individual_annotated_list: $ =>
@@ -713,4 +715,28 @@ function iri_rfc3987() {
     optional(/\?[A-Za-z0-9_\-\.\~\/\?]*/),
     optional(/\#[A-Za-z0-9_\-\.\~\/\?]*/),
   )
+}
+
+function _digits() {
+  return repeat1(_digit())
+}
+
+function _digit() {
+  return choice(_zero(), _non_zero())
+}
+
+function _zero() {
+  return '0'
+}
+
+function _non_zero() {
+  return /[1-9]/
+}
+
+function _positive_integer() {
+  return seq(_non_zero(), repeat(_digit()))
+}
+
+function _exponent() {
+  return seq(choice('e', 'E'), optional(choice('+', '-')), _digits())
 }

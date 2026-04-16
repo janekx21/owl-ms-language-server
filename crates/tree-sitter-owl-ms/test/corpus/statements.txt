@@ -872,3 +872,32 @@ Class: C
             (primary
               (class_iri
                 (simple_iri)))))))))
+
+
+==================
+Numbers in facts should parse as literal
+==================
+Ontology: X
+Individual: Y
+    Facts: learnFrom Alice, hasAge 16
+---
+(source_file
+  (ontology
+    (keyword_ontology)
+    (ontology_iri
+      (simple_iri))
+    (individual_frame
+      (keyword_individual)
+      (individual_iri
+        (simple_iri))
+      (individual_facts
+        (keyword_facts)
+        (fact
+          (object_property_iri
+            (simple_iri))
+          (individual_iri
+            (simple_iri)))
+        (fact
+          (data_property_iri
+            (simple_iri))
+          (integer_literal))))))
