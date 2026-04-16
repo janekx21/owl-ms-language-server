@@ -667,8 +667,11 @@ impl LanguageServer for Backend {
             .named_descendant_for_point_range(pos.into(), pos.into())
             .ok_or(Error::PositionOutOfBounds(pos))?;
 
-        let diagnostics_under_cursor = doc
-            .diagnostics(ws)
+        // TODO This could be from the parameter, but then the parsing from lsp diagnostics
+        // to internal one should take place somehow. Not needed now I think.
+        // Also I dont know how they are matched
+        let diagnostics = doc.diagnostics(ws);
+        let diagnostics_under_cursor = diagnostics
             .into_iter()
             .filter(|diagnostic| diagnostic.range.contains(pos));
 
@@ -700,6 +703,7 @@ impl LanguageServer for Backend {
                         )])),
                         ..Default::default()
                     }),
+                    // TODO from above diagnostics: Some(vec![d]),
                     ..Default::default()
                 }))
             }

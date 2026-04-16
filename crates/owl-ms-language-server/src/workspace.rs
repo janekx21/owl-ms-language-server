@@ -612,6 +612,43 @@ impl Diagnostic {
             }
         }
     }
+
+    pub fn into_lsp_diagnostic(
+        self,
+        rope: &Rope,
+        encoding: &PositionEncodingKind,
+    ) -> Result<lsp_types::Diagnostic> {
+        Ok(lsp_types::Diagnostic {
+            range: self.range.into_lsp(rope, encoding)?,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: None,
+            code_description: None,
+            source: Some("owl language server".to_string()),
+            message: self.label(),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    // TODO parse from diagnostic back
+    // pub fn from_lsp_diagnostic(
+    //     value: lsp_types::Diagnostic,
+    //     rope: &Rope,
+    //     encoding: &PositionEncodingKind,
+    // ) -> Self {
+    //     // Ok(lsp_types::Diagnostic {
+    //     //     range: self.range.into_lsp(rope, encoding)?,
+    //     //     severity: Some(DiagnosticSeverity::ERROR),
+    //     //     code: None,
+    //     //     code_description: None,
+    //     //     source: Some("owl language server".to_string()),
+    //     //     message: self.label(),
+    //     //     related_information: None,
+    //     //     tags: None,
+    //     //     data: None,
+    //     // })
+    // }
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -1241,17 +1278,9 @@ impl InternalDocument {
             .diagnostics(workspace)
             .iter()
             .map(|diagnostic| {
-                Ok(lsp_types::Diagnostic {
-                    range: diagnostic.range.into_lsp(self.rope(), encoding)?,
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: None,
-                    code_description: None,
-                    source: Some("owl language server".to_string()),
-                    message: diagnostic.label(),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                })
+                diagnostic
+                    .clone()
+                    .into_lsp_diagnostic(self.rope(), encoding)
             })
             .filter_and_log()
             .collect_vec();
