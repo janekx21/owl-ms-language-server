@@ -1,5 +1,23 @@
 [
   {
+    "type": "iri",
+    "named": true,
+    "subtypes": [
+      {
+        "type": "abbreviated_iri",
+        "named": true
+      },
+      {
+        "type": "full_iri",
+        "named": true
+      },
+      {
+        "type": "simple_iri",
+        "named": true
+      }
+    ]
+  },
+  {
     "type": "abbreviated_iri",
     "named": true,
     "fields": {}
@@ -13,10 +31,6 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
           "type": "annotation_property_iri",
           "named": true
         },
@@ -29,19 +43,15 @@
           "named": true
         },
         {
-          "type": "full_iri",
-          "named": true
-        },
-        {
           "type": "integer_literal",
           "named": true
         },
         {
-          "type": "node_id",
+          "type": "iri",
           "named": true
         },
         {
-          "type": "simple_iri",
+          "type": "node_id",
           "named": true
         },
         {
@@ -68,23 +78,15 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
           "type": "annotations",
           "named": true
         },
         {
-          "type": "full_iri",
+          "type": "iri",
           "named": true
         },
         {
           "type": "keyword_domain",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
           "named": true
         }
       ]
@@ -141,15 +143,7 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
+          "type": "iri",
           "named": true
         }
       ]
@@ -164,23 +158,15 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
           "type": "annotations",
           "named": true
         },
         {
-          "type": "full_iri",
+          "type": "iri",
           "named": true
         },
         {
           "type": "keyword_range",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
           "named": true
         }
       ]
@@ -384,15 +370,7 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
+          "type": "iri",
           "named": true
         }
       ]
@@ -664,15 +642,7 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
+          "type": "iri",
           "named": true
         }
       ]
@@ -869,15 +839,7 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
+          "type": "iri",
           "named": true
         }
       ]
@@ -957,11 +919,6 @@
         }
       ]
     }
-  },
-  {
-    "type": "decimal_literal",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "description",
@@ -1249,11 +1206,6 @@
     }
   },
   {
-    "type": "floating_point_literal",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "has_key",
     "named": true,
     "fields": {},
@@ -1293,19 +1245,11 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
+          "type": "iri",
           "named": true
         },
         {
           "type": "keyword_import",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
           "named": true
         }
       ]
@@ -1420,15 +1364,7 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
+          "type": "iri",
           "named": true
         }
       ]
@@ -1483,11 +1419,6 @@
         }
       ]
     }
-  },
-  {
-    "type": "integer_literal",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "inverse_of",
@@ -1666,15 +1597,7 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
+          "type": "iri",
           "named": true
         }
       ]
@@ -1807,15 +1730,7 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
+          "type": "iri",
           "named": true
         }
       ]
@@ -2168,15 +2083,7 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
+          "type": "iri",
           "named": true
         }
       ]
@@ -2191,19 +2098,7 @@
     "named": false
   },
   {
-    "type": "+",
-    "named": false
-  },
-  {
     "type": ",",
-    "named": false
-  },
-  {
-    "type": "-",
-    "named": false
-  },
-  {
-    "type": ".",
     "named": false
   },
   {
@@ -2224,14 +2119,6 @@
   },
   {
     "type": ">=",
-    "named": false
-  },
-  {
-    "type": "E",
-    "named": false
-  },
-  {
-    "type": "F",
     "named": false
   },
   {
@@ -2260,19 +2147,23 @@
     "extra": true
   },
   {
-    "type": "e",
-    "named": false
+    "type": "decimal_literal",
+    "named": true
   },
   {
     "type": "exactly",
     "named": false
   },
   {
-    "type": "f",
-    "named": false
+    "type": "floating_point_literal",
+    "named": true
   },
   {
     "type": "full_iri",
+    "named": true
+  },
+  {
+    "type": "integer_literal",
     "named": true
   },
   {
