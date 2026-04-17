@@ -272,6 +272,7 @@ impl Workspace {
                         DocumentReference::External(doc) => doc.get_frame_info(iri),
                     }
                 } else {
+                    warn!("Doc {url} not in worksapce");
                     None
                 }
             })
@@ -583,7 +584,10 @@ struct Stage2Document {
 
     all_frame_infos: HashMap<Iri, FrameInfo>,
     local_diagnostics: Vec<Diagnostic>,
-    directly_reachable_urls: (Vec<Url>, Vec<Url>),
+    /// These include only URL's from the imports
+    directly_reachable_import_urls: Vec<Url>,
+    /// These include all other URL's that can be found in this document
+    directly_reachable_other_urls: Vec<Url>,
     iri_locations: HashMap<Iri, Vec<Range>>,
 }
 
@@ -721,13 +725,34 @@ impl InternalDocument {
 
         let urls = self.reachable_urls(include_prefix);
 
-        let docs = urls.iter().filter_map(|url| {
-            workspace.document_by_url(url)
-            // TODO maybe reactivate but for now lets not log here
-            // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
-            // .inspect_log()
-            // .ok()
-        });
+        let docs = urls
+            .iter()
+            .filter_map(|url| {
+                workspace.document_by_url(url)
+                // TODO maybe reactivate but for now lets not log here
+                // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
+                // .inspect_log()
+                // .ok()
+            })
+            .collect_vec();
+
+        // Ignore these debugging traces
+        trace!("reachable docs recursive step tries:");
+        for u in &urls {
+            trace!("{u}");
+        }
+        trace!("but gets just:");
+        for r in &docs {
+            trace!("{r:?}");
+        }
+        trace!("internal documents loaded:");
+        for p in workspace.internal_documents.keys() {
+            trace!("{}", p.display());
+        }
+        trace!("external documents loaded:");
+        for u in workspace.external_documents.keys() {
+            trace!("{u}");
+        }
 
         for doc in docs {
             match doc {
@@ -881,6 +906,7 @@ impl InternalDocument {
         workspace: &Workspace,
     ) -> Vec<tower_lsp::lsp_types::InlayHint> {
         let reachable_docs = self.reachable_docs_recursive(workspace, true);
+        debug!("Reachable docs for {} are {reachable_docs:#?}", self.uri);
         // TODO cache this in stage2
         self.queried_document
             .parsed_document
@@ -893,10 +919,12 @@ impl InternalDocument {
 
                 let label =
                 // timeit("get frame info recursive", || {
-                    Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs)
+                    Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs).ok_or(Error::FrameInfoNotFound(iri.clone()))?.label()
                 // })
-                .and_then(|frame_info| frame_info.label())
+                // .and_then(|frame_info| frame_info.label())
                 .unwrap_or_default();
+
+                trace!("Found {label} for {iri}");
 
                 let mut label_normalized = label.clone().to_lowercase();
                 label_normalized.retain(char::is_alphanumeric);
@@ -1093,11 +1121,12 @@ impl InternalDocument {
     /// Contains all import URL's unprocessed.
     pub fn reachable_urls(&self, include_prefix: bool) -> Vec<Url> {
         // TODO please do not clone this thing :>
-        let (imports, prefixes) = self.stage2.directly_reachable_urls.clone();
+        let mut urls = self.stage2.directly_reachable_import_urls.clone();
         if include_prefix {
-            imports.into_iter().chain(prefixes).collect_vec()
+            urls.extend(self.stage2.directly_reachable_other_urls.iter().cloned());
+            urls
         } else {
-            imports
+            urls
         }
     }
 
@@ -1458,14 +1487,15 @@ struct QueriedDocument {
 
 impl QueriedDocument {
     /// Finds flat references to other document URL's in this document
-    pub fn reachable_urls(&self) -> (Vec<Url>, Vec<Url>) {
+    pub fn reachable_urls(&self, document_references: &[(Iri, Range)]) -> (Vec<Url>, Vec<Url>) {
         let imports = self
             .imports
             .iter()
             .filter_map(|iri| Url::parse(iri).ok())
             .collect_vec();
 
-        let prefixes = self
+        // Other urls include prefixes
+        let mut other_urls = self
             .prefixes
             .iter()
             // Filter out the empty prefix ":"
@@ -1485,7 +1515,17 @@ impl QueriedDocument {
             })
             .collect_vec();
 
-        (imports, prefixes)
+        let referenced_urls = document_references
+            .iter()
+            .filter_map(|(iri, _)| iri_to_parent_url(iri))
+            .unique()
+            .collect_vec();
+
+        debug!("Extending {} with {referenced_urls:#?}", self.uri);
+
+        other_urls.extend(referenced_urls);
+
+        (imports, other_urls)
     }
 
     pub fn abbreviated_iri_to_full_iri(&self, abbreviated_iri: &str) -> Option<String> {
@@ -1625,12 +1665,16 @@ impl QueriedDocument {
             iri_locations.entry(iri.clone()).or_default().push(*range);
         }
 
+        let (directly_reachable_import_urls, directly_reachable_other_urls) =
+            timeit("reachable urls", || self.reachable_urls(&references));
+
         Stage2Document {
             all_frame_infos: timeit("all frame infos", || {
                 self.document_all_frame_infos(definitions.iter())
             }),
             local_diagnostics: timeit("syntax errors", || syntax_errors(&self.parsed_document)),
-            directly_reachable_urls: timeit("reachable urls", || self.reachable_urls()),
+            directly_reachable_import_urls,
+            directly_reachable_other_urls,
             iri_locations,
             references: references.into_iter().map(|(iri, _)| iri).collect(),
             definitions: definitions
@@ -1996,8 +2040,15 @@ impl ExternalDocument {
     }
 
     pub fn get_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
-        get_frame_info_helper_ex(self, iri)
+        let x = get_frame_info_helper_ex(self, iri);
+        trace!("frame info for {iri} is {x:#?}");
+        x
     }
+}
+
+fn iri_to_parent_url(iri: &Iri) -> Option<Url> {
+    let url = Url::parse(iri).ok()?;
+    Some(iri_to_onology_url(url))
 }
 
 /// Convert some IRI (here in URL type) into a URL where the IRI can be fetched from
