@@ -1,14 +1,20 @@
-use std::{hint::black_box, time::Duration};
+use std::{
+    cell::RefCell,
+    hint::black_box,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 // use crate::Backend;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use itertools::Itertools;
 use owl_ms_language_server::{
     apply_change_to_rope_and_tree, rope_provider::RopeProvider, LANGUAGE,
 };
 use ropey::{str_utils::byte_to_char_idx, Rope};
 use tower_lsp::lsp_types::{Position, PositionEncodingKind, Range, TextDocumentContentChangeEvent};
 use tree_sitter_c2rust::{
-    InputEdit, Parser, Point, Query, QueryCursor, StreamingIterator, Tree, TreeCursor,
+    InputEdit, ParseOptions, Parser, Point, Query, QueryCursor, StreamingIterator, Tree, TreeCursor,
 };
 
 mod requests;
@@ -69,19 +75,19 @@ fn ontology_change_bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("ontology_change_bench");
     for size in (0..20).map(|i| i * 2000) {
         let model = {
-            let ontology = requests::generate_ontology(size);
-            let mut parser = Parser::new();
-            parser.set_language(&LANGUAGE).unwrap();
+            let ontology = requests::generate_ontology(size + 20);
+            let parser = Rc::new(RefCell::new(Parser::new()));
+            parser.borrow_mut().set_language(&LANGUAGE).unwrap();
             let mut rope = Rope::from_str(ontology.as_str());
             let rope_provider = RopeProvider::new(&rope);
             let mut old_tree = parser
+                .borrow_mut()
                 .parse_with_options(&mut |i, _| rope_provider.chunk_callback(i), None, None)
                 .unwrap();
 
-            let line = 3; // ontology.lines().count() - 1;
-            let text = "Prefix: : <http://invalid/onto#> ";
-            // let text = "Class: SomeClass";
-            let start_byte = rope.line_to_byte(line);
+            // panic!("{}", rope);
+            // let text = "Prefix: : <http://invalid/onto#> ";
+            // let start_byte = rope.line_to_byte(line);
             // assert!(start_byte == 0);
             // assert_eq!(rope.char(start_byte - 1), '\n');
 
@@ -105,6 +111,22 @@ fn ontology_change_bench(c: &mut Criterion) {
             // old_tree.edit(&edit);
             // rope.insert(start_byte, text);
 
+            // How the 0 ontology looks like
+            // ```owl-ms
+            // Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+            // Prefix: owl: <http://www.w3.org/2000/07/owl#>
+            // Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+            // Prefix: ex: <http://example.org/>
+            //
+            // Ontology: <http://example.org/generated>
+            //
+            //     AnnotationProperty: rdfs:label
+            //     AnnotationProperty: rdfs:comment
+            // ```
+
+            let line = ontology.lines().count() - 2; //           let line = 8; // ontology.lines().count() - 1;
+            let text = "        Annotations: rdfs:label \"Foo Bar\"\n";
+
             apply_change_to_rope_and_tree(
                 &PositionEncodingKind::UTF8,
                 &mut old_tree,
@@ -126,66 +148,13 @@ fn ontology_change_bench(c: &mut Criterion) {
             )
             .unwrap();
 
-            fn log_changed_nodes(tree: &Tree) {
-                let mut cursor = tree.walk();
-                log_changed_nodes_recursive(&mut cursor, 0);
-            }
-
-            fn log_changed_nodes_recursive(cursor: &mut TreeCursor, depth: usize) {
-                let node = cursor.node();
-                if node.has_changes() {
-                    eprintln!(
-                        "{}{} [{}-{}] changed",
-                        "  ".repeat(depth),
-                        node.kind(),
-                        node.start_byte(),
-                        node.end_byte(),
-                    );
-                } else {
-                    eprintln!(
-                        "{}{} [{}-{}] unchanged",
-                        "  ".repeat(depth),
-                        node.kind(),
-                        node.start_byte(),
-                        node.end_byte(),
-                    );
-                }
-                if cursor.goto_first_child() {
-                    loop {
-                        log_changed_nodes_recursive(cursor, depth + 1);
-                        if !cursor.goto_next_sibling() {
-                            break;
-                        }
-                    }
-                    cursor.goto_parent();
-                }
-            }
-
-            fn log_all_changes(tree: &Tree) {
-                let mut cursor = tree.walk();
-                if cursor.goto_first_child() {
-                    loop {
-                        let node = cursor.node();
-                        eprintln!(
-                            "frame: {} [{}-{}] changed={}",
-                            node.kind(),
-                            node.start_byte(),
-                            node.end_byte(),
-                            node.has_changes()
-                        );
-                        if !cursor.goto_next_sibling() {
-                            break;
-                        }
-                    }
-                }
-            }
             // TODO try this one old_tree.changed_ranges(other)
-            log_changed_nodes(&old_tree);
-            log_all_changes(&old_tree);
-            // panic!("size={}", size);
+            // log_changed_nodes(&old_tree);
+            // log_all_changes(&old_tree);
+            // panic!("{rope}");
             // TODO hier weiter machen. Also wir haben als letztes versucht das auf O(1) zu bekommen
 
-            (rope, old_tree)
+            (rope, old_tree, parser)
         };
 
         group.throughput(Throughput::Elements(size as u64));
@@ -193,23 +162,61 @@ fn ontology_change_bench(c: &mut Criterion) {
         group.measurement_time(Duration::from_millis(500));
         // group.measurement_time(Duration::from_millis(5000));
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &_size| {
+            // let m = model.clone();
+            // b.iter_custom(move |iters| {
+            //     let (rope, old_tree, parser) = m.clone();
+            //     let start = Instant::now();
+            //     for _i in 0..iters {
+            //         black_box({
+            //             let rope_provider = RopeProvider::new(&rope);
+            //             // parser.reset();
+            //             let tree = parser
+            //                 .borrow_mut()
+            //                 .parse_with_options(
+            //                     &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+            //                     Some(&old_tree),
+            //                     None,
+            //                 )
+            //                 .unwrap();
+
+            //             // let changes = old_tree.changed_ranges(&tree).collect_vec();
+            //             // eprintln!("Changes {changes:#?}");
+
+            //             assert!(
+            //                 // false &&
+            //                 !tree.root_node().has_error(),
+            //                 "tree has error:\n{:#?}\n ------ in rope:\n{}",
+            //                 tree.root_node().to_sexp(),
+            //                 rope
+            //             );
+            //             tree
+            //         });
+            //     }
+            //     start.elapsed()
+            // });
+
             b.iter_batched(
                 || {
-                    let mut parser = Parser::new();
-                    parser.set_language(&LANGUAGE).unwrap();
-                    (model.clone(), parser)
+                    // let mut parser = Parser::new();
+                    // parser.set_language(&LANGUAGE).unwrap();
+                    model.clone()
                 },
-                |((rope, old_tree), mut parser)| {
+                |(rope, old_tree, parser)| {
                     black_box({
                         let rope_provider = RopeProvider::new(&rope);
-                        parser.reset();
+                        // parser.reset();
                         let tree = parser
+                            .borrow_mut()
                             .parse_with_options(
                                 &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
                                 Some(&old_tree),
                                 None,
                             )
                             .unwrap();
+
+                        // let changes = old_tree.changed_ranges(&tree).collect_vec();
+                        // eprintln!("Changes {changes:#?}");
+
                         assert!(
                             // false &&
                             !tree.root_node().has_error(),
@@ -227,6 +234,63 @@ fn ontology_change_bench(c: &mut Criterion) {
     }
     group.finish();
 }
+
+fn log_changed_nodes(tree: &Tree) {
+    eprintln!("Changed Nodes:\n");
+    let mut cursor = tree.walk();
+    log_changed_nodes_recursive(&mut cursor, 0);
+}
+
+fn log_changed_nodes_recursive(cursor: &mut TreeCursor, depth: usize) {
+    let node = cursor.node();
+    if node.has_changes() {
+        eprintln!(
+            "[+] {}{} [{}-{}] changed",
+            "  ".repeat(depth),
+            node.kind(),
+            node.start_byte(),
+            node.end_byte(),
+        );
+    } else {
+        eprintln!(
+            "[ ] {}{} [{}-{}] unchanged",
+            "  ".repeat(depth),
+            node.kind(),
+            node.start_byte(),
+            node.end_byte(),
+        );
+    }
+    if cursor.goto_first_child() {
+        loop {
+            log_changed_nodes_recursive(cursor, depth + 1);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
+    }
+}
+
+// fn log_all_changes(tree: &Tree) {
+//     eprintln!("All Changes:\n");
+//     let mut cursor = tree.walk();
+//     if cursor.goto_first_child() {
+//         loop {
+//             let node = cursor.node();
+//             eprintln!(
+//                 "frame: {} [{}-{}] changed={}",
+//                 node.kind(),
+//                 node.start_byte(),
+//                 node.end_byte(),
+//                 node.has_changes()
+//             );
+//             if !cursor.goto_next_sibling() {
+//                 break;
+//             }
+//         }
+//         // cursor.goto_parent();
+//     }
+// }
 
 fn ontology_query_bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("ontology_query_bench");

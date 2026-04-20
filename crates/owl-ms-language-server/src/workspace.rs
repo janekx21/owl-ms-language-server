@@ -1239,7 +1239,7 @@ impl InternalDocument {
 pub fn apply_change_to_rope_and_tree(
     encoding: &PositionEncodingKind,
     new_tree: &mut Tree,
-    new_rope: &mut Rope,
+    new_rope: &mut Rope, // This rope is always in UTF-8
     change: &lsp_types::TextDocumentContentChangeEvent,
 ) -> Result<()> {
     let range = change.range.expect("range to be defined");
@@ -1249,7 +1249,7 @@ pub fn apply_change_to_rope_and_tree(
     let start_char = new_rope.try_byte_to_char(start_byte)?;
     let old_end_char = new_rope.try_byte_to_char(old_end_byte)?;
     debug!(
-        "change range in chars {start_byte}..{old_end_byte} og range {range:?} and text {}",
+        "change range in bytes {start_byte}..{old_end_byte} og range {range:?} and text {}",
         change.text
     );
     new_rope.try_remove(start_char..old_end_char)?;

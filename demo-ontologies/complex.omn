@@ -843,3 +843,6 @@ Class: :Entity
                 )
             )
         )
+
+AnnotationProperty: rdfs:label
+    SubPropertyOf: rdfs:comment

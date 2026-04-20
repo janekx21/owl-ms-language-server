@@ -112,7 +112,7 @@ pub fn generate_ontology(target_lines: usize) -> String {
     let mut entity_counter = 0;
 
     while lines.len() < target_lines {
-        // let frame_type = rng.next_usize(6);
+        // TODO reactivate let frame_type = rng.next_usize(6);
         let frame_type = rng.next_usize(1);
         entity_counter += 1;
 
@@ -315,8 +315,8 @@ fn generate_class(
     // Class frame (~4-8 lines each)
     let class_name = format!("Class{entity_counter}");
     lines.push(format!("    Class: {class_name}"));
-    // lines.push("        Annotations:".to_string());
-    // lines.push(format!("            rdfs:label \"{class_name} Label\"@en"));
+    lines.push("        Annotations:".to_string());
+    lines.push(format!("            rdfs:label \"{class_name} Label\"@en"));
 
     // if rng.next_usize(2) == 0 {
     //     lines.push(format!(

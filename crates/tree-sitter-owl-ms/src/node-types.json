@@ -1,62 +1,18 @@
 [
   {
-    "type": "_frame",
+    "type": "iri",
     "named": true,
     "subtypes": [
       {
-        "type": "annotation_property_frame",
+        "type": "abbreviated_iri",
         "named": true
       },
       {
-        "type": "class_frame",
+        "type": "full_iri",
         "named": true
       },
       {
-        "type": "data_property_frame",
-        "named": true
-      },
-      {
-        "type": "datatype_frame",
-        "named": true
-      },
-      {
-        "type": "different_individuals",
-        "named": true
-      },
-      {
-        "type": "disjoint_classes",
-        "named": true
-      },
-      {
-        "type": "disjoint_data_properties",
-        "named": true
-      },
-      {
-        "type": "disjoint_object_properties",
-        "named": true
-      },
-      {
-        "type": "equivalent_classes",
-        "named": true
-      },
-      {
-        "type": "equivalent_data_properties",
-        "named": true
-      },
-      {
-        "type": "equivalent_object_properties",
-        "named": true
-      },
-      {
-        "type": "individual_frame",
-        "named": true
-      },
-      {
-        "type": "object_property_frame",
-        "named": true
-      },
-      {
-        "type": "same_individual",
+        "type": "simple_iri",
         "named": true
       }
     ]
@@ -75,10 +31,6 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
           "type": "annotation_property_iri",
           "named": true
         },
@@ -91,19 +43,15 @@
           "named": true
         },
         {
-          "type": "full_iri",
-          "named": true
-        },
-        {
           "type": "integer_literal",
           "named": true
         },
         {
-          "type": "node_id",
+          "type": "iri",
           "named": true
         },
         {
-          "type": "simple_iri",
+          "type": "node_id",
           "named": true
         },
         {
@@ -130,23 +78,15 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
           "type": "annotations",
           "named": true
         },
         {
-          "type": "full_iri",
+          "type": "iri",
           "named": true
         },
         {
           "type": "keyword_domain",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
           "named": true
         }
       ]
@@ -203,15 +143,7 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
+          "type": "iri",
           "named": true
         }
       ]
@@ -226,23 +158,15 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
           "type": "annotations",
           "named": true
         },
         {
-          "type": "full_iri",
+          "type": "iri",
           "named": true
         },
         {
           "type": "keyword_range",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
           "named": true
         }
       ]
@@ -446,15 +370,7 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
+          "type": "iri",
           "named": true
         }
       ]
@@ -473,7 +389,7 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
+          "type": "data_property_iri",
           "named": true
         },
         {
@@ -549,6 +465,10 @@
           "named": true
         },
         {
+          "type": "object_property_iri",
+          "named": true
+        },
+        {
           "type": "primary",
           "named": true
         },
@@ -562,29 +482,6 @@
         },
         {
           "type": "typed_literal",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "data_or_object_property_iri",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
           "named": true
         }
       ]
@@ -626,7 +523,7 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
+          "type": "data_property_iri",
           "named": true
         },
         {
@@ -672,7 +569,7 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
+          "type": "data_property_iri",
           "named": true
         },
         {
@@ -691,7 +588,7 @@
         "required": true,
         "types": [
           {
-            "type": "data_or_object_property_iri",
+            "type": "data_property_iri",
             "named": true
           }
         ]
@@ -737,6 +634,21 @@
     }
   },
   {
+    "type": "data_property_iri",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "iri",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "data_property_range",
     "named": true,
     "fields": {},
@@ -772,7 +684,7 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
+          "type": "data_property_iri",
           "named": true
         },
         {
@@ -927,15 +839,7 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
+          "type": "iri",
           "named": true
         }
       ]
@@ -1017,11 +921,6 @@
     }
   },
   {
-    "type": "decimal_literal",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "description",
     "named": true,
     "fields": {},
@@ -1099,7 +998,7 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
+          "type": "data_property_iri",
           "named": true
         },
         {
@@ -1122,15 +1021,15 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
-          "named": true
-        },
-        {
           "type": "keyword_disjoint_properties",
           "named": true
         },
         {
           "type": "keyword_inverse",
+          "named": true
+        },
+        {
+          "type": "object_property_iri",
           "named": true
         }
       ]
@@ -1218,7 +1117,7 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
+          "type": "data_property_iri",
           "named": true
         },
         {
@@ -1241,15 +1140,15 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
-          "named": true
-        },
-        {
           "type": "keyword_equivalent_properties",
           "named": true
         },
         {
           "type": "keyword_inverse",
+          "named": true
+        },
+        {
+          "type": "object_property_iri",
           "named": true
         }
       ]
@@ -1264,7 +1163,7 @@
       "required": true,
       "types": [
         {
-          "type": "data_or_object_property_iri",
+          "type": "data_property_iri",
           "named": true
         },
         {
@@ -1288,6 +1187,10 @@
           "named": true
         },
         {
+          "type": "object_property_iri",
+          "named": true
+        },
+        {
           "type": "string_literal_no_language",
           "named": true
         },
@@ -1303,11 +1206,6 @@
     }
   },
   {
-    "type": "floating_point_literal",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "has_key",
     "named": true,
     "fields": {},
@@ -1320,7 +1218,7 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
+          "type": "data_property_iri",
           "named": true
         },
         {
@@ -1329,6 +1227,10 @@
         },
         {
           "type": "keyword_inverse",
+          "named": true
+        },
+        {
+          "type": "object_property_iri",
           "named": true
         }
       ]
@@ -1343,19 +1245,11 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
+          "type": "iri",
           "named": true
         },
         {
           "type": "keyword_import",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
           "named": true
         }
       ]
@@ -1470,15 +1364,7 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
+          "type": "iri",
           "named": true
         }
       ]
@@ -1535,11 +1421,6 @@
     }
   },
   {
-    "type": "integer_literal",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "inverse_of",
     "named": true,
     "fields": {},
@@ -1552,15 +1433,15 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
-          "named": true
-        },
-        {
           "type": "keyword_inverse",
           "named": true
         },
         {
           "type": "keyword_inverse_of",
+          "named": true
+        },
+        {
+          "type": "object_property_iri",
           "named": true
         }
       ]
@@ -1604,15 +1485,15 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
-          "named": true
-        },
-        {
           "type": "keyword_disjoint_with",
           "named": true
         },
         {
           "type": "keyword_inverse",
+          "named": true
+        },
+        {
+          "type": "object_property_iri",
           "named": true
         }
       ]
@@ -1631,15 +1512,15 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
-          "named": true
-        },
-        {
           "type": "keyword_equivalent_to",
           "named": true
         },
         {
           "type": "keyword_inverse",
+          "named": true
+        },
+        {
+          "type": "object_property_iri",
           "named": true
         }
       ]
@@ -1654,7 +1535,7 @@
         "required": true,
         "types": [
           {
-            "type": "data_or_object_property_iri",
+            "type": "object_property_iri",
             "named": true
           }
         ]
@@ -1708,6 +1589,139 @@
     }
   },
   {
+    "type": "object_property_iri",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "iri",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ontology",
+    "named": true,
+    "fields": {
+      "annotations": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "annotations",
+            "named": true
+          }
+        ]
+      },
+      "frame": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "annotation_property_frame",
+            "named": true
+          },
+          {
+            "type": "class_frame",
+            "named": true
+          },
+          {
+            "type": "data_property_frame",
+            "named": true
+          },
+          {
+            "type": "datatype_frame",
+            "named": true
+          },
+          {
+            "type": "different_individuals",
+            "named": true
+          },
+          {
+            "type": "disjoint_classes",
+            "named": true
+          },
+          {
+            "type": "disjoint_data_properties",
+            "named": true
+          },
+          {
+            "type": "disjoint_object_properties",
+            "named": true
+          },
+          {
+            "type": "equivalent_classes",
+            "named": true
+          },
+          {
+            "type": "equivalent_data_properties",
+            "named": true
+          },
+          {
+            "type": "equivalent_object_properties",
+            "named": true
+          },
+          {
+            "type": "individual_frame",
+            "named": true
+          },
+          {
+            "type": "object_property_frame",
+            "named": true
+          },
+          {
+            "type": "same_individual",
+            "named": true
+          }
+        ]
+      },
+      "import": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "import",
+            "named": true
+          }
+        ]
+      },
+      "iri": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "ontology_iri",
+            "named": true
+          }
+        ]
+      },
+      "version_iri": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "version_iri",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "keyword_ontology",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "ontology_iri",
     "named": true,
     "fields": {},
@@ -1716,15 +1730,7 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
+          "type": "iri",
           "named": true
         }
       ]
@@ -1766,7 +1772,7 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
+          "type": "data_property_iri",
           "named": true
         },
         {
@@ -1843,6 +1849,10 @@
         },
         {
           "type": "non_negative_integer",
+          "named": true
+        },
+        {
+          "type": "object_property_iri",
           "named": true
         },
         {
@@ -1924,46 +1934,6 @@
     "named": true,
     "root": true,
     "fields": {
-      "annotations": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "annotations",
-            "named": true
-          }
-        ]
-      },
-      "frame": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "_frame",
-            "named": true
-          }
-        ]
-      },
-      "import": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "import",
-            "named": true
-          }
-        ]
-      },
-      "iri": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "ontology_iri",
-            "named": true
-          }
-        ]
-      },
       "prefix": {
         "multiple": true,
         "required": false,
@@ -1973,24 +1943,14 @@
             "named": true
           }
         ]
-      },
-      "version_iri": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "version_iri",
-            "named": true
-          }
-        ]
       }
     },
     "children": {
       "multiple": false,
-      "required": false,
+      "required": true,
       "types": [
         {
-          "type": "keyword_ontology",
+          "type": "ontology",
           "named": true
         }
       ]
@@ -2042,15 +2002,15 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
-          "named": true
-        },
-        {
           "type": "keyword_inverse",
           "named": true
         },
         {
           "type": "keyword_sub_property_chain",
+          "named": true
+        },
+        {
+          "type": "object_property_iri",
           "named": true
         }
       ]
@@ -2069,15 +2029,15 @@
           "named": true
         },
         {
-          "type": "data_or_object_property_iri",
-          "named": true
-        },
-        {
           "type": "keyword_inverse",
           "named": true
         },
         {
           "type": "keyword_sub_property_of",
+          "named": true
+        },
+        {
+          "type": "object_property_iri",
           "named": true
         }
       ]
@@ -2123,15 +2083,7 @@
       "required": true,
       "types": [
         {
-          "type": "abbreviated_iri",
-          "named": true
-        },
-        {
-          "type": "full_iri",
-          "named": true
-        },
-        {
-          "type": "simple_iri",
+          "type": "iri",
           "named": true
         }
       ]
@@ -2146,19 +2098,7 @@
     "named": false
   },
   {
-    "type": "+",
-    "named": false
-  },
-  {
     "type": ",",
-    "named": false
-  },
-  {
-    "type": "-",
-    "named": false
-  },
-  {
-    "type": ".",
     "named": false
   },
   {
@@ -2179,14 +2119,6 @@
   },
   {
     "type": ">=",
-    "named": false
-  },
-  {
-    "type": "E",
-    "named": false
-  },
-  {
-    "type": "F",
     "named": false
   },
   {
@@ -2215,19 +2147,23 @@
     "extra": true
   },
   {
-    "type": "e",
-    "named": false
+    "type": "decimal_literal",
+    "named": true
   },
   {
     "type": "exactly",
     "named": false
   },
   {
-    "type": "f",
-    "named": false
+    "type": "floating_point_literal",
+    "named": true
   },
   {
     "type": "full_iri",
+    "named": true
+  },
+  {
+    "type": "integer_literal",
     "named": true
   },
   {
