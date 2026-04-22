@@ -1934,6 +1934,16 @@
     "named": true,
     "root": true,
     "fields": {
+      "ontology": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "ontology",
+            "named": true
+          }
+        ]
+      },
       "prefix": {
         "multiple": true,
         "required": false,
@@ -1944,16 +1954,6 @@
           }
         ]
       }
-    },
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "ontology",
-          "named": true
-        }
-      ]
     }
   },
   {

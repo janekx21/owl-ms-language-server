@@ -1,40 +1,11 @@
 module.exports = grammar({
   name: 'owl_ms',
-  word: $ => $._pn_local,
   conflicts: $ => [[$.data_property_iri, $.object_property_iri]],
-  // externals: $ => [
-  //   $._pname_ln, // replaces the internal token version
-  //   $._pn_local, // replaces the internal token version
-  // ],
-  extras: $ => [/\s/, $.comment],
+  extras: $ => [/[ \t\n\r]/, $.comment],
   supertypes: $ => [$.iri],
   rules: {
     // My rules
-    source_file: $ =>
-      seq(field('prefix', repeat($.prefix_declaration)), $.ontology),
-
-    ontology: $ =>
-      seq(
-        $.keyword_ontology,
-        optional(
-          seq(
-            field('iri', $.ontology_iri),
-            optional(field('version_iri', $.version_iri)),
-          ),
-        ),
-        field('import', repeat($.import)),
-        field('annotations', repeat($.annotations)),
-        field('frame', repeat($._frame)),
-      ),
-
-    // If repeat is this:
-    //   repeat1(x) => choice(seq(x, repeat(x)), x)
-    // Then the results would be a linked list style (x(x(x(x(x)))))
-    // This mean any change in the list is a change in all parents and maybe children (new context)
-    // What if repeat would be more like a tree
-    // _xs: $ => choice(seq($._xs, $._xs), $._frame),
-    // Well that is slower :<
-
+    source_file: $ => $._ontology_document,
     comment: _ => token(seq('#', /.*/)), // https://github.com/tree-sitter/tree-sitter-rust/blob/master/grammar.js
 
     // https://www.w3.org/TR/owl2-manchester-syntax/
@@ -42,10 +13,10 @@ module.exports = grammar({
     // 2.1 IRIs, Integers, Literals, and Entities
     // TODO create supertype
     iri: $ => choice($.full_iri, $.abbreviated_iri, $.simple_iri),
-    full_iri: _ => token(seq('<', iri_rfc3987(), '>')),
+    full_iri: $ => token(seq('<', iri_rfc3987(), '>')),
     abbreviated_iri: $ => $._pname_ln,
     simple_iri: $ => $._pn_local,
-    prefix_name: _ => /([A-Za-z][A-Za-z0-9_\-\.]*)?:/,
+    prefix_name: $ => /([A-Za-z][A-Za-z0-9_\-\.]*)?:/,
 
     _datatype: $ =>
       choice(
@@ -112,8 +83,26 @@ module.exports = grammar({
     _lexial_value: $ => $._quoted_string,
 
     // 2.2 Ontologies and Annotations
-    // ontology_document is the source file
+    _ontology_document: $ =>
+      seq(
+        field('prefix', repeat($.prefix_declaration)),
+        field('ontology', $.ontology),
+      ),
     prefix_declaration: $ => seq($.keyword_prefix, $.prefix_name, $.full_iri),
+
+    ontology: $ =>
+      seq(
+        $.keyword_ontology,
+        optional(
+          seq(
+            field('iri', $.ontology_iri),
+            optional(field('version_iri', $.version_iri)),
+          ),
+        ),
+        field('import', repeat($.import)),
+        field('annotations', repeat($.annotations)),
+        field('frame', repeat($._frame)),
+      ),
 
     import: $ => seq($.keyword_import, $.iri),
 
@@ -136,7 +125,7 @@ module.exports = grammar({
 
     // 2.3  Property and Datatype Expressions
     _object_property_expression: $ =>
-      prec(2, choice($.object_property_iri, $._inverse_object_property)),
+      choice($.object_property_iri, $._inverse_object_property),
     _inverse_object_property: $ =>
       seq($.keyword_inverse, $.object_property_iri),
 
@@ -572,11 +561,11 @@ module.exports = grammar({
     // https://www.w3.org/TR/2008/REC-rdf-sparql-query-20080115/
     // TODO make more strict
     // _pn_local: $ => /[A-Za-z0-9_\-\.]+/,
-    _pname_ln: $ => token(prec(2, seq(pname_ns(), pn_local()))), // old= /[A-Za-z0-9_\-\.]*:[A-Za-z0-9_\-\.]+/, // TODO
+    _pname_ln: $ => token(seq(pname_ns(), pn_local())), // old= /[A-Za-z0-9_\-\.]*:[A-Za-z0-9_\-\.]+/,
     // _pn_prefix: $ => /[A-Za-z0-9_\-\.]+/,
     // _pname_ln: $ => seq(optional($._pn_prefix), ':', $._pn_local),
 
-    _pn_local: $ => token(pn_local()), // TODO
+    _pn_local: $ => token(pn_local()),
 
     // Keywords
 
@@ -665,7 +654,6 @@ function pn_chars_base() {
 }
 
 ///([A-Z])|([a-z])|([\u00C0-\u00D6])|([\u00D8-\u00F6])|([\u00F8-\u02FF])|([\u0370-\u037D])|([\u037F-\u1FFF])|([\u200C-\u200D])|([\u2070-\u218F])|([\u2C00-\u2FEF])|([\u3001-\uD7FF])|([\uF900-\uFDCF])|([\uFDF0-\uFFFD])|([\u10000-\uEFFFF])/
-// ([A-Z])|([a-z])|([\x{00C0}-\x{00D6}])|([\x{00D8}-\x{00F6}])|([\x{00F8}-\x{02FF}])|([\x{0370}-\x{037D}])|([\x{037F}-\x{1FFF}])|([\x{200C}-\x{200D}])|([\x{2070}-\x{218F}])|([\x{2C00}-\x{2FEF}])|([\x{3001}-\x{D7FF}])|([\x{F900}-\x{FDCF}])|([\x{FDF0}-\x{FFFD}])|([\x{10000}-\x{EFFFF}])
 
 function pn_chars_u() {
   return choice(pn_chars_base(), '_')

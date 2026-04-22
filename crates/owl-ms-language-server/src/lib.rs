@@ -481,7 +481,7 @@ impl LanguageServer for Backend {
             let mut sync = self.write_sync().await;
             let (document, workspace) = sync.take_internal_document(&url)?;
 
-            let new_document = timeit("document.edit", || document.edit(&params, self.encoding()))?;
+            let new_document = document.edit(&params, self.encoding()).await?;
 
             workspace.insert_internal_document(new_document);
 

@@ -826,7 +826,7 @@ impl InternalDocument {
         Ok(())
     }
 
-    pub fn edit(
+    pub async fn edit(
         self,
         params: &DidChangeTextDocumentParams,
         encoding: &PositionEncodingKind,
@@ -916,7 +916,7 @@ impl InternalDocument {
             tree: new_tree,
             rope: new_rope,
         };
-        let queried_document: QueriedDocument = parsed_document.into();
+        let queried_document: QueriedDocument = parsed_document.into_queried().await;
 
         let stage2 = timeit("document.edit / stage1.analyze", || {
             queried_document.analyze()
@@ -1321,7 +1321,7 @@ pub struct FormattingSettings {
 }
 
 /// An internal document that has no semantic analysis. Just text and syntax tree.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ParsedDocument {
     /// File location
     path: PathBuf,
@@ -1343,6 +1343,7 @@ impl Hash for ParsedDocument {
 impl From<ParsedDocument> for QueriedDocument {
     fn from(val: ParsedDocument) -> Self {
         debug!("ParsedDocument -> QueriedDocument");
+
         let ontology_id = val.ontology_id();
         let prefixes = val.prefixes();
         let imports = val.imports();
@@ -1352,6 +1353,48 @@ impl From<ParsedDocument> for QueriedDocument {
             uri: val.uri.clone(),
             _version: val.version,
             parsed_document: val,
+            ontology_id,
+            prefixes,
+            imports,
+        }
+    }
+}
+
+impl ParsedDocument {
+    async fn into_queried(self: ParsedDocument) -> QueriedDocument {
+        debug!("ParsedDocument -> QueriedDocument");
+
+        // Create 3 clones of this structure and then run the queries in parallel
+        // let v1 = self.clone();
+        // let v2 = self.clone();
+        // let v3 = self.clone();
+
+        // let (ontology_id, prefixes, imports) = tokio::try_join!(
+        //     tokio::task::spawn(async move { v1.ontology_id() }),
+        //     tokio::task::spawn(async move { v2.prefixes() }),
+        //     tokio::task::spawn(async move { v3.imports() })
+        // )
+        // .unwrap();
+        // let (ontology_id, prefixes, imports) = tokio::try_join!(
+        //     tokio::task::spawn_blocking(move || v1.ontology_id()),
+        //     tokio::task::spawn_blocking(move || v2.prefixes()),
+        //     tokio::task::spawn_blocking(move || v3.imports())
+        // )
+        // .unwrap();
+
+        let (ontology_id, prefixes, imports) = self.multi();
+        // (self.ontology_id(), self.prefixes(), self.imports());
+
+        // let ((ontology_id, prefixes), imports) = rayon::join(
+        //     || rayon::join(|| self.ontology_id(), || self.prefixes()),
+        //     || self.imports(),
+        // );
+
+        QueriedDocument {
+            path: self.path.clone(),
+            uri: self.uri.clone(),
+            _version: self.version,
+            parsed_document: self,
             ontology_id,
             prefixes,
             imports,
@@ -1463,6 +1506,56 @@ impl ParsedDocument {
             .map(|iri| iri.as_str().to_string())
             .collect_vec()
     }
+
+    pub fn multi(
+        &self,
+    ) -> (
+        Option<(String, Option<String>)>,
+        HashMap<String, String>,
+        Vec<String>,
+    ) {
+        let mut ontology_id: Option<(String, Option<String>)> = None;
+        let mut prefixes = HashMap::<String, String>::new();
+        let mut imports = Vec::<Iri>::new();
+        for query_match in self.query(&ALL_QUERIES.multi) {
+            match query_match.pattern_index {
+                0 => {
+                    ontology_id = match &query_match.captures[..] {
+                        [] => None,
+                        // This should be a full IRI so lets trim it
+                        [iri] => Some((trim_full_iri(iri.node.text.clone()), None)),
+                        [iri, version_iri] => Some((
+                            trim_full_iri(iri.node.text.clone()),
+                            Some(trim_full_iri(version_iri.node.text.clone())),
+                        )),
+                        _ => unreachable!("The query has only one capture"),
+                    };
+                }
+                1 => {
+                    let (key, value) = match &query_match.captures[..] {
+                        [name, iri] => (
+                            name.node.text.trim_end_matches(':').to_string(),
+                            trim_full_iri(iri.node.text.clone()),
+                        ),
+                        _ => unreachable!(),
+                    };
+                    prefixes.insert(key, value);
+                }
+                2 => {
+                    let x = match &query_match.captures[..] {
+                        [iri] => Oxiri::parse(trim_full_iri(iri.node.text.clone())).ok(),
+                        _ => unimplemented!(),
+                    };
+
+                    if let Some(iri) = x {
+                        imports.push(iri.to_string());
+                    }
+                }
+                _ => todo!("Pattern index unknown"),
+            }
+        }
+        (ontology_id, prefixes, imports)
+    }
 }
 
 #[cached(
@@ -1492,7 +1585,7 @@ fn query_helper(
     query_cursor
         .matches(query, stage1.tree.root_node(), rope_provider)
         .map_deref(|m| UnwrappedQueryMatch {
-            _pattern_index: m.pattern_index,
+            pattern_index: m.pattern_index,
             _id: m.id(),
             captures: m
                 .captures
@@ -1576,20 +1669,17 @@ impl QueriedDocument {
     fn document_all_frame_infos<'a>(
         &self,
         definitions: impl Iterator<Item = &'a IriDefinition>,
+        annotations: impl Iterator<Item = (String, String, String)>,
     ) -> HashMap<Iri, FrameInfo> {
         let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
 
         // First we collect the annotations
-        for frame_info in
-            self.document_annotations()
-                .into_iter()
-                .map(|(frame_iri, annotation_iri, literal)| FrameInfo {
-                    iri: frame_iri.clone(),
-                    annotations: HashMap::from([(annotation_iri, vec![literal])]),
-                    frame_type: FrameType::Unknown,
-                    definitions: Vec::new(),
-                })
-        {
+        for frame_info in annotations.map(|(frame_iri, annotation_iri, literal)| FrameInfo {
+            iri: frame_iri.clone(),
+            annotations: HashMap::from([(annotation_iri, vec![literal])]),
+            frame_type: FrameType::Unknown,
+            definitions: Vec::new(),
+        }) {
             if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
                 // Merge the frame info for the same IRI
                 frame_info_mut.extend(frame_info);
@@ -1685,9 +1775,85 @@ impl QueriedDocument {
 
     fn analyze(&self) -> Stage2Document {
         debug!("QueriedDocument -> Stage2Document");
+        // let node_by_id = node_by_id_map(&self.parsed_document.tree);
 
-        let references = timeit("references", || self.document_references());
-        let definitions = timeit("definitions", || self.document_definitions());
+        // let mut references = Vec::<(String, Range)>::new();
+        // let mut definitions = Vec::<IriDefinition>::new();
+        // let mut annotations = Vec::<(String, String, String)>::new();
+
+        // for query_match in self.parsed_document.query(&ALL_QUERIES.multi_2) {
+        //     match query_match.pattern_index {
+        //         0 => {
+        //             let reference = match &query_match.captures[..] {
+        //                 [iri_capture] => {
+        //                     let iri = trim_full_iri(iri_capture.node.text.clone());
+        //                     let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+
+        //                     (iri, iri_capture.node.range)
+        //                 }
+        //                 _ => unreachable!(),
+        //             };
+        //             references.push(reference);
+        //         }
+        //         1 => {
+        //             let definition = match &query_match.captures[..] {
+        //                 [frame_iri, frame] => {
+        //                     let iri = trim_full_iri(frame_iri.node.text.clone());
+        //                     let frame_node_id = frame_iri.node.id;
+        //                     let iri_parent_kind = node_by_id
+        //                         .get(&frame_node_id)
+        //                         .expect("Node id must be valid after query")
+        //                         .parent()
+        //                         .expect("All frame IRIs should have paretns")
+        //                         .kind();
+        //                     let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+
+        //                     IriDefinition {
+        //                         iri: frame_iri,
+        //                         location: Location {
+        //                             uri: Url::from_file_path(&self.path)
+        //                                 .expect("Path should be valid file URL"),
+        //                             range: frame.node.range,
+        //                         },
+        //                         kind: FrameType::parse(iri_parent_kind),
+        //                     }
+        //                 }
+        //                 _ => unreachable!(),
+        //             };
+        //             definitions.push(definition);
+        //         }
+        //         2 => {
+        //             let annotation = match &query_match.captures[..] {
+        //                 [frame_iri, annotation_iri, literal] => {
+        //                     let iri = trim_full_iri(frame_iri.node.text.clone());
+        //                     let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+        //                     let iri = trim_full_iri(annotation_iri.node.text.clone());
+        //                     let annotation_iri =
+        //                         self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+        //                     let literal = trim_string_value(&literal.node.text);
+
+        //                     (frame_iri, annotation_iri, literal)
+        //                 }
+        //                 _ => unreachable!(),
+        //             };
+        //             annotations.push(annotation);
+        //         }
+        //         _ => todo!("Pattern index not implemented"),
+        //     }
+        // }
+
+        let ((references, definitions), annotations) = rayon::join(
+            || {
+                rayon::join(
+                    || self.document_references(),
+                    || self.document_definitions(),
+                )
+            },
+            || self.document_annotations(),
+        );
+        // let references = timeit("references", || self.document_references());
+        // let definitions = timeit("definitions", || self.document_definitions());
+        // let annotations = self.document_annotations();
 
         // Find iri locations
         let mut iri_locations: HashMap<String, Vec<Range>> = HashMap::new();
@@ -1695,10 +1861,17 @@ impl QueriedDocument {
             iri_locations.entry(iri.clone()).or_default().push(*range);
         }
 
+        // debug!("Annotations-----------------------\n{annotations:#?}\n--------------------");
+
+        let all_frame_infos = timeit("all frame infos", || {
+            self.document_all_frame_infos(definitions.iter(), annotations.into_iter())
+        });
+        // debug!(
+        //     "all_frame_infos-----------------------\n{all_frame_infos:#?}\n--------------------"
+        // );
+
         Stage2Document {
-            all_frame_infos: timeit("all frame infos", || {
-                self.document_all_frame_infos(definitions.iter())
-            }),
+            all_frame_infos,
             local_diagnostics: timeit("syntax errors", || syntax_errors(&self.parsed_document)),
             directly_reachable_urls: timeit("reachable urls", || self.reachable_urls()),
             iri_locations,
@@ -2134,7 +2307,7 @@ fn simple_term_to_string(simple_term: &SimpleTerm) -> String {
 /// This is a version of a query match that has no reference to the tree or cursor
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnwrappedQueryMatch {
-    _pattern_index: usize,
+    pattern_index: usize,
     pub captures: Vec<UnwrappedQueryCapture>,
     _id: u32,
 }
