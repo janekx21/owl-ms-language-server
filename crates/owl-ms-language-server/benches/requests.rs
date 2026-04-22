@@ -1034,6 +1034,51 @@ fn bench_symbol(c: &mut Criterion) {
     clear_caches();
 }
 
+fn bench_did_change(c: &mut Criterion) {
+    let mut group = c.benchmark_group("did_change");
+
+    for &size in &BENCHMARK_SIZES {
+        group.throughput(Throughput::Elements(size as u64));
+        group.warm_up_time(Duration::from_millis(100));
+        group.measurement_time(Duration::from_millis(500));
+        let setup = setup_with_size(size);
+
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &_size| {
+            b.iter(|| {
+                let (rt, service, url, dir, _) = &setup;
+                rt.block_on(async {
+                    service
+                        .inner()
+                        .did_change(DidChangeTextDocumentParams {
+                            text_document: VersionedTextDocumentIdentifier {
+                                uri: url.clone(),
+                                version: 0,
+                            },
+                            content_changes: vec![TextDocumentContentChangeEvent {
+                                range: Some(Range {
+                                    start: Position {
+                                        line: 10,
+                                        character: 0,
+                                    },
+                                    end: Position {
+                                        line: 10,
+                                        character: 0,
+                                    },
+                                }),
+                                text: String::from("Class: InsertedClass\n"),
+                                range_length: None,
+                            }],
+                        })
+                        .await;
+                });
+                (rt, service, dir)
+            });
+        });
+    }
+    group.finish();
+    clear_caches();
+}
+
 criterion_group!(
     benches,
     bench_hover,
@@ -1049,6 +1094,7 @@ criterion_group!(
     bench_semantic_tokens_range,
     bench_inlay_hint,
     bench_symbol,
+    bench_did_change
 );
 
 // Profiling benchmarks group
