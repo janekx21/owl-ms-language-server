@@ -58,8 +58,6 @@ pub struct AllQueries {
     pub frame_query: Query,
     pub prefix: Query,
     pub ontology: Query,
-    pub multi: Query,
-    pub multi_2: Query,
 }
 
 // All queries are in one struct for easy testing. Invalid ones are detected by unit tests.
@@ -124,51 +122,6 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
         ",
     )
     .expect("valid query"),
-    multi: Query::new(
-        &LANGUAGE,
-        "
-            (ontology iri: (_)@iri version_iri: (_)@version_iri ? )
-
-            (prefix_declaration (prefix_name)@name (full_iri)@iri)
-            
-            (import (iri)@iri)
-        ",
-    )
-    .expect("Valid query"),
-    // Warning! Reusing the capture names across queries leads to wanky indices and mixing of orders
-    multi_2: Query::new(
-        &LANGUAGE,
-        "
-            [
-              (datatype_iri (_)@iri)
-              (class_iri (_)@iri)
-              (annotation_property_iri (_)@iri)
-              (data_property_iri (_)@iri)
-              (object_property_iri (_)@iri)
-              (individual_iri (_)@iri)
-            ] 
-
-            [
-                (datatype_frame (datatype_iri)@frame_iri)
-                (class_frame (class_iri)@frame_iri)
-                (object_property_frame (object_property_iri)@frame_iri)
-                (data_property_frame (data_property_iri)@frame_iri)
-                (annotation_property_frame (annotation_property_iri)@frame_iri)
-                (individual_frame (individual_iri)@frame_iri)
-            ]@frame
-
-            (_ iri: (_)@frame_iri
-                (annotations
-                    (annotation
-                        (annotation_property_iri)@annotation_iri
-                        [
-                            (string_literal_no_language)
-                            (string_literal_with_language)
-                            (typed_literal)
-                        ]@literal)))
-        ",
-    )
-    .expect("Valid query"),
 });
 
 /// Tree-sitter grammar specification
