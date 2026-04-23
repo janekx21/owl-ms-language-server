@@ -15,10 +15,10 @@
 
   outputs =
     {
-      self,
       nixpkgs,
       flake-utils,
       rust-overlay,
+      ...
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -33,6 +33,10 @@
         langaugeServerScript = pkgs.writeShellScriptBin "owl-ms-language-server" ''
           /home/janek/Git/owl-ms-language-server/target/debug/owl-ms-language-server --stdio --offline
         '';
+
+        # To profile the language server, I use samply like this
+        # samply record /home/janek/Git/owl-ms-language-server/target/release/owl-ms-language-server --stdio --offline
+        # Then samply load profile.json.gz on the result
       in
       with pkgs;
       {
@@ -59,6 +63,8 @@
             # Scripts of this repository
             tree-sitter-watch
             langaugeServerScript
+
+            samply
           ];
         };
       }

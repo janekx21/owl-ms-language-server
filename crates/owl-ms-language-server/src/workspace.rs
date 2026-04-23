@@ -11,6 +11,7 @@ use crate::{
     rope_provider::RopeProvider, LANGUAGE,
 };
 use cached::proc_macro::cached;
+use cached::Cached;
 use horned_owl::model::Component::{self, AnnotationAssertion};
 use horned_owl::model::{
     AnnotationProperty, AnnotationSubject, AnnotationValue, ArcStr, Build, DataProperty, Datatype,
@@ -78,6 +79,20 @@ pub fn lock_global_build_arc() -> MutexGuard<'static, Build<ArcStr>> {
     (*GLOBAL_BUILD_ARC)
         .lock()
         .expect("the horned owl builder should not panic")
+}
+
+/// Clears all global caches used by the workspace.
+/// This is useful for benchmarks to prevent memory accumulation across iterations.
+pub fn clear_caches() {
+    if let Ok(mut cache) = QUERY_HELPER.lock() {
+        cache.cache_clear();
+    }
+    if let Ok(mut cache) = GET_FRAME_INFO_HELPER_EX.lock() {
+        cache.cache_clear();
+    }
+    if let Ok(mut gab) = GLOBAL_BUILD_ARC.lock() {
+        *gab = Build::new_arc();
+    }
 }
 
 /// Document container
@@ -372,7 +387,7 @@ impl Workspace {
             let document_text =
                 tokio::task::spawn_blocking(move || http_client.get(url_copy.as_str()))
                     .await
-                    .expect("join should work")?;
+                    .expect("Should not be canceled")?;
 
             let document = timeit("external doc new", || {
                 ExternalDocument::new(document_text, url.clone())
@@ -597,7 +612,67 @@ pub struct IriDefinition {
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct Diagnostic {
     pub range: Range,
-    pub label: String,
+    pub kind: DiagnosticKind,
+}
+
+impl Diagnostic {
+    pub fn label(&self) -> String {
+        match &self.kind {
+            DiagnosticKind::MissingIri(iri) => format!("Iri {iri} used but not defined"),
+            DiagnosticKind::SyntaxError {
+                valid_children,
+                parent,
+            } => {
+                format!("Syntax Error. expected {valid_children} inside {parent}")
+            }
+        }
+    }
+
+    pub fn into_lsp_diagnostic(
+        self,
+        rope: &Rope,
+        encoding: &PositionEncodingKind,
+    ) -> Result<lsp_types::Diagnostic> {
+        Ok(lsp_types::Diagnostic {
+            range: self.range.into_lsp(rope, encoding)?,
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: None,
+            code_description: None,
+            source: Some("owl language server".to_string()),
+            message: self.label(),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    }
+
+    // TODO parse from diagnostic back
+    // pub fn from_lsp_diagnostic(
+    //     value: lsp_types::Diagnostic,
+    //     rope: &Rope,
+    //     encoding: &PositionEncodingKind,
+    // ) -> Self {
+    //     // Ok(lsp_types::Diagnostic {
+    //     //     range: self.range.into_lsp(rope, encoding)?,
+    //     //     severity: Some(DiagnosticSeverity::ERROR),
+    //     //     code: None,
+    //     //     code_description: None,
+    //     //     source: Some("owl language server".to_string()),
+    //     //     message: self.label(),
+    //     //     related_information: None,
+    //     //     tags: None,
+    //     //     data: None,
+    //     // })
+    // }
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub enum DiagnosticKind {
+    MissingIri(Iri),
+    SyntaxError {
+        valid_children: String, // add some nicer info here if needed
+        parent: String,
+    },
 }
 
 impl Display for InternalDocument {
@@ -648,7 +723,7 @@ impl InternalDocument {
             rope,
         };
 
-        let queried_document: QueriedDocument = parsed_document.into();
+        let queried_document: QueriedDocument = parsed_document.into_queried();
 
         let stage2: Stage2Document = queried_document.analyze();
 
@@ -752,7 +827,7 @@ impl InternalDocument {
     }
 
     pub fn edit(
-        self,
+        self, // TODO #30 do a mut instead so the analytics do not get dropped
         params: &DidChangeTextDocumentParams,
         encoding: &PositionEncodingKind,
     ) -> Result<InternalDocument> {
@@ -833,6 +908,7 @@ impl InternalDocument {
         // TODO #30 prune diagnostics with
         // Remove all old diagnostics with an overlapping range. They will need to be recreated
         // Move all other diagnostics
+        // Use change ranges to detect syntactically changed parts
 
         let parsed_document = ParsedDocument {
             uri: uri.clone(),
@@ -841,11 +917,11 @@ impl InternalDocument {
             tree: new_tree,
             rope: new_rope,
         };
-        let queried_document: QueriedDocument = parsed_document.into();
 
-        let stage2 = timeit("document.edit / stage1.analyze", || {
-            queried_document.analyze()
-        });
+        let queried_document: QueriedDocument =
+            timeit("document.edit / querie", || parsed_document.into_queried());
+
+        let stage2 = timeit("document.edit / analyze", || queried_document.analyze());
 
         let doc = InternalDocument {
             path,
@@ -874,6 +950,12 @@ impl InternalDocument {
             .next()
     }
 
+    /// Converts a full IRI maybe into an abbreviated IRI or just adds < >
+    pub fn full_iri_to_shorter_iri(&self, full_iri: &str) -> String {
+        self.full_iri_to_abbreviated_iri(full_iri)
+            .unwrap_or(format!("<{full_iri}>"))
+    }
+
     pub fn inlay_hint(
         &self,
         range: Range,
@@ -884,7 +966,7 @@ impl InternalDocument {
         // TODO cache this in stage2
         self.queried_document
             .parsed_document
-            .query_range(&ALL_QUERIES.iri_query, range)
+            .query_range(&ALL_QUERIES.iri_query_all, range)
             .into_iter()
             .flat_map(|match_| match_.captures)
             .map(|capture| {
@@ -1114,7 +1196,7 @@ impl InternalDocument {
     ) -> Vec<(Range, String)> {
         self.queried_document
             .parsed_document
-            .query(&ALL_QUERIES.iri_query)
+            .query(&ALL_QUERIES.iri_query_all)
             .into_iter()
             .map(|m| {
                 let (iri, range, parent_kind) = match &m.captures[..] {
@@ -1140,10 +1222,7 @@ impl InternalDocument {
                     Ok(Some((
                         range,
                         new_iri
-                            .map(|new_iri| {
-                                self.full_iri_to_abbreviated_iri(new_iri)
-                                    .unwrap_or(format!("<{new_iri}>"))
-                            })
+                            .map(|new_iri| self.full_iri_to_shorter_iri(new_iri))
                             .unwrap_or(original.to_string()),
                     )))
                 } else {
@@ -1159,7 +1238,7 @@ impl InternalDocument {
         // TODO change this into using queried_document directly
         self.queried_document
             .parsed_document
-            .query(&ALL_QUERIES.iri_query)
+            .query(&ALL_QUERIES.iri_query_references)
             .into_iter()
             .map(|m| {
                 let (iri, range, node_id) = match &m.captures[..] {
@@ -1214,18 +1293,10 @@ impl InternalDocument {
         let diagnostics = self
             .diagnostics(workspace)
             .iter()
-            .map(|Diagnostic { range, label }| {
-                Ok(lsp_types::Diagnostic {
-                    range: range.into_lsp(self.rope(), encoding)?,
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: None,
-                    code_description: None,
-                    source: Some("owl language server".to_string()),
-                    message: label.clone(),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                })
+            .map(|diagnostic| {
+                diagnostic
+                    .clone()
+                    .into_lsp_diagnostic(self.rope(), encoding)
             })
             .filter_and_log()
             .collect_vec();
@@ -1251,7 +1322,7 @@ pub struct FormattingSettings {
 }
 
 /// An internal document that has no semantic analysis. Just text and syntax tree.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ParsedDocument {
     /// File location
     path: PathBuf,
@@ -1273,6 +1344,7 @@ impl Hash for ParsedDocument {
 impl From<ParsedDocument> for QueriedDocument {
     fn from(val: ParsedDocument) -> Self {
         debug!("ParsedDocument -> QueriedDocument");
+
         let ontology_id = val.ontology_id();
         let prefixes = val.prefixes();
         let imports = val.imports();
@@ -1282,6 +1354,27 @@ impl From<ParsedDocument> for QueriedDocument {
             uri: val.uri.clone(),
             _version: val.version,
             parsed_document: val,
+            ontology_id,
+            prefixes,
+            imports,
+        }
+    }
+}
+
+impl ParsedDocument {
+    fn into_queried(self: ParsedDocument) -> QueriedDocument {
+        debug!("ParsedDocument -> QueriedDocument");
+
+        let ((ontology_id, prefixes), imports) = rayon::join(
+            || rayon::join(|| self.ontology_id(), || self.prefixes()),
+            || self.imports(),
+        );
+
+        QueriedDocument {
+            path: self.path.clone(),
+            uri: self.uri.clone(),
+            _version: self.version,
+            parsed_document: self,
             ontology_id,
             prefixes,
             imports,
@@ -1422,7 +1515,7 @@ fn query_helper(
     query_cursor
         .matches(query, stage1.tree.root_node(), rope_provider)
         .map_deref(|m| UnwrappedQueryMatch {
-            _pattern_index: m.pattern_index,
+            pattern_index: m.pattern_index,
             _id: m.id(),
             captures: m
                 .captures
@@ -1504,22 +1597,18 @@ impl QueriedDocument {
     }
 
     fn document_all_frame_infos<'a>(
-        &self,
         definitions: impl Iterator<Item = &'a IriDefinition>,
+        annotations: impl Iterator<Item = (String, String, String)>,
     ) -> HashMap<Iri, FrameInfo> {
         let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
 
         // First we collect the annotations
-        for frame_info in
-            self.document_annotations()
-                .into_iter()
-                .map(|(frame_iri, annotation_iri, literal)| FrameInfo {
-                    iri: frame_iri.clone(),
-                    annotations: HashMap::from([(annotation_iri, vec![literal])]),
-                    frame_type: FrameType::Unknown,
-                    definitions: Vec::new(),
-                })
-        {
+        for frame_info in annotations.map(|(frame_iri, annotation_iri, literal)| FrameInfo {
+            iri: frame_iri.clone(),
+            annotations: HashMap::from([(annotation_iri, vec![literal])]),
+            frame_type: FrameType::Unknown,
+            definitions: Vec::new(),
+        }) {
             if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
                 // Merge the frame info for the same IRI
                 frame_info_mut.extend(frame_info);
@@ -1599,7 +1688,7 @@ impl QueriedDocument {
 
     fn document_references(&self) -> Vec<(String, Range)> {
         self.parsed_document
-            .query(&ALL_QUERIES.iri_query)
+            .query(&ALL_QUERIES.iri_query_references)
             .iter()
             .map(|m| match &m.captures[..] {
                 [iri_capture] => {
@@ -1616,8 +1705,15 @@ impl QueriedDocument {
     fn analyze(&self) -> Stage2Document {
         debug!("QueriedDocument -> Stage2Document");
 
-        let references = timeit("references", || self.document_references());
-        let definitions = timeit("definitions", || self.document_definitions());
+        let ((references, definitions), annotations) = rayon::join(
+            || {
+                rayon::join(
+                    || self.document_references(),
+                    || self.document_definitions(),
+                )
+            },
+            || self.document_annotations(),
+        );
 
         // Find iri locations
         let mut iri_locations: HashMap<String, Vec<Range>> = HashMap::new();
@@ -1625,10 +1721,12 @@ impl QueriedDocument {
             iri_locations.entry(iri.clone()).or_default().push(*range);
         }
 
+        let all_frame_infos = timeit("all frame infos", || {
+            QueriedDocument::document_all_frame_infos(definitions.iter(), annotations.into_iter())
+        });
+
         Stage2Document {
-            all_frame_infos: timeit("all frame infos", || {
-                self.document_all_frame_infos(definitions.iter())
-            }),
+            all_frame_infos,
             local_diagnostics: timeit("syntax errors", || syntax_errors(&self.parsed_document)),
             directly_reachable_urls: timeit("reachable urls", || self.reachable_urls()),
             iri_locations,
@@ -2064,7 +2162,7 @@ fn simple_term_to_string(simple_term: &SimpleTerm) -> String {
 /// This is a version of a query match that has no reference to the tree or cursor
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnwrappedQueryMatch {
-    _pattern_index: usize,
+    pattern_index: usize,
     pub captures: Vec<UnwrappedQueryCapture>,
     _id: u32,
 }
@@ -2297,11 +2395,13 @@ fn syntax_errors(stage1: &ParsedDocument) -> Vec<Diagnostic> {
                 .collect();
 
                 let parent = node_type_to_string(parent_kind);
-                let msg = format!("Syntax Error. expected {valid_children} inside {parent}");
 
                 diagnostics.push(Diagnostic {
                     range,
-                    label: msg.to_string(),
+                    kind: DiagnosticKind::SyntaxError {
+                        valid_children,
+                        parent,
+                    },
                 });
             }
             // move along
@@ -2391,7 +2491,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
             for ele in vec {
                 diagnostics.push(Diagnostic {
                     range: *ele,
-                    label: format!("Iri {diff} used but not defined"),
+                    kind: DiagnosticKind::MissingIri(diff.clone()),
                 });
             }
         }
@@ -2446,9 +2546,22 @@ impl FrameType {
             "object_property_iri" | "object_property_frame" => FrameType::ObjectProperty,
             "class_frame" | "class_iri" => FrameType::Class,
             kind => {
-                error!("Implement {kind}");
+                error!("FrameType parse failed: Implement frame type for {kind}");
                 FrameType::Invalid
             }
+        }
+    }
+
+    pub fn to_definition(self) -> Option<String> {
+        match self {
+            FrameType::Class => Some("Class:".to_string()),
+            FrameType::DataType => Some("Datatype:".to_string()),
+            FrameType::ObjectProperty => Some("ObjectProperty:".to_string()),
+            FrameType::DataProperty => Some("DataProperty:".to_string()),
+            FrameType::AnnotationProperty => Some("AnnotationProperty:".to_string()),
+            FrameType::Individual => Some("Individual:".to_string()),
+            FrameType::Ontology => Some("Ontology:".to_string()),
+            FrameType::Invalid | FrameType::Unknown => None,
         }
     }
 }

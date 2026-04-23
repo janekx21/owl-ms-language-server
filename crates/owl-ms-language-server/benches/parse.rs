@@ -11,16 +11,16 @@ fn parse_helper(source_code: &String, parser: &mut Parser) {
     parser.parse(source_code, None).unwrap();
 }
 
-fn re_parse_helper(source_code: &Rope, parser: &mut Parser, old_tree: &Tree) {
+fn re_parse_helper(source_code: &Rope, parser: &mut Parser, old_tree: &Tree) -> Tree {
     let rope_provider = RopeProvider::new(source_code);
-    parser.reset();
+    // parser.reset();
     parser
         .parse_with_options(
             &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
             Some(old_tree),
             None,
         )
-        .unwrap();
+        .unwrap()
 }
 
 fn parse_bench(c: &mut Criterion) {
@@ -78,7 +78,7 @@ fn ontology_change_bench(c: &mut Criterion) {
         group.warm_up_time(Duration::from_millis(100));
         // group.measurement_time(Duration::from_millis(5000));
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
-            b.iter_batched_ref(
+            b.iter_batched(
                 || {
                     let mut source_code = "Ontology: <http://foo.bar>\n".to_string();
                     source_code.push_str(
@@ -109,7 +109,10 @@ fn ontology_change_bench(c: &mut Criterion) {
 
                     (rope, parser, old_tree)
                 },
-                |(source, parser, old_tree)| re_parse_helper(source, parser, old_tree),
+                |(source, mut parser, old_tree)| {
+                    black_box(re_parse_helper(&source, &mut parser, &old_tree));
+                    (source, parser, old_tree)
+                },
                 criterion::BatchSize::SmallInput,
             );
         });

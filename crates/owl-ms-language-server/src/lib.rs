@@ -26,7 +26,7 @@ use std::collections::{HashMap, HashSet, LinkedList};
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::{OnceCell, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use tokio::task::{self};
+use tokio::task::{self, JoinHandle};
 use tower_lsp::jsonrpc::Result;
 // There are too many LSP types
 #[allow(clippy::wildcard_imports)]
@@ -37,7 +37,13 @@ use workspace::{node_text, trim_full_iri, Workspace};
 
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
-use crate::workspace::{Document, DocumentReference, FormattingSettings, InternalDocument};
+use crate::workspace::{
+    Document, DocumentReference, FormattingSettings, FrameType, InternalDocument,
+};
+
+// Re-export for benchmarks
+pub use crate::workspace::clear_caches;
+
 // Constants
 
 pub static LANGUAGE: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_ms::LANGUAGE.into());
@@ -206,6 +212,21 @@ impl Backend {
 
             // Every dependency is loaded
         })
+    }
+
+    /// Waits for all background indexing tasks to complete.
+    /// Useful for benchmarks to ensure no background work interferes with measurements.
+    pub async fn wait_for_indexing(&self) {
+        let mut sync = self.write_sync().await;
+        let mut all_handles = Vec::<JoinHandle<()>>::new();
+        for workspace in sync.workspaces_mut() {
+            let handles = std::mem::take(&mut workspace.index_handles);
+            all_handles.extend(handles.into_iter());
+        }
+        drop(sync);
+        for handle in all_handles {
+            let _ = handle.await;
+        }
     }
 
     fn server_capabilities(position_encoding_kind: PositionEncodingKind) -> ServerCapabilities {
@@ -460,7 +481,7 @@ impl LanguageServer for Backend {
             let mut sync = self.write_sync().await;
             let (document, workspace) = sync.take_internal_document(&url)?;
 
-            let new_document = timeit("document.edit", || document.edit(&params, self.encoding()))?;
+            let new_document = document.edit(&params, self.encoding())?;
 
             workspace.insert_internal_document(new_document);
 
@@ -627,7 +648,6 @@ impl LanguageServer for Backend {
             } else {
                 let frame_info =
                     Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs);
-
                 if let Some(frame_info) = frame_info {
                     let locations = frame_info
                         .definitions
@@ -654,30 +674,87 @@ impl LanguageServer for Backend {
         debug!("code_action at {}", params.text_document.uri);
         let url = params.text_document.uri;
         let sync = self.read_sync().await;
-        let (doc, _) = sync.get_internal_document(&url)?;
-        // let doc = doc.read();
-        let end: Position = doc.tree().root_node().range().end_point.into();
+        let (doc, ws) = sync.get_internal_document(&url)?;
 
-        Ok(Some(vec![CodeActionOrCommand::CodeAction(CodeAction {
-            title: "add class".to_string(),
-            edit: Some(WorkspaceEdit {
-                changes: Some(HashMap::from([(
-                    url,
-                    vec![TextEdit {
-                        range: lsp_types::Range {
-                            start: end.into_lsp(doc.rope(), self.encoding())?,
-                            end: end.into_lsp(doc.rope(), self.encoding())?,
-                        },
-                        new_text:
-                            "\nClass: new_class\n    Annotations:\n        rdfs:label \"new class\""
-                                .to_string(),
-                    }],
-                )])),
-                document_changes: None,
-                change_annotations: None,
-            }),
-            ..Default::default()
-        })]))
+        // pos is just the range start. Ignore range end for now.
+        let pos: Position = Position::from_lsp(params.range.start, doc.rope(), self.encoding())?;
+
+        let node = doc
+            .tree()
+            .root_node()
+            .named_descendant_for_point_range(pos.into(), pos.into())
+            .ok_or(Error::PositionOutOfBounds(pos))?;
+
+        // TODO This could be from the parameter, but then the parsing from lsp diagnostics
+        // to internal one should take place somehow. Not needed now I think.
+        // Also I dont know how they are matched
+        let diagnostics = doc.diagnostics(ws);
+        let diagnostics_under_cursor = diagnostics
+            .into_iter()
+            .filter(|diagnostic| diagnostic.range.contains(pos));
+
+        let end: Position = doc.tree().root_node().range().end_point.into();
+        let end_lsp = end.into_lsp(doc.rope(), self.encoding())?;
+        let create_missing_iri_actions = diagnostics_under_cursor.filter_map(|d| match &d.kind {
+            workspace::DiagnosticKind::MissingIri(full_iri) => {
+                let iri = doc.full_iri_to_shorter_iri(full_iri);
+                let iri_kind = node
+                    .parent()
+                    .expect("Missing IRI node should have parent")
+                    .kind();
+
+                let frame_type = FrameType::parse(iri_kind);
+                let definition_str = frame_type.to_definition()?;
+
+                Some(CodeActionOrCommand::CodeAction(CodeAction {
+                    title: format!("Create {frame_type} for {iri}",),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(HashMap::from([(
+                            url.clone(),
+                            vec![TextEdit {
+                                range: lsp_types::Range {
+                                    start: end_lsp,
+                                    end: end_lsp,
+                                },
+                                new_text: format!("\n{definition_str} {iri}\n"),
+                            }],
+                        )])),
+                        ..Default::default()
+                    }),
+                    // TODO from above diagnostics: Some(vec![d]),
+                    ..Default::default()
+                }))
+            }
+            workspace::DiagnosticKind::SyntaxError { .. } => None,
+        });
+
+        let mut actions = vec![
+            // TODO maybe this would be a great workspace action?
+            // CodeActionOrCommand::CodeAction(CodeAction {
+            // title: "add class".to_string(),
+            // edit: Some(WorkspaceEdit {
+            //     changes: Some(HashMap::from([(
+            //         url.clone(),
+            //         vec![TextEdit {
+            //             range: lsp_types::Range {
+            //                 start: end.into_lsp(doc.rope(), self.encoding())?,
+            //                 end: end.into_lsp(doc.rope(), self.encoding())?,
+            //             },
+            //             new_text:
+            //                 "\nClass: new_class\n    Annotations:\n        rdfs:label \"new class\""
+            //                     .to_string(),
+            //         }],
+            //     )])),
+            //     document_changes: None,
+            //     change_annotations: None,
+            // }),
+            // ..Default::default()
+            // })
+        ];
+
+        actions.extend(create_missing_iri_actions);
+
+        Ok(Some(actions))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -730,10 +807,7 @@ impl LanguageServer for Backend {
                 .unique_by(|(_, iri, _)| iri.clone())
                 .sorted_unstable_by_key(|(v, _, _)| v.clone())
                 .filter_map(|(full, maybe_full_iri, frame)| {
-                    let iri = doc.full_iri_to_abbreviated_iri(&maybe_full_iri).unwrap_or(
-                        // This means it was not a full iri
-                        maybe_full_iri.clone(),
-                    );
+                    let iri = doc.full_iri_to_shorter_iri(&maybe_full_iri);
 
                     if iri == partial_text {
                         None
