@@ -826,8 +826,8 @@ impl InternalDocument {
         Ok(())
     }
 
-    pub async fn edit(
-        self,
+    pub fn edit(
+        self, // TODO #30 do a mut instead so the analytics do not get dropped
         params: &DidChangeTextDocumentParams,
         encoding: &PositionEncodingKind,
     ) -> Result<InternalDocument> {
@@ -908,6 +908,7 @@ impl InternalDocument {
         // TODO #30 prune diagnostics with
         // Remove all old diagnostics with an overlapping range. They will need to be recreated
         // Move all other diagnostics
+        // Use change ranges to detect syntactically changed parts
 
         let parsed_document = ParsedDocument {
             uri: uri.clone(),
@@ -916,11 +917,11 @@ impl InternalDocument {
             tree: new_tree,
             rope: new_rope,
         };
-        let queried_document: QueriedDocument = parsed_document.into_queried().await;
 
-        let stage2 = timeit("document.edit / stage1.analyze", || {
-            queried_document.analyze()
-        });
+        let queried_document: QueriedDocument =
+            timeit("document.edit / querie", || parsed_document.into_queried());
+
+        let stage2 = timeit("document.edit / analyze", || queried_document.analyze());
 
         let doc = InternalDocument {
             path,
@@ -1361,7 +1362,7 @@ impl From<ParsedDocument> for QueriedDocument {
 }
 
 impl ParsedDocument {
-    async fn into_queried(self: ParsedDocument) -> QueriedDocument {
+    fn into_queried(self: ParsedDocument) -> QueriedDocument {
         debug!("ParsedDocument -> QueriedDocument");
 
         // Create 3 clones of this structure and then run the queries in parallel
@@ -1382,13 +1383,15 @@ impl ParsedDocument {
         // )
         // .unwrap();
 
-        let (ontology_id, prefixes, imports) = self.multi();
+        // let (ontology_id, prefixes, imports) = self.multi();
+
+        // let (ontology_id, prefixes, imports) =
         // (self.ontology_id(), self.prefixes(), self.imports());
 
-        // let ((ontology_id, prefixes), imports) = rayon::join(
-        //     || rayon::join(|| self.ontology_id(), || self.prefixes()),
-        //     || self.imports(),
-        // );
+        let ((ontology_id, prefixes), imports) = rayon::join(
+            || rayon::join(|| self.ontology_id(), || self.prefixes()),
+            || self.imports(),
+        );
 
         QueriedDocument {
             path: self.path.clone(),
