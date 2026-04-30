@@ -1,17 +1,13 @@
 module.exports = grammar({
   name: 'owl_ms',
   word: $ => $._pn_local,
-  conflicts: $ => [[$.data_property_iri, $.object_property_iri]],
-  // externals: $ => [
-  //   $._pname_ln, // replaces the internal token version
-  //   $._pn_local, // replaces the internal token version
-  // ],
   extras: $ => [/\s/, $.comment],
   supertypes: $ => [$.iri],
   rules: {
     // My rules
-    source_file: $ =>
-      seq(field('prefix', repeat($.prefix_declaration)), $.ontology),
+    source_file: $ => seq(optional($._prefixes), $.ontology),
+
+    _prefixes: $ => field('prefix', repeat1($.prefix_declaration)),
 
     ontology: $ =>
       seq(
@@ -64,8 +60,8 @@ module.exports = grammar({
     datatype_iri: $ => $.iri,
     class_iri: $ => $.iri,
     annotation_property_iri: $ => $.iri,
-    data_property_iri: $ => $.iri,
-    object_property_iri: $ => $.iri,
+    data_or_object_property_iri: $ => $.iri,
+    // data_or_object_property_iri: $ => $.iri,
     individual_iri: $ => $.iri,
 
     //  What the hell is this rule?
@@ -74,7 +70,7 @@ module.exports = grammar({
     _individual: $ => choice($.individual_iri, $.node_id),
     node_id: $ => seq('_:', $._pn_local),
 
-    non_negative_integer: $ => choice(_zero(), _positive_integer()),
+    non_negative_integer: $ => token(choice(_zero(), _positive_integer())),
 
     _literal: $ =>
       choice(
@@ -136,11 +132,14 @@ module.exports = grammar({
 
     // 2.3  Property and Datatype Expressions
     _object_property_expression: $ =>
-      prec(2, choice($.object_property_iri, $._inverse_object_property)),
+      prec(
+        3,
+        choice($.data_or_object_property_iri, $._inverse_object_property),
+      ),
     _inverse_object_property: $ =>
-      seq($.keyword_inverse, $.object_property_iri),
+      seq($.keyword_inverse, $.data_or_object_property_iri),
 
-    _data_property_expression: $ => $.data_property_iri,
+    _data_property_expression: $ => prec(2, $.data_or_object_property_iri),
 
     data_range: $ => sep1($._data_conjunction, 'or'),
     _data_conjunction: $ => sep1($._data_primary, 'and'),
@@ -178,19 +177,17 @@ module.exports = grammar({
     // 2.4 Descriptions
     description: $ => sep1($.conjunction, 'or'),
 
-    conjunction: $ =>
-      choice(
-        seq(
-          $.class_iri,
-          'that',
-          optional('not'),
-          $._restriction,
-          repeat(seq('and', optional('not'), $._restriction)),
-        ),
-        sep1($.primary, 'and'),
-      ),
+    conjunction: $ => choice($._that_conjuction, sep1($.primary, 'and')),
 
     primary: $ => seq(optional('not'), choice($._restriction, $._atomic)),
+    _that_conjuction: $ =>
+      seq(
+        $.class_iri,
+        'that',
+        optional('not'),
+        $._restriction,
+        repeat(seq('and', optional('not'), $._restriction)),
+      ),
 
     _restriction: $ =>
       choice(
@@ -305,7 +302,7 @@ module.exports = grammar({
     object_property_frame: $ =>
       seq(
         $.keyword_object_property,
-        field('iri', $.object_property_iri),
+        field('iri', $.data_or_object_property_iri),
         repeat(
           choice(
             $.annotations,
@@ -372,7 +369,7 @@ module.exports = grammar({
     data_property_frame: $ =>
       seq(
         $.keyword_data_property,
-        field('iri', $.data_property_iri),
+        field('iri', $.data_or_object_property_iri),
         repeat(
           choice(
             $.annotations,
@@ -461,8 +458,9 @@ module.exports = grammar({
         // digit, therefore just a number is a valid IRI :'>
         choice(prec(1, $._data_property_fact), $._object_property_fact),
       ),
-    _object_property_fact: $ => seq($.object_property_iri, $._individual),
-    _data_property_fact: $ => seq($.data_property_iri, $._literal),
+    _object_property_fact: $ =>
+      seq($.data_or_object_property_iri, $._individual),
+    _data_property_fact: $ => seq($.data_or_object_property_iri, $._literal),
 
     _misc: $ =>
       choice(

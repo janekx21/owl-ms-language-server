@@ -1,12 +1,11 @@
 use std::{
     cell::RefCell,
-    hint::black_box,
     rc::Rc,
     time::{Duration, Instant},
 };
 
 // use crate::Backend;
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use itertools::Itertools;
 use owl_ms_language_server::{
     apply_change_to_rope_and_tree, rope_provider::RopeProvider, LANGUAGE,
@@ -338,6 +337,70 @@ fn ontology_query_bench(c: &mut Criterion) {
     group.finish();
 }
 
+fn fragile_bench(c: &mut Criterion) {
+    let mut group = c.benchmark_group("fragile");
+
+    group.warm_up_time(Duration::from_millis(100));
+    group.sample_size(10);
+    group.sampling_mode(criterion::SamplingMode::Flat);
+
+    group.bench_function("prefix incremental", |b| {
+        let mut ontology = String::new();
+        for _ in 0..1_000 {
+            ontology.push_str("Prefix: x: <http://invalid/onto#>\n");
+        }
+        ontology.push_str("Ontology: <http://invalid/onto>");
+        let mut logs: Vec<String> = vec![];
+        let mut parser = Parser::new();
+        parser.set_language(&LANGUAGE).unwrap();
+        parser.set_logger(Some(Box::new(|_, msg| {
+            logs.push(msg.to_string());
+        })));
+        let mut old_tree = parser.parse(&ontology, None).unwrap();
+        assert!(!old_tree.root_node().has_error());
+        // old_tree.edit(&InputEdit {
+        //     start_byte: 0,
+        //     old_end_byte: 0,
+        //     new_end_byte: 0,
+        //     start_position: Point { row: 0, column: 0 },
+        //     old_end_position: Point { row: 0, column: 0 },
+        //     new_end_position: Point { row: 0, column: 0 },
+        // });
+
+        b.iter(|| black_box(parser.parse(&ontology, Some(&old_tree))));
+        println!(
+            "incremental : {:#?}",
+            logs.iter()
+                .filter(|m| m.contains("reuse"))
+                .counts_by(|m| m.split_whitespace().take(2).join(" "))
+        );
+    });
+
+    group.bench_function("prefix baseline", |b| {
+        let mut ontology = String::new();
+        for _ in 0..1_000 {
+            ontology.push_str("Prefix: x: <http://invalid/onto#>\n");
+        }
+        ontology.push_str("Ontology: <http://invalid/onto>");
+
+        let mut logs: Vec<String> = vec![];
+        let mut parser = Parser::new();
+        parser.set_language(&LANGUAGE).unwrap();
+        parser.set_logger(Some(Box::new(|_, msg| {
+            logs.push(msg.to_string());
+        })));
+
+        b.iter(|| black_box(parser.parse(&ontology, None)));
+        println!(
+            "baseline : {:#?}",
+            logs.iter()
+                .filter(|m| m.contains("reuse"))
+                .counts_by(|m| m.split_whitespace().take(2).join(" "))
+        );
+    });
+    group.finish();
+}
+
 // criterion_group!(
 //     name = long_bench;
 //     config = Criterion::default().measurement_time(Duration::from_secs(60));
@@ -348,6 +411,7 @@ criterion_group!(
     parse_bench,
     ontology_change_bench,
     ontology_size_bench,
-    ontology_query_bench
+    ontology_query_bench,
+    fragile_bench
 );
 criterion_main!(benches); //, long_bench
