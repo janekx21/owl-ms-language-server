@@ -233,6 +233,137 @@ fn ontology_change_bench(c: &mut Criterion) {
     }
     group.finish();
 }
+fn prefix_change_bench(c: &mut Criterion) {
+    let mut group = c.benchmark_group("prefix_change_bench");
+    for size in (0..20).map(|i| i * 2000) {
+        let model = {
+            // Generate Ontology
+            let mut ontology = String::new();
+            for _ in 0..size {
+                ontology.push_str("Prefix: abc: <http://invalid/onto#>\n");
+            }
+            ontology.push_str("Ontology: <http://invalid/onto> <http://invalid/onto/1>\n");
+
+            let parser = Rc::new(RefCell::new(Parser::new()));
+            parser.borrow_mut().set_language(&LANGUAGE).unwrap();
+            let mut rope = Rope::from_str(ontology.as_str());
+            let rope_provider = RopeProvider::new(&rope);
+            let mut old_tree = parser
+                .borrow_mut()
+                .parse_with_options(&mut |i, _| rope_provider.chunk_callback(i), None, None)
+                .unwrap();
+
+            // let line = ontology.lines().count() - 2; //           let line = 8; // ontology.lines().count() - 1;
+            let line = 0;
+            let text = "Prefix: def: <http://invalid/def#>\n";
+
+            apply_change_to_rope_and_tree(
+                &PositionEncodingKind::UTF8,
+                &mut old_tree,
+                &mut rope,
+                &TextDocumentContentChangeEvent {
+                    range: Some(Range {
+                        start: Position {
+                            line: line.try_into().unwrap(),
+                            character: 0,
+                        },
+                        end: Position {
+                            line: line.try_into().unwrap(),
+                            character: 0,
+                        },
+                    }),
+                    text: text.to_string(),
+                    range_length: None,
+                },
+            )
+            .unwrap();
+
+            // TODO try this one old_tree.changed_ranges(other)
+            // log_changed_nodes(&old_tree);
+            // log_all_changes(&old_tree);
+            // panic!("{rope}");
+            // TODO hier weiter machen. Also wir haben als letztes versucht das auf O(1) zu bekommen
+
+            (rope, old_tree, parser)
+        };
+
+        group.throughput(Throughput::Elements(size as u64));
+        group.warm_up_time(Duration::from_millis(100));
+        group.measurement_time(Duration::from_millis(500));
+        // group.measurement_time(Duration::from_millis(5000));
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &_size| {
+            // let m = model.clone();
+            // b.iter_custom(move |iters| {
+            //     let (rope, old_tree, parser) = m.clone();
+            //     let start = Instant::now();
+            //     for _i in 0..iters {
+            //         black_box({
+            //             let rope_provider = RopeProvider::new(&rope);
+            //             // parser.reset();
+            //             let tree = parser
+            //                 .borrow_mut()
+            //                 .parse_with_options(
+            //                     &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+            //                     Some(&old_tree),
+            //                     None,
+            //                 )
+            //                 .unwrap();
+
+            //             // let changes = old_tree.changed_ranges(&tree).collect_vec();
+            //             // eprintln!("Changes {changes:#?}");
+
+            //             assert!(
+            //                 // false &&
+            //                 !tree.root_node().has_error(),
+            //                 "tree has error:\n{:#?}\n ------ in rope:\n{}",
+            //                 tree.root_node().to_sexp(),
+            //                 rope
+            //             );
+            //             tree
+            //         });
+            //     }
+            //     start.elapsed()
+            // });
+
+            b.iter_batched(
+                || {
+                    // let mut parser = Parser::new();
+                    // parser.set_language(&LANGUAGE).unwrap();
+                    model.clone()
+                },
+                |(rope, old_tree, parser)| {
+                    black_box({
+                        let rope_provider = RopeProvider::new(&rope);
+                        // parser.reset();
+                        let tree = parser
+                            .borrow_mut()
+                            .parse_with_options(
+                                &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+                                Some(&old_tree),
+                                None,
+                            )
+                            .unwrap();
+
+                        // let changes = old_tree.changed_ranges(&tree).collect_vec();
+                        // eprintln!("Changes {changes:#?}");
+
+                        assert!(
+                            // false &&
+                            !tree.root_node().has_error(),
+                            "tree has error:\n{:#?}\n ------ in rope:\n{}",
+                            tree.root_node().to_sexp(),
+                            rope
+                        );
+                        tree
+                    });
+                    (rope, parser, old_tree)
+                },
+                criterion::BatchSize::SmallInput,
+            );
+        });
+    }
+    group.finish();
+}
 
 fn log_changed_nodes(tree: &Tree) {
     eprintln!("Changed Nodes:\n");
@@ -410,6 +541,7 @@ criterion_group!(
     benches,
     parse_bench,
     ontology_change_bench,
+    prefix_change_bench,
     ontology_size_bench,
     ontology_query_bench,
     fragile_bench
