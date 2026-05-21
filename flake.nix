@@ -53,6 +53,26 @@
             # clang
           ];
           RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+          # Required for the downloaded VS Code Electron binary used in e2e tests
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
+            with pkgs;
+            [
+              glib
+              nss
+              nspr
+              atk
+              cups
+              dbus
+              libdrm
+              mesa
+              pango
+              cairo
+              alsa-lib
+              libxkbcommon
+              expat
+              nspr
+            ]
+          );
           nativeBuildInputs = with pkgs; [
             # cargo
             # clippy
