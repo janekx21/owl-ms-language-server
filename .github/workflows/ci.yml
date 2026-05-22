@@ -76,14 +76,41 @@ jobs:
       working-directory: crates/tree-sitter-owl-ms
       run: npx tree-sitter-cli test
 
-    # TODO test node
-    # - name: Setup Node
-    #   uses: actions/setup-node@v4
-    #   with:
-    #     node-version: '22.x'
-        
-    # - name: Install Node Dependencies
-    #   working-directory: editors/code
-    #   run: npm ci
-    #
+  test_e2e:
+    runs-on: ubuntu-latest
+    name: E2E tests (VS Code extension)
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Rust toolchain
+      run: |
+        rustup update --no-self-update stable
+        rustup default stable
+
+    - name: Build language server
+      run: cargo build --release
+
+    - name: Place binary for extension
+      run: |
+        mkdir -p editors/code/server
+        cp target/release/owl-ms-language-server editors/code/server/owl-ms-language-server
+
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22.x'
+
+    - name: Install Node dependencies
+      working-directory: editors/code
+      run: npm ci
+
+    - name: Compile TypeScript
+      working-directory: editors/code
+      run: npm run compile
+
+    - name: Run E2E tests
+      working-directory: editors/code
+      run: xvfb-run -a npm test
 
