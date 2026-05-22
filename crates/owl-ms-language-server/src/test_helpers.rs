@@ -179,10 +179,9 @@ pub struct StaticClient {
 impl HttpClient for StaticClient {
     fn get(&self, url: &str) -> crate::web::Result<String> {
         info!("Resolving {url} in static client");
-        Ok(self
-            .data
-            .get(url)
-            .unwrap_or_else(|| panic!("the url {url} should be defined"))
-            .to_string())
+        self.data.get(url).cloned().ok_or(crate::web::Error::Web(
+            url.to_string(),
+            "Static client did not define that URL and date",
+        ))
     }
 }
