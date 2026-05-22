@@ -15,10 +15,10 @@
 
   outputs =
     {
-      self,
       nixpkgs,
       flake-utils,
       rust-overlay,
+      ...
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -40,9 +40,7 @@
         # To profile the language server, I use samply like this
         # samply record /home/janek/Git/owl-ms-language-server/target/release/owl-ms-language-server --stdio --offline
         # Then samply load profile.json.gz on the result
-        # To profile the language server, I use samply like this
-        # samply record /home/janek/Git/owl-ms-language-server/target/release/owl-ms-language-server --stdio --offline
-        # Then samply load profile.json.gz on the result
+
         tarpaulin-report = pkgs.writeShellScriptBin "tarpaulin-report" ''
           ${pkgs.cargo-tarpaulin}/bin/cargo-tarpaulin --engine llvm --out html && \
           xdg-open tarpaulin-report.html
@@ -92,8 +90,6 @@
 
             # Scripts of this repository
             tree-sitter-watch
-            langaugeServerScript
-
             samply
             owl-ms-language-server
             tarpaulin-report
