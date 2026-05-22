@@ -52,7 +52,8 @@ pub static KEYWORDS: LazyLock<Vec<String>> = LazyLock::new(|| {
 
 pub struct AllQueries {
     pub import_query: Query,
-    pub iri_query: Query,
+    pub iri_query_all: Query,
+    pub iri_query_references: Query,
     pub annotation_query: Query,
     pub frame_query: Query,
     pub prefix: Query,
@@ -61,13 +62,23 @@ pub struct AllQueries {
 
 // All queries are in one struct for easy testing. Invalid ones are detected by unit tests.
 pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
-    import_query: Query::new(
+    import_query: Query::new(&LANGUAGE, "(import (iri)@iri)").expect("valid query"),
+    iri_query_all: Query::new(&LANGUAGE, "(iri)@iri").expect("valid query"),
+    // Just IRIs that are references to frames
+    iri_query_references: Query::new(
         &LANGUAGE,
-        "(import [(full_iri) (simple_iri) (abbreviated_iri)]@iri)",
+        "
+        [
+          (datatype_iri (_)@iri)
+          (class_iri (_)@iri)
+          (annotation_property_iri (_)@iri)
+          (data_property_iri (_)@iri)
+          (object_property_iri (_)@iri)
+          (individual_iri (_)@iri)
+        ] 
+        ",
     )
     .expect("valid query"),
-    iri_query: Query::new(&LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri")
-        .expect("valid query"),
     annotation_query: Query::new(
         &LANGUAGE,
         "

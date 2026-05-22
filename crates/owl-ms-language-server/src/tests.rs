@@ -2025,8 +2025,10 @@ async fn backend_completion_with_iri_should_complete_to_iri() {
 
     let url = Url::from_file_path(tmp_dir.path().join("a.omn")).unwrap();
 
+    // Turns out you need a default prefix for simple IRIs to make sense
     let ontology = indoc! {r#"
         Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Prefix: : <http://foo.org/a#>
         Ontology: <http://foo.org/a>
         Class: F_1234
             Annotations:
@@ -2054,7 +2056,7 @@ async fn backend_completion_with_iri_should_complete_to_iri() {
         .completion(CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url },
-                position: lsp_types::Position::new(6, 19),
+                position: lsp_types::Position::new(7, 19),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -2099,8 +2101,10 @@ async fn backend_completion_with_iri_should_be_case_insensitive() {
     let url = Url::from_file_path(tmp_dir.path().join("a.omn")).unwrap();
 
     // Use lowercase "som" to match "Some Class" (case-insensitive)
+    // Turns out you need a default prefix for simple IRIs to make sense
     let ontology = indoc! {r#"
         Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Prefix: : <http://foo.org/a#>
         Ontology: <http://foo.org/a>
         Class: F_1234
             Annotations:
@@ -2128,7 +2132,7 @@ async fn backend_completion_with_iri_should_be_case_insensitive() {
         .completion(CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: url },
-                position: lsp_types::Position::new(6, 19),
+                position: lsp_types::Position::new(7, 19),
             },
             work_done_progress_params: WorkDoneProgressParams {
                 work_done_token: None,
@@ -2769,7 +2773,7 @@ async fn diagnostics_missing_class_with_external_document_should_report_error() 
 
     // Assert
     let diagnostics = service_diagnostics(&service).await;
-    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label.clone()).collect();
+    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label()).collect();
     let diagnostic_text = diagnostic_labels.join("\n");
 
     assert!(
@@ -2852,7 +2856,7 @@ async fn diagnostics_missing_datatype_with_external_document_should_report_error
 
     // Assert
     let diagnostics = service_diagnostics(&service).await;
-    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label.clone()).collect();
+    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label()).collect();
     let diagnostic_text = diagnostic_labels.join("\n");
 
     assert!(
@@ -2933,7 +2937,7 @@ async fn diagnostics_missing_object_property_with_external_document_should_repor
 
     // Assert
     let diagnostics = service_diagnostics(&service).await;
-    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label.clone()).collect();
+    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label()).collect();
     let diagnostic_text = diagnostic_labels.join("\n");
 
     assert!(
@@ -3017,7 +3021,7 @@ async fn diagnostics_missing_data_property_with_external_document_should_report_
 
     // Assert
     let diagnostics = service_diagnostics(&service).await;
-    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label.clone()).collect();
+    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label()).collect();
     let diagnostic_text = diagnostic_labels.join("\n");
 
     assert!(
@@ -3102,7 +3106,7 @@ async fn diagnostics_missing_annotation_property_with_external_document_should_r
 
     // Assert
     let diagnostics = service_diagnostics(&service).await;
-    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label.clone()).collect();
+    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label()).collect();
     let diagnostic_text = diagnostic_labels.join("\n");
 
     assert!(
@@ -3185,7 +3189,7 @@ async fn diagnostics_missing_individual_with_external_document_should_report_err
 
     // Assert
     let diagnostics = service_diagnostics(&service).await;
-    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label.clone()).collect();
+    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label()).collect();
     let diagnostic_text = diagnostic_labels.join("\n");
 
     assert!(
@@ -3357,7 +3361,7 @@ async fn diagnostics_multiple_missing_iris_with_external_document_should_report_
         diagnostics.len()
     );
 
-    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label.clone()).collect();
+    let diagnostic_labels: Vec<String> = diagnostics.iter().map(|d| d.label()).collect();
     let diagnostic_text = diagnostic_labels.join(", ");
 
     assert!(
@@ -3567,4 +3571,75 @@ async fn backend_goto_definition_on_import_iri_with_nested_catalog_should_work()
         }
         _ => panic!("Expected Scalar response for import IRI goto definition"),
     }
+}
+#[test(tokio::test)]
+async fn backend_code_action_on_missing_iri_should_create_frame() {
+    setup();
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test workspace".into(),
+        }),
+        vec![],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    let ontology = indoc! {r#"
+        Prefix: : <http://example.org/main#>
+        Ontology: <http://example.org/main.omn>
+            Class: SomeClass
+                SubClassOf: UndefinedClass # Cursor is on UndefinedClass
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let result = service
+        .inner()
+        .code_action(CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: url.clone() },
+            range: lsp_types::Range {
+                start: lsp_types::Position::new(3, 26),
+                end: lsp_types::Position::new(3, 26),
+            },
+            context: CodeActionContext::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    let result = result.expect("Sould be some some");
+    assert!(result.iter().any(|action| match action {
+        CodeActionOrCommand::Command(_) => false,
+        CodeActionOrCommand::CodeAction(code_action) => {
+            code_action.title.to_lowercase().contains("create")
+                && code_action
+                    .edit
+                    .as_ref()
+                    .unwrap()
+                    .changes
+                    .as_ref()
+                    .expect("Changes should have one change, the new class")
+                    .get(&url)
+                    .is_some()
+        }
+    }));
 }
