@@ -148,6 +148,20 @@ Configure your editor to use the created binary at `target/debug/owl-ms-language
 
 To use the local language server with VS-Code either install the binary using `cargo install --path crates/owl-ms-language-server` or set the environment variable `_OWL_MS_LSP_SERVER_DEBUG` to the location of your owl-ms-language-server binary. Then with VS-Code open the `editor/code` folder and run the project (press F5). A second VS-Code editor should open that has the plugin installed and that uses the local language server installation.
 
+You can generate a test coverage report with the following command. This requires that you install `tarpaulin`.
+
+```
+cargo tarpaulin --engine llvm --out html
+```
+
+And open it with `xdg-open tarpaulin-report.html`.
+
+Or use the flake script that does both things for you.
+
+```
+tarpaulin-report
+```
+
 ## License
 
 All projects use the [Apache-2.0](https://choosealicense.com/licenses/apache-2.0/) License
