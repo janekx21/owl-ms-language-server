@@ -30,7 +30,7 @@
 
         tree-sitter-watch = pkgs.writeShellScriptBin "tree-sitter-watch" ''${pkgs.watchexec}/bin/watchexec --clear -e js -e scm -e txt "${pkgs.tree-sitter}/bin/tree-sitter generate && ${pkgs.tree-sitter}/bin/tree-sitter test"'';
 
-        langaugeServerScript = pkgs.writeShellScriptBin "owl-ms-language-server" ''
+        owl-ms-language-server = pkgs.writeShellScriptBin "owl-ms-language-server" ''
           /home/janek/Git/owl-ms-language-server/target/debug/owl-ms-language-server --stdio --offline
         '';
 
@@ -40,6 +40,13 @@
         # To profile the language server, I use samply like this
         # samply record /home/janek/Git/owl-ms-language-server/target/release/owl-ms-language-server --stdio --offline
         # Then samply load profile.json.gz on the result
+        # To profile the language server, I use samply like this
+        # samply record /home/janek/Git/owl-ms-language-server/target/release/owl-ms-language-server --stdio --offline
+        # Then samply load profile.json.gz on the result
+        tarpaulin-report = pkgs.writeShellScriptBin "tarpaulin-report" ''
+          ${pkgs.cargo-tarpaulin}/bin/cargo-tarpaulin --engine llvm --out html && \
+          xdg-open tarpaulin-report.html
+        '';
       in
       with pkgs;
       {
@@ -55,6 +62,26 @@
             # clang
           ];
           RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+          # Required for the downloaded VS Code Electron binary used in e2e tests
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
+            with pkgs;
+            [
+              glib
+              nss
+              nspr
+              atk
+              cups
+              dbus
+              libdrm
+              mesa
+              pango
+              cairo
+              alsa-lib
+              libxkbcommon
+              expat
+              nspr
+            ]
+          );
           nativeBuildInputs = with pkgs; [
             # cargo
             # clippy
@@ -66,6 +93,10 @@
             # Scripts of this repository
             tree-sitter-watch
             langaugeServerScript
+
+            samply
+            owl-ms-language-server
+            tarpaulin-report
           ];
         };
       }
