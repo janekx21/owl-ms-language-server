@@ -26,7 +26,7 @@ use std::collections::{HashMap, HashSet, LinkedList};
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::{OnceCell, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use tokio::task::{self};
+use tokio::task::{self, JoinHandle};
 use tower_lsp::jsonrpc::Result;
 // There are too many LSP types
 #[allow(clippy::wildcard_imports)]
@@ -38,6 +38,10 @@ use workspace::{node_text, trim_full_iri, Workspace};
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{Document, DocumentReference, FormattingSettings, InternalDocument};
+
+// Re-export for benchmarks
+pub use crate::workspace::clear_caches;
+
 // Constants
 
 pub static LANGUAGE: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_ms::LANGUAGE.into());
@@ -206,6 +210,21 @@ impl Backend {
 
             // Every dependency is loaded
         })
+    }
+
+    /// Waits for all background indexing tasks to complete.
+    /// Useful for benchmarks to ensure no background work interferes with measurements.
+    pub async fn wait_for_indexing(&self) {
+        let mut sync = self.write_sync().await;
+        let mut all_handles = Vec::<JoinHandle<()>>::new();
+        for workspace in sync.workspaces_mut() {
+            let handles = std::mem::take(&mut workspace.index_handles);
+            all_handles.extend(handles.into_iter());
+        }
+        drop(sync);
+        for handle in all_handles {
+            let _ = handle.await;
+        }
     }
 
     fn server_capabilities(position_encoding_kind: PositionEncodingKind) -> ServerCapabilities {
@@ -627,7 +646,6 @@ impl LanguageServer for Backend {
             } else {
                 let frame_info =
                     Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs);
-
                 if let Some(frame_info) = frame_info {
                     let locations = frame_info
                         .definitions
@@ -655,7 +673,6 @@ impl LanguageServer for Backend {
         let url = params.text_document.uri;
         let sync = self.read_sync().await;
         let (doc, _) = sync.get_internal_document(&url)?;
-        // let doc = doc.read();
         let end: Position = doc.tree().root_node().range().end_point.into();
 
         Ok(Some(vec![CodeActionOrCommand::CodeAction(CodeAction {

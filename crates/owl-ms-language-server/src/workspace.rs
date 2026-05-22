@@ -11,6 +11,7 @@ use crate::{
     rope_provider::RopeProvider, LANGUAGE,
 };
 use cached::proc_macro::cached;
+use cached::Cached;
 use horned_owl::model::Component::{self, AnnotationAssertion};
 use horned_owl::model::{
     AnnotationProperty, AnnotationSubject, AnnotationValue, ArcStr, Build, DataProperty, Datatype,
@@ -78,6 +79,20 @@ pub fn lock_global_build_arc() -> MutexGuard<'static, Build<ArcStr>> {
     (*GLOBAL_BUILD_ARC)
         .lock()
         .expect("the horned owl builder should not panic")
+}
+
+/// Clears all global caches used by the workspace.
+/// This is useful for benchmarks to prevent memory accumulation across iterations.
+pub fn clear_caches() {
+    if let Ok(mut cache) = QUERY_HELPER.lock() {
+        cache.cache_clear();
+    }
+    if let Ok(mut cache) = GET_FRAME_INFO_HELPER_EX.lock() {
+        cache.cache_clear();
+    }
+    if let Ok(mut gab) = GLOBAL_BUILD_ARC.lock() {
+        *gab = Build::new_arc();
+    }
 }
 
 /// Document container
@@ -372,7 +387,7 @@ impl Workspace {
             let document_text =
                 tokio::task::spawn_blocking(move || http_client.get(url_copy.as_str()))
                     .await
-                    .expect("join should work")?;
+                    .expect("Should not be canceled")?;
 
             let document = timeit("external doc new", || {
                 ExternalDocument::new(document_text, url.clone())
