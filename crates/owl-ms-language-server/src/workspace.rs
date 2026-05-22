@@ -10,8 +10,7 @@ use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
     rope_provider::RopeProvider, LANGUAGE,
 };
-use cached::proc_macro::cached;
-use cached::Cached;
+use cached::{cached, Cached};
 use horned_owl::model::Component::{self, AnnotationAssertion};
 use horned_owl::model::{
     AnnotationProperty, AnnotationSubject, AnnotationValue, ArcStr, Build, DataProperty, Datatype,
@@ -84,10 +83,13 @@ pub fn lock_global_build_arc() -> MutexGuard<'static, Build<ArcStr>> {
 /// Clears all global caches used by the workspace.
 /// This is useful for benchmarks to prevent memory accumulation across iterations.
 pub fn clear_caches() {
-    if let Ok(mut cache) = QUERY_HELPER.lock() {
+    {
+        let mut cache = QUERY_HELPER.write();
         cache.cache_clear();
     }
-    if let Ok(mut cache) = GET_FRAME_INFO_HELPER_EX.lock() {
+
+    {
+        let mut cache = GET_FRAME_INFO_HELPER_EX.write();
         cache.cache_clear();
     }
     if let Ok(mut gab) = GLOBAL_BUILD_ARC.lock() {
@@ -1518,7 +1520,6 @@ impl ParsedDocument {
 }
 
 #[cached(
-    time = 5,
     key = "u64",
     convert = r#"{
         let mut hasher = DefaultHasher::new();
@@ -1528,7 +1529,8 @@ impl ParsedDocument {
         Hash::hash(&query.start_byte_for_pattern(0), &mut hasher);
         Hash::hash(&query.end_byte_for_pattern(0), &mut hasher);
         hasher.finish()
-     } "#
+     } "#,
+    size = 100
 )]
 fn query_helper(
     stage1: &ParsedDocument,
