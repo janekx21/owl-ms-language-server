@@ -727,7 +727,7 @@ impl InternalDocument {
             rope,
         };
 
-        let queried_document: QueriedDocument = parsed_document.into();
+        let queried_document: QueriedDocument = parsed_document.into_queried();
 
         let stage2: Stage2Document = queried_document.analyze();
 
@@ -852,7 +852,7 @@ impl InternalDocument {
     }
 
     pub fn edit(
-        self,
+        self, // TODO #30 do a mut instead so the analytics do not get dropped
         params: &DidChangeTextDocumentParams,
         encoding: &PositionEncodingKind,
     ) -> Result<InternalDocument> {
@@ -933,6 +933,7 @@ impl InternalDocument {
         // TODO #30 prune diagnostics with
         // Remove all old diagnostics with an overlapping range. They will need to be recreated
         // Move all other diagnostics
+        // Use change ranges to detect syntactically changed parts
 
         let parsed_document = ParsedDocument {
             uri: uri.clone(),
@@ -941,11 +942,11 @@ impl InternalDocument {
             tree: new_tree,
             rope: new_rope,
         };
-        let queried_document: QueriedDocument = parsed_document.into();
 
-        let stage2 = timeit("document.edit / stage1.analyze", || {
-            queried_document.analyze()
-        });
+        let queried_document: QueriedDocument =
+            timeit("document.edit / querie", || parsed_document.into_queried());
+
+        let stage2 = timeit("document.edit / analyze", || queried_document.analyze());
 
         let doc = InternalDocument {
             path,
@@ -1350,7 +1351,7 @@ pub struct FormattingSettings {
 }
 
 /// An internal document that has no semantic analysis. Just text and syntax tree.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ParsedDocument {
     /// File location
     path: PathBuf,
@@ -1372,6 +1373,7 @@ impl Hash for ParsedDocument {
 impl From<ParsedDocument> for QueriedDocument {
     fn from(val: ParsedDocument) -> Self {
         debug!("ParsedDocument -> QueriedDocument");
+
         let ontology_id = val.ontology_id();
         let prefixes = val.prefixes();
         let imports = val.imports();
@@ -1381,6 +1383,27 @@ impl From<ParsedDocument> for QueriedDocument {
             uri: val.uri.clone(),
             _version: val.version,
             parsed_document: val,
+            ontology_id,
+            prefixes,
+            imports,
+        }
+    }
+}
+
+impl ParsedDocument {
+    fn into_queried(self: ParsedDocument) -> QueriedDocument {
+        debug!("ParsedDocument -> QueriedDocument");
+
+        let ((ontology_id, prefixes), imports) = rayon::join(
+            || rayon::join(|| self.ontology_id(), || self.prefixes()),
+            || self.imports(),
+        );
+
+        QueriedDocument {
+            path: self.path.clone(),
+            uri: self.uri.clone(),
+            _version: self.version,
+            parsed_document: self,
             ontology_id,
             prefixes,
             imports,
@@ -1521,7 +1544,7 @@ fn query_helper(
     query_cursor
         .matches(query, stage1.tree.root_node(), rope_provider)
         .map_deref(|m| UnwrappedQueryMatch {
-            _pattern_index: m.pattern_index,
+            pattern_index: m.pattern_index,
             _id: m.id(),
             captures: m
                 .captures
@@ -1614,22 +1637,18 @@ impl QueriedDocument {
     }
 
     fn document_all_frame_infos<'a>(
-        &self,
         definitions: impl Iterator<Item = &'a IriDefinition>,
+        annotations: impl Iterator<Item = (String, String, String)>,
     ) -> HashMap<Iri, FrameInfo> {
         let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
 
         // First we collect the annotations
-        for frame_info in
-            self.document_annotations()
-                .into_iter()
-                .map(|(frame_iri, annotation_iri, literal)| FrameInfo {
-                    iri: frame_iri.clone(),
-                    annotations: HashMap::from([(annotation_iri, vec![literal])]),
-                    frame_type: FrameType::Unknown,
-                    definitions: Vec::new(),
-                })
-        {
+        for frame_info in annotations.map(|(frame_iri, annotation_iri, literal)| FrameInfo {
+            iri: frame_iri.clone(),
+            annotations: HashMap::from([(annotation_iri, vec![literal])]),
+            frame_type: FrameType::Unknown,
+            definitions: Vec::new(),
+        }) {
             if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
                 // Merge the frame info for the same IRI
                 frame_info_mut.extend(frame_info);
@@ -1726,8 +1745,15 @@ impl QueriedDocument {
     fn analyze(&self) -> Stage2Document {
         debug!("QueriedDocument -> Stage2Document");
 
-        let references = timeit("references", || self.document_references());
-        let definitions = timeit("definitions", || self.document_definitions());
+        let ((references, definitions), annotations) = rayon::join(
+            || {
+                rayon::join(
+                    || self.document_references(),
+                    || self.document_definitions(),
+                )
+            },
+            || self.document_annotations(),
+        );
 
         // Find iri locations
         let mut iri_locations: HashMap<String, Vec<Range>> = HashMap::new();
@@ -1735,13 +1761,15 @@ impl QueriedDocument {
             iri_locations.entry(iri.clone()).or_default().push(*range);
         }
 
+        let all_frame_infos = timeit("all frame infos", || {
+            QueriedDocument::document_all_frame_infos(definitions.iter(), annotations.into_iter())
+        });
+
         let (directly_reachable_import_urls, directly_reachable_other_urls) =
             timeit("reachable urls", || self.reachable_urls(&references));
 
         Stage2Document {
-            all_frame_infos: timeit("all frame infos", || {
-                self.document_all_frame_infos(definitions.iter())
-            }),
+            all_frame_infos,
             local_diagnostics: timeit("syntax errors", || syntax_errors(&self.parsed_document)),
             directly_reachable_import_urls,
             directly_reachable_other_urls,
@@ -2185,7 +2213,7 @@ fn simple_term_to_string(simple_term: &SimpleTerm) -> String {
 /// This is a version of a query match that has no reference to the tree or cursor
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnwrappedQueryMatch {
-    _pattern_index: usize,
+    pattern_index: usize,
     pub captures: Vec<UnwrappedQueryCapture>,
     _id: u32,
 }

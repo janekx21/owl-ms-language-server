@@ -1,4 +1,7 @@
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
+use criterion::{
+    criterion_group, criterion_main, AxisScale, BatchSize, BenchmarkId, Criterion,
+    PlotConfiguration, Throughput,
+};
 use owl_ms_language_server::{clear_caches, web::HttpClient, Backend};
 #[cfg(unix)]
 use pprof::criterion::{Output, PProfProfiler};
@@ -52,8 +55,9 @@ impl SeededRng {
     }
 }
 
-/// Benchmark sizes: 10 steps from ~100 to ~20000 lines
-const BENCHMARK_SIZES: [usize; 10] = [100, 500, 1000, 2000, 4000, 6000, 8000, 12000, 16000, 20000];
+const BENCHMARK_SIZES: [usize; 10] = [
+    10, 37, 100, 370, 1_000, 3_700, 10_000, 37_000, 100_000, 370_000,
+];
 
 /// Fixed seed for reproducible ontology generation
 const RNG_SEED: u64 = 42;
@@ -407,7 +411,7 @@ async fn setup_backend_with_ontology(ontology: String) -> (LspService<Backend>, 
 }
 
 fn setup_with_size(size: usize) -> (Runtime, LspService<Backend>, Url, TempDir, u32) {
-    let rt = Runtime::new().unwrap();
+    let rt = Runtime::new().unwrap(); // This is multi threaded
     let ontology = generate_ontology(size);
     let line_count = count_lines(&ontology);
     let (service, url, dir) = rt.block_on(setup_backend_with_ontology(ontology));
@@ -1034,9 +1038,54 @@ fn bench_symbol(c: &mut Criterion) {
     clear_caches();
 }
 
+fn bench_did_change(c: &mut Criterion) {
+    let mut group = c.benchmark_group("did_change");
+    group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
+
+    for &size in &BENCHMARK_SIZES {
+        group.throughput(Throughput::Elements(size as u64));
+        let setup = setup_with_size(size);
+
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &_size| {
+            b.iter(|| {
+                let (rt, service, url, dir, _) = &setup;
+                rt.block_on(async {
+                    service
+                        .inner()
+                        .did_change(DidChangeTextDocumentParams {
+                            text_document: VersionedTextDocumentIdentifier {
+                                uri: url.clone(),
+                                version: 0,
+                            },
+                            content_changes: vec![TextDocumentContentChangeEvent {
+                                range: Some(Range {
+                                    start: Position {
+                                        line: 10,
+                                        character: 0,
+                                    },
+                                    end: Position {
+                                        line: 10,
+                                        character: 0,
+                                    },
+                                }),
+                                text: String::from("Class: InsertedClass\n"),
+                                range_length: None,
+                            }],
+                        })
+                        .await;
+                });
+                (rt, service, dir)
+            });
+        });
+    }
+    group.finish();
+    clear_caches();
+}
+
 criterion_group!(
-    benches,
-    bench_hover,
+    name = benches;
+    config = Criterion::default().warm_up_time(Duration::from_millis(100)).measurement_time(Duration::from_millis(500));
+    targets = bench_hover,
     bench_goto_definition,
     bench_completion,
     bench_completion_keywords,
@@ -1049,6 +1098,7 @@ criterion_group!(
     bench_semantic_tokens_range,
     bench_inlay_hint,
     bench_symbol,
+    bench_did_change
 );
 
 // Profiling benchmarks group
