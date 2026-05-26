@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.13.0](https://github.com/janekx21/owl-ms-language-server/compare/v0.12.1...v0.13.0) (2026-05-26)
+
+
+### Features
+
+* 104 benchmark requests ([#126](https://github.com/janekx21/owl-ms-language-server/issues/126)) ([76af9f7](https://github.com/janekx21/owl-ms-language-server/commit/76af9f74824d047decfc2fef8fd3e720c92eabff))
+* 127 merge queries ([#151](https://github.com/janekx21/owl-ms-language-server/issues/151)) ([faec7e4](https://github.com/janekx21/owl-ms-language-server/commit/faec7e435447d9c5b2fad815acfeca4a65164f1a))
+* 155 add some quality checks ([#156](https://github.com/janekx21/owl-ms-language-server/issues/156)) ([55d1077](https://github.com/janekx21/owl-ms-language-server/commit/55d10770c34ad1c2b2d4897544186924b1d1b3ad))
+* 9 create missing frame action command ([#148](https://github.com/janekx21/owl-ms-language-server/issues/148)) ([9ecbf51](https://github.com/janekx21/owl-ms-language-server/commit/9ecbf517e217c766996384df9d540567308848c2))
+* add reference urls to reachable urls and rename them from prefix to other ([#130](https://github.com/janekx21/owl-ms-language-server/issues/130)) ([9495c53](https://github.com/janekx21/owl-ms-language-server/commit/9495c53c65bc9dacd13dbf53c5008e28495e683b))
+
+
+### Bug Fixes
+
+* 158 memory leak ([#159](https://github.com/janekx21/owl-ms-language-server/issues/159)) ([f0c0008](https://github.com/janekx21/owl-ms-language-server/commit/f0c00088bf7fb3ab432279ec6649f4d4d58ccc5a))
+
 ## [0.12.1](https://github.com/janekx21/owl-ms-language-server/compare/v0.12.0...v0.12.1) (2026-04-14)
 
 
