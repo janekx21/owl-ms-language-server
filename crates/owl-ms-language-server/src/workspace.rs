@@ -5,6 +5,7 @@ use crate::pos::Position;
 use crate::queries::{
     self, treesitter_highlight_capture_into_semantic_token_type_index, NODE_TYPES,
 };
+use crate::range::RangeBox;
 use crate::web::{url_to_filename, HttpClient};
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
@@ -46,7 +47,8 @@ use std::{
 use tokio::task::JoinHandle;
 use tower_lsp::lsp_types::{
     self, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
-    PositionEncodingKind, SemanticToken, SymbolKind, Url, WorkspaceFolder,
+    PositionEncodingKind, SemanticToken, SymbolKind, TextDocumentContentChangeEvent, Url,
+    WorkspaceFolder,
 };
 use tree_sitter_c2rust::{InputEdit, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
@@ -583,7 +585,11 @@ pub struct InternalDocument {
     /// URL and location where this document was loaded from
     pub uri: Url,
     pub version: i32,
+    parsed_document: ParsedDocument,
+    #[cfg(not(test))]
     queried_document: QueriedDocument,
+    #[cfg(test)]
+    pub queried_document: QueriedDocument,
     stage2: Stage2Document,
 }
 
@@ -731,7 +737,7 @@ impl InternalDocument {
 
         let queried_document: QueriedDocument = parsed_document.into_queried();
 
-        let stage2: Stage2Document = queried_document.analyze();
+        let stage2: Stage2Document = queried_document.analyze(&parsed_document);
 
         debug!("Stage2Document -> InternalDocument");
 
@@ -739,17 +745,18 @@ impl InternalDocument {
             path,
             uri,
             version,
+            parsed_document,
             queried_document,
             stage2,
         }
     }
 
     pub fn rope(&self) -> &Rope {
-        &self.queried_document.parsed_document.rope
+        &self.parsed_document.rope
     }
 
     pub fn tree(&self) -> &Tree {
-        &self.queried_document.parsed_document.tree
+        &self.parsed_document.tree
     }
 
     pub fn prefixes(&self) -> &HashMap<String, String> {
@@ -774,7 +781,7 @@ impl InternalDocument {
     }
 
     pub fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
-        node_by_id(&self.queried_document.parsed_document, id)
+        node_by_id(&self.parsed_document, id)
     }
 
     /// Returns all document URL's that can be reached (imports, prefixes, ...) from this internal document.
@@ -855,10 +862,11 @@ impl InternalDocument {
 
     pub fn edit(
         self, // TODO #30 do a mut instead so the analytics do not get dropped
-        params: &DidChangeTextDocumentParams,
+        params: DidChangeTextDocumentParams,
         encoding: &PositionEncodingKind,
     ) -> Result<InternalDocument> {
-        if self.version >= params.text_document.version {
+        let new_version = params.text_document.version;
+        if self.version >= new_version {
             return Ok(self); // no change needed
         }
 
@@ -875,85 +883,75 @@ impl InternalDocument {
 
         debug!("content changes {:#?}", params.content_changes);
 
-        let mut new_tree = self.tree().clone();
-        let mut new_rope = self.rope().clone();
-        let uri = self.uri;
-        let path = self.path;
+        // Deconstruct the internal document into its parts
 
-        // This range is relative to the *old* document not the new one
-        for change in &params.content_changes {
-            let range = change.range.expect("range to be defined");
-            // LSP ranges are in bytes when encoding is utf-8!!!
-            let old_range: Range = Range::from_lsp(&range, &new_rope, encoding)?;
-            let start_byte = old_range.start.byte_index(&new_rope);
-            let old_end_byte = old_range.end.byte_index(&new_rope);
+        let InternalDocument {
+            path,
+            uri,
+            version,
+            parsed_document,
+            mut queried_document,
+            stage2,
+        } = self;
 
-            // must come before the rope is changed!
-            let start_char = new_rope.try_byte_to_char(start_byte)?;
-            let old_end_char = new_rope.try_byte_to_char(old_end_byte)?;
-
-            debug!(
-                "change range in chars {start_byte}..{old_end_byte} og range {range:?} and text {}",
-                change.text
-            );
-
-            // rope replace
-            new_rope.try_remove(start_char..old_end_char)?;
-            new_rope.try_insert(start_char, &change.text)?;
-
-            // this must come after the rope was changed!
-            let new_end_byte = start_byte + change.text.len();
-            let new_end_position = Position::new_from_byte_index(&new_rope, new_end_byte);
-
-            let edit = InputEdit {
-                start_byte,
-                old_end_byte,
-                new_end_byte,
-                start_position: old_range.start.into(),
-                old_end_position: old_range.end.into(),
-                new_end_position: new_end_position.into(),
-            };
-            timeit("tree edit", || new_tree.edit(&edit));
-        }
-        let new_version = params.text_document.version;
-
-        let rope_provider = RopeProvider::new(&new_rope);
-
-        let new_tree = {
-            let mut parser_guard = lock_global_parser();
-            timeit("parsing", || {
-                parser_guard
-                    .parse_with_options(
-                        &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
-                        Some(&new_tree),
-                        None,
-                    )
-                    .expect("language to be set, no timeout to be used, no cancellation flag")
+        let change_ranges = params
+            .content_changes
+            .into_iter()
+            .map(|TextDocumentContentChangeEvent { range, text, .. }| {
+                Range::from_lsp(
+                    &range.expect("range to be defined"),
+                    &parsed_document.rope,
+                    encoding,
+                )
+                .map(|r| (r, text))
             })
-        };
+            .filter_and_log()
+            .collect_vec();
 
-        // TODO #30 prune diagnostics with
-        // Remove all old diagnostics with an overlapping range. They will need to be recreated
-        // Move all other diagnostics
-        // Use change ranges to detect syntactically changed parts
+        let (old_tree, parsed_document) = edit_parsed_document(
+            change_ranges.iter(),
+            new_version,
+            &path,
+            &uri,
+            parsed_document,
+        )?;
 
-        let parsed_document = ParsedDocument {
-            uri: uri.clone(),
-            path: path.clone(),
-            version: new_version,
-            tree: new_tree,
-            rope: new_rope,
-        };
+        // let QueriedDocument {
+        //     ontology_id,
+        //     prefixes,
+        //     imports,
+        //     ..
+        // } = queried_document;
 
-        let queried_document: QueriedDocument =
-            timeit("document.edit / querie", || parsed_document.into_queried());
+        // Note that these ranges are in the pre edit form
+        for change in &change_ranges {
+            debug!("Updating changed range (pre edit) {change:?}");
+            queried_document.update(change, &parsed_document);
+        }
 
-        let stage2 = timeit("document.edit / analyze", || queried_document.analyze());
+        // TODO do I need this?
+        // Syntax changes only
+        // Note that these ranges are in the post edit form
+        // let syntax_change_ranges = old_tree.changed_ranges(&parsed_document.tree);
+        // for range in syntax_change_ranges {
+        //     let range: Range = range.into();
+        //     debug!("Updating changed syntax range (post edit) {range}");
+        //     queried_document.update(range, &parsed_document);
+        // }
+
+        // let queried_document: QueriedDocument =
+        //     timeit("document.edit / querie", || parsed_document.into_queried());
+
+        // TODO incremental update of this analyze step
+        let stage2 = timeit("document.edit / analyze", || {
+            queried_document.analyze(&parsed_document)
+        });
 
         let doc = InternalDocument {
             path,
             uri,
             version: new_version,
+            parsed_document,
             queried_document,
             stage2,
         };
@@ -992,7 +990,7 @@ impl InternalDocument {
         let reachable_docs = self.reachable_docs_recursive(workspace, true);
         debug!("Reachable docs for {} are {reachable_docs:#?}", self.uri);
         // TODO cache this in stage2
-        self.queried_document
+        self
             .parsed_document
             .query_range(&ALL_QUERIES.iri_query_all, range)
             .into_iter()
@@ -1225,8 +1223,7 @@ impl InternalDocument {
         iri_kind: &String,
         original: &str,
     ) -> Vec<(Range, String)> {
-        self.queried_document
-            .parsed_document
+        self.parsed_document
             .query(&ALL_QUERIES.iri_query_all)
             .into_iter()
             .map(|m| {
@@ -1267,8 +1264,7 @@ impl InternalDocument {
 
     pub fn references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range> {
         // TODO change this into using queried_document directly
-        self.queried_document
-            .parsed_document
+        self.parsed_document
             .query(&ALL_QUERIES.iri_query_references)
             .into_iter()
             .map(|m| {
@@ -1345,6 +1341,81 @@ impl InternalDocument {
     }
 }
 
+fn edit_parsed_document<'a>(
+    changes: impl Iterator<Item = &'a (Range, String)>,
+    new_version: i32,
+    path: &PathBuf,
+    uri: &Url,
+    parsed_document: ParsedDocument,
+) -> Result<(Tree, ParsedDocument)> {
+    let ParsedDocument { tree, rope, .. } = parsed_document;
+    let mut old_tree = tree;
+    let mut new_rope = rope;
+
+    for change in changes {
+        apply_change_to_rope_and_tree(&mut old_tree, &mut new_rope, change)?;
+    }
+
+    let rope_provider = RopeProvider::new(&new_rope);
+    let new_tree = {
+        let mut parser_guard = lock_global_parser();
+        timeit("parsing", || {
+            parser_guard
+                .parse_with_options(
+                    &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+                    Some(&old_tree),
+                    None,
+                )
+                .expect("language to be set, no timeout to be used, no cancellation flag")
+        })
+    };
+    let parsed_document = ParsedDocument {
+        uri: uri.clone(),
+        path: path.clone(),
+        version: new_version,
+        tree: new_tree,
+        rope: new_rope,
+    };
+    Ok((old_tree, parsed_document))
+}
+
+/// .
+///
+/// # Panics
+///
+/// Panics if change has no range.
+///
+/// # Errors
+///
+/// This function will return an error if the change is out of range.
+pub fn apply_change_to_rope_and_tree(
+    new_tree: &mut Tree,
+    new_rope: &mut Rope, // This rope is always in UTF-8
+    (old_range, text): &(Range, String),
+) -> Result<()> {
+    // let range = range.expect("range to be defined");
+    // let old_range = range: Range = Range::from_lsp(&range, &*new_rope, encoding)?;
+    let start_byte = old_range.start.byte_index(&*new_rope);
+    let old_end_byte = old_range.end.byte_index(&*new_rope);
+    let start_char = new_rope.try_byte_to_char(start_byte)?;
+    let old_end_char = new_rope.try_byte_to_char(old_end_byte)?;
+    debug!("change range in bytes {start_byte}..{old_end_byte} and text {text}");
+    new_rope.try_remove(start_char..old_end_char)?;
+    new_rope.try_insert(start_char, text)?;
+    let new_end_byte = start_byte + text.len();
+    let new_end_position = Position::new_from_byte_index(&*new_rope, new_end_byte);
+    let edit = InputEdit {
+        start_byte,
+        old_end_byte,
+        new_end_byte,
+        start_position: old_range.start.into(),
+        old_end_position: old_range.end.into(),
+        new_end_position: new_end_position.into(),
+    };
+    timeit("tree edit", || new_tree.edit(&edit));
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct FormattingSettings {
     pub tab_size: u32,
@@ -1384,7 +1455,6 @@ impl From<ParsedDocument> for QueriedDocument {
             path: val.path.clone(),
             uri: val.uri.clone(),
             _version: val.version,
-            parsed_document: val,
             ontology_id,
             prefixes,
             imports,
@@ -1393,7 +1463,7 @@ impl From<ParsedDocument> for QueriedDocument {
 }
 
 impl ParsedDocument {
-    fn into_queried(self: ParsedDocument) -> QueriedDocument {
+    fn into_queried(self: &ParsedDocument) -> QueriedDocument {
         debug!("ParsedDocument -> QueriedDocument");
 
         let ((ontology_id, prefixes), imports) = rayon::join(
@@ -1405,7 +1475,6 @@ impl ParsedDocument {
             path: self.path.clone(),
             uri: self.uri.clone(),
             _version: self.version,
-            parsed_document: self,
             ontology_id,
             prefixes,
             imports,
@@ -1460,16 +1529,22 @@ impl ParsedDocument {
     }
 
     /// Returns the ontology IRI if possible and the version IRI if possible.
-    pub fn ontology_id(&self) -> Option<(String, Option<String>)> {
+    pub fn ontology_id(&self) -> Option<RangeBox<OntologyId>> {
         match &self.query(&ALL_QUERIES.ontology)[..] {
             [] => None,
             [ontology] => match &ontology.captures[..] {
                 [] => None,
                 // This should be a full IRI so lets trim it
-                [iri] => Some((trim_full_iri(iri.node.text.clone()), None)),
-                [iri, version_iri] => Some((
-                    trim_full_iri(iri.node.text.clone()),
-                    Some(trim_full_iri(version_iri.node.text.clone())),
+                [iri] => Some(RangeBox::new(
+                    (trim_full_iri(iri.node.text.clone()), None),
+                    iri.node.range,
+                )),
+                [iri, version_iri] => Some(RangeBox::new(
+                    (
+                        trim_full_iri(iri.node.text.clone()),
+                        Some(trim_full_iri(version_iri.node.text.clone())),
+                    ),
+                    Range::new(iri.node.range.start, version_iri.node.range.end),
                 )),
                 _ => unreachable!("The query has only one capture"),
             },
@@ -1566,16 +1641,21 @@ fn query_helper(
         .collect_vec()
 }
 
+type OntologyId = (Iri, Option<Iri>);
+
 #[derive(Debug)]
-struct QueriedDocument {
+pub struct QueriedDocument {
     /// File location
     path: PathBuf,
     /// URL and location where this document was loaded from
     uri: Url,
     _version: i32,
-    parsed_document: ParsedDocument,
 
-    ontology_id: Option<(Iri, Option<Iri>)>,
+    #[cfg(not(test))]
+    ontology_id: Option<RangeBox<OntologyId>>,
+    #[cfg(test)]
+    pub ontology_id: Option<RangeBox<OntologyId>>,
+
     prefixes: HashMap<String, Iri>,
     imports: Vec<Iri>,
 }
@@ -1616,7 +1696,11 @@ impl QueriedDocument {
             .unique()
             .collect_vec();
 
-        debug!("Extending {} with {referenced_urls:#?}", self.uri);
+        debug!(
+            "Extending {} with {}",
+            self.uri,
+            referenced_urls.iter().join(", ")
+        );
 
         other_urls.extend(referenced_urls);
 
@@ -1677,8 +1761,11 @@ impl QueriedDocument {
         frame_infos
     }
 
-    fn document_annotations(&self) -> Vec<(String, String, String)> {
-        self.parsed_document
+    fn document_annotations(
+        &self,
+        parsed_document: &ParsedDocument,
+    ) -> Vec<(String, String, String)> {
+        parsed_document
             .query(&ALL_QUERIES.annotation_query)
             .iter()
             .map(|m| match &m.captures[..] {
@@ -1696,9 +1783,9 @@ impl QueriedDocument {
             .collect_vec()
     }
 
-    fn document_definitions(&self) -> Vec<IriDefinition> {
-        let node_by_id = node_by_id_map(&self.parsed_document.tree);
-        self.parsed_document
+    fn document_definitions(&self, parsed_document: &ParsedDocument) -> Vec<IriDefinition> {
+        let node_by_id = node_by_id_map(&parsed_document.tree);
+        parsed_document
             .query(&ALL_QUERIES.frame_query)
             .iter()
             .map(|m| match &m.captures[..] {
@@ -1728,8 +1815,8 @@ impl QueriedDocument {
             .collect()
     }
 
-    fn document_references(&self) -> Vec<(String, Range)> {
-        self.parsed_document
+    fn document_references(&self, parsed_document: &ParsedDocument) -> Vec<(String, Range)> {
+        parsed_document
             .query(&ALL_QUERIES.iri_query_references)
             .iter()
             .map(|m| match &m.captures[..] {
@@ -1744,17 +1831,17 @@ impl QueriedDocument {
             .collect()
     }
 
-    fn analyze(&self) -> Stage2Document {
+    fn analyze(&self, parsed_document: &ParsedDocument) -> Stage2Document {
         debug!("QueriedDocument -> Stage2Document");
 
         let ((references, definitions), annotations) = rayon::join(
             || {
                 rayon::join(
-                    || self.document_references(),
-                    || self.document_definitions(),
+                    || self.document_references(parsed_document),
+                    || self.document_definitions(parsed_document),
                 )
             },
-            || self.document_annotations(),
+            || self.document_annotations(parsed_document),
         );
 
         // Find iri locations
@@ -1772,7 +1859,7 @@ impl QueriedDocument {
 
         Stage2Document {
             all_frame_infos,
-            local_diagnostics: timeit("syntax errors", || syntax_errors(&self.parsed_document)),
+            local_diagnostics: timeit("syntax errors", || syntax_errors(parsed_document)),
             directly_reachable_import_urls,
             directly_reachable_other_urls,
             iri_locations,
@@ -1782,6 +1869,20 @@ impl QueriedDocument {
                 .map(|IriDefinition { iri, .. }| iri)
                 .collect(),
         }
+    }
+
+    fn update(&mut self, (range, _): &(Range, String), parsed_document: &ParsedDocument) {
+        // Update ontology id
+        if let Some(id) = &self.ontology_id {
+            debug!("Check {} overlap with {range}", id.range());
+            if id.range().overlaps(range) {
+                self.ontology_id = parsed_document.ontology_id();
+            }
+        } else {
+            self.ontology_id = parsed_document.ontology_id();
+        }
+
+        // TODO other stuff
     }
 }
 
@@ -2529,7 +2630,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
         .filter(|iri| !imports.contains(*iri))
     {
         // Skip ontology and version IRIs
-        if let Some((iri, version)) = &ontology_id {
+        if let Some((iri, version)) = ontology_id.as_ref().map(RangeBox::value) {
             if diff == iri {
                 continue;
             }

@@ -1,4 +1,7 @@
-use crate::{catalog::Catalog, queries::ALL_QUERIES, test_helpers::*, *};
+use crate::{
+    catalog::Catalog, queries::ALL_QUERIES, range::Range, rope_provider::RopeProvider,
+    test_helpers::*, workspace::apply_change_to_rope_and_tree, *,
+};
 use horned_owl::{
     io::{OWXParserConfiguration, ParserConfiguration, RDFParserConfiguration},
     model::{AnnotatedComponent, Build},
@@ -11,6 +14,7 @@ use sophia::api::term::SimpleTerm;
 use tempdir::TempDir;
 use test_log::test;
 use tower_lsp::LspService;
+use tree_sitter_c2rust::Tree;
 
 /// This module contains tests.
 /// Each test function name is in the form of `<function>_<thing>_<condition>_<expectation>`.
@@ -39,6 +43,98 @@ fn parse_ontology_should_work() {
 fn deref_all_queries_should_be_valid() {
     setup();
     let _ = *ALL_QUERIES;
+}
+
+#[test]
+fn reparse_ontology_node_ids() {
+    // Just for exploration purposes
+    setup();
+    // Arrange
+    let mut parser = arrange_parser();
+
+    let source_code = indoc! {"
+Ontology: Foobar
+    # The foo class
+    Class: Foo
+    Datatype: Bar
+    Class: FooBar
+    "};
+    let mut rope = Rope::from(source_code);
+    let mut tree = {
+        let rope_provider = RopeProvider::new(&rope);
+        parser
+            .parse_with_options(&mut |i, _| rope_provider.chunk_callback(i), None, None)
+            .unwrap()
+    };
+
+    info!("Text: \n{rope}\n");
+    print_tree(&tree);
+
+    info!("------ edit ------");
+    let edits = [
+        (
+            Range::new(Position::new(0, 10), Position::new(0, 16)),
+            "Foo Bar",
+        ),
+        (Range::new(Position::new(3, 0), Position::new(3, 0)), "#"),
+    ];
+
+    for (range, text) in edits {
+        apply_change_to_rope_and_tree(&mut tree, &mut rope, &(range, text.to_string())).unwrap();
+    }
+
+    info!("Text: \n{rope}\n");
+    print_tree(&tree);
+
+    info!("------ reparsing ------");
+
+    // Act
+    let rope_provider = RopeProvider::new(&rope);
+    let tree_2 = parser
+        .parse_with_options(
+            &mut |i, _| rope_provider.chunk_callback(i),
+            Some(&tree),
+            None,
+        )
+        .unwrap();
+
+    // Assert
+
+    info!("Text: \n{rope}\n");
+    print_tree(&tree_2);
+
+    for change in tree.changed_ranges(&tree_2) {
+        info!("Changed syntax at {}", Range::from(change));
+    }
+
+    for change in tree_2.changed_ranges(&tree) {
+        info!("Changed syntax (rev) at {}", Range::from(change));
+    }
+
+    panic!();
+}
+
+fn print_tree(tree: &Tree) {
+    let mut w = tree.walk();
+    'outer: loop {
+        info!(
+            "{}+ {}, ID: {}, C?: {}, {:?}",
+            " ".repeat(w.depth() as usize),
+            w.node().kind(),
+            w.node().id(),
+            w.node().has_changes(),
+            w.node().byte_range(),
+        );
+
+        // In order traversal
+        if !w.goto_first_child() {
+            while !w.goto_next_sibling() {
+                if !w.goto_parent() {
+                    break 'outer;
+                }
+            }
+        }
+    }
 }
 
 ///////////////////////////////////////////
@@ -3642,4 +3738,249 @@ async fn backend_code_action_on_missing_iri_should_create_frame() {
                     .is_some()
         }
     }));
+}
+
+#[test(tokio::test)]
+async fn backend_did_change_should_update_ontology_id() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            Class: SomeClass
+                Annotations: rdfs:label "Some Class annotation"
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: ontology_url.clone(),
+                version: 1,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                text: "othername".into(),
+                range: Some(lsp_types::Range {
+                    start: lsp_types::Position::new(0, 26),
+                    end: lsp_types::Position::new(0, 34),
+                }),
+                range_length: None,
+            }],
+        })
+        .await;
+
+    // Assert
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    assert_eq!(
+        document.rope().to_string(),
+        indoc! { r#"
+            Ontology: <http://invalid/othername> <http://invalid/ontology/123>
+                Class: SomeClass
+                    Annotations: rdfs:label "Some Class annotation"
+        "#}
+    );
+
+    let id = document
+        .queried_document
+        .ontology_id
+        .as_ref()
+        .unwrap()
+        .value();
+
+    assert_eq!(
+        id,
+        &(
+            "http://invalid/othername".to_string(),
+            Some("http://invalid/ontology/123".to_string())
+        )
+    );
+}
+
+#[test(tokio::test)]
+async fn backend_did_change_with_syntax_change_should_update_ontology_id() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            Class: SomeClass
+                Annotations: rdfs:label "Some Class annotation"
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: ontology_url.clone(),
+                version: 1,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                text: "Class: Foo".into(),
+                range: Some(lsp_types::Range {
+                    start: lsp_types::Position::new(0, 36),
+                    end: lsp_types::Position::new(0, 65),
+                }),
+                range_length: None,
+            }],
+        })
+        .await;
+
+    // Assert
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    assert_eq!(
+        document.rope().to_string(),
+        indoc! { r#"
+            Ontology: <http://invalid/ontology> Class: Foo
+                Class: SomeClass
+                    Annotations: rdfs:label "Some Class annotation"
+        "#}
+    );
+
+    let id = document
+        .queried_document
+        .ontology_id
+        .as_ref()
+        .unwrap()
+        .value();
+
+    assert_eq!(id, &("http://invalid/ontology".to_string(), None));
+}
+
+#[test(tokio::test)]
+#[ignore = "not ready"]
+async fn backend_did_change_with_large_syntax_change_should_update_ontology_id() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Prefix: foo: <http://invalid/foo>
+        Prefix: bar: <http://invalid/bar>
+        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            Class: SomeClass
+                Annotations: rdfs:label "Some Class annotation"
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: ontology_url.clone(),
+                version: 1,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                text: "Ontology: <http://invalid/othername> <http://invalid/ontology/321>\n".into(),
+                range: Some(lsp_types::Range {
+                    start: lsp_types::Position::new(1, 0),
+                    end: lsp_types::Position::new(1, 0),
+                }),
+                range_length: None,
+            }],
+        })
+        .await;
+
+    // Assert
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    assert_eq!(
+        document.rope().to_string(),
+        indoc! { r#"
+            Prefix: foo: <http://invalid/foo>
+            Ontology: <http://invalid/othername> <http://invalid/ontology/321>
+            Prefix: bar: <http://invalid/bar>
+            Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+                Class: SomeClass
+                    Annotations: rdfs:label "Some Class annotation"
+        "#}
+    );
+
+    let id = document
+        .queried_document
+        .ontology_id
+        .as_ref()
+        .unwrap()
+        .value();
+
+    assert_eq!(
+        id,
+        &(
+            "http://invalid/othername".to_string(),
+            Some("http://invalid/ontology/321".to_string())
+        )
+    );
+    panic!();
 }

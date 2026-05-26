@@ -79,6 +79,12 @@ impl Range {
 
         true
     }
+
+    /// Returns true if this range overlaps with another range.
+    /// Since end positions are exclusive, ranges [a,b) and [b,c) do NOT overlap.
+    pub fn overlaps(&self, other: &Range) -> bool {
+        self.start < other.end && other.start < self.end
+    }
 }
 
 impl Display for Range {
@@ -106,6 +112,27 @@ impl From<tree_sitter_c2rust::Range> for Range {
 impl From<Range> for std::ops::Range<tree_sitter_c2rust::Point> {
     fn from(value: Range) -> std::ops::Range<tree_sitter_c2rust::Point> {
         value.start.into()..value.end.into()
+    }
+}
+
+#[derive(Debug)]
+pub struct RangeBox<T>(T, Range);
+
+impl<T> RangeBox<T> {
+    pub fn new(value: T, range: Range) -> Self {
+        Self(value, range)
+    }
+
+    pub fn range(&self) -> &Range {
+        &self.1
+    }
+
+    pub fn value(&self) -> &T {
+        &self.0
+    }
+
+    pub fn unpack(self) -> (T, Range) {
+        (self.0, self.1)
     }
 }
 
@@ -260,5 +287,76 @@ mod tests {
             !r.contains(pos(2, 5)),
             "An empty range should contain nothing"
         );
+    }
+
+    // --- overlap cases -----------------------------
+
+    #[test]
+    fn same_range_overlaps() {
+        let r = Range::new(Position::new(1, 0), Position::new(1, 5));
+        assert!(r.overlaps(&r));
+    }
+
+    #[test]
+    fn partial_overlap_on_same_line() {
+        // [0,3) vs [2,5)  -> overlap at [2,3)
+        assert!(Range::new(Position::new(0, 0), Position::new(0, 3))
+            .overlaps(&Range::new(Position::new(0, 2), Position::new(0, 5))));
+    }
+
+    #[test]
+    fn one_range_contained_in_other() {
+        // [0,10) contains [2,5)
+        assert!(Range::new(Position::new(0, 0), Position::new(0, 10))
+            .overlaps(&Range::new(Position::new(0, 2), Position::new(0, 5))));
+        assert!(Range::new(Position::new(0, 2), Position::new(0, 5))
+            .overlaps(&Range::new(Position::new(0, 0), Position::new(0, 10))));
+    }
+
+    #[test]
+    fn overlap_across_lines() {
+        // [1:5 -> 3:0) vs [2:0 -> 4:0)
+        assert!(Range::new(Position::new(1, 5), Position::new(3, 0))
+            .overlaps(&Range::new(Position::new(2, 0), Position::new(4, 0))));
+    }
+
+    #[test]
+    fn overlap_reversed_argument_order() {
+        let a = Range::new(Position::new(0, 0), Position::new(0, 5));
+        let b = Range::new(Position::new(0, 3), Position::new(0, 8));
+        assert!(a.overlaps(&b));
+        assert!(b.overlaps(&a));
+    }
+
+    // --- non-overlap cases -------------------------
+
+    #[test]
+    fn adjacent_ranges_do_not_overlap() {
+        // [0,5) and [5,10) share only the boundary — end is exclusive
+        assert!(!Range::new(Position::new(0, 0), Position::new(0, 5))
+            .overlaps(&Range::new(Position::new(0, 5), Position::new(0, 10))));
+        assert!(!Range::new(Position::new(0, 5), Position::new(0, 10))
+            .overlaps(&Range::new(Position::new(0, 0), Position::new(0, 5))));
+    }
+
+    #[test]
+    fn disjoint_ranges_same_line() {
+        // [0,3) and [5,8)
+        assert!(!Range::new(Position::new(0, 0), Position::new(0, 3))
+            .overlaps(&Range::new(Position::new(0, 5), Position::new(0, 8))));
+    }
+
+    #[test]
+    fn disjoint_ranges_different_lines() {
+        // [1:0 -> 1:10) and [3:0 -> 3:10)
+        assert!(!Range::new(Position::new(1, 0), Position::new(1, 10))
+            .overlaps(&Range::new(Position::new(3, 0), Position::new(3, 10))));
+    }
+
+    #[test]
+    fn adjacent_across_lines_do_not_overlap() {
+        // [1:0 -> 2:5) and [2:5 -> 3:0)
+        assert!(!Range::new(Position::new(1, 0), Position::new(2, 5))
+            .overlaps(&Range::new(Position::new(2, 5), Position::new(3, 0))));
     }
 }
