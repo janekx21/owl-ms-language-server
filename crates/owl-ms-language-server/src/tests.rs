@@ -1,6 +1,11 @@
 use crate::{
-    catalog::Catalog, queries::ALL_QUERIES, range::Range, rope_provider::RopeProvider,
-    test_helpers::*, workspace::apply_change_to_rope_and_tree, *,
+    catalog::Catalog,
+    queries::ALL_QUERIES,
+    range::{post_range_to_pre_range, Change, Range},
+    rope_provider::RopeProvider,
+    test_helpers::*,
+    workspace::apply_change_to_rope_and_tree,
+    *,
 };
 use horned_owl::{
     io::{OWXParserConfiguration, ParserConfiguration, RDFParserConfiguration},
@@ -16,8 +21,8 @@ use test_log::test;
 use tower_lsp::LspService;
 use tree_sitter_c2rust::Tree;
 
-/// This module contains tests.
-/// Each test function name is in the form of `<function>_<thing>_<condition>_<expectation>`.
+/// This module contains all functional tests.
+/// Each test's function name is in the form of `<function>_<thing>_<condition>_<expectation>`.
 
 /////////////////////////
 // Tree sitter tests
@@ -46,6 +51,7 @@ fn deref_all_queries_should_be_valid() {
 }
 
 #[test]
+#[ignore = "Just for experimentation"]
 fn reparse_ontology_node_ids() {
     // Just for exploration purposes
     setup();
@@ -80,7 +86,15 @@ Ontology: Foobar
     ];
 
     for (range, text) in edits {
-        apply_change_to_rope_and_tree(&mut tree, &mut rope, &(range, text.to_string())).unwrap();
+        apply_change_to_rope_and_tree(
+            &mut tree,
+            &mut rope,
+            &Change {
+                range,
+                text: text.to_string(),
+            },
+        )
+        .unwrap();
     }
 
     info!("Text: \n{rope}\n");
@@ -137,12 +151,165 @@ fn print_tree(tree: &Tree) {
     }
 }
 
+#[test]
+fn post_range_to_pre_range_with_whitespace_changes_should_inverse_apply_changes_on_all_nodes() {
+    setup();
+    let mut parser = arrange_parser();
+
+    let source_code = indoc! {"
+Ontology: Foobar
+    # The foo class
+    Class: Foo
+    Datatype: Bar
+    Class: FooBar
+    "};
+    let mut rope = Rope::from(source_code);
+    let mut tree = {
+        let rope_provider = RopeProvider::new(&rope);
+        parser
+            .parse_with_options(&mut |i, _| rope_provider.chunk_callback(i), None, None)
+            .unwrap()
+    };
+
+    let changes = [
+        Change {
+            range: Range::new(Position::new(1, 0), Position::new(1, 0)),
+            text: "                   \n".to_string(),
+        },
+        Change {
+            range: Range::new(Position::new(2, 0), Position::new(2, 4)),
+            text: "".to_string(),
+        },
+    ];
+
+    // collect some pre-edit ranges from the tree to use as test cases
+    let pre_ranges: Vec<Range> = collect_node_ranges(&tree);
+
+    // apply changes, tracking what the post ranges become
+    for change in &changes {
+        apply_change_to_rope_and_tree(&mut tree, &mut rope, change).unwrap();
+    }
+
+    // reparse to get post-edit tree
+    let rope_provider = RopeProvider::new(&rope);
+    let new_tree = parser
+        .parse_with_options(
+            &mut |i, _| rope_provider.chunk_callback(i),
+            Some(&tree),
+            None,
+        )
+        .unwrap();
+
+    let post_ranges: Vec<Range> = collect_node_ranges(&new_tree);
+
+    let pre_after_post_ranges = post_ranges
+        .into_iter()
+        .map(|range| changes.iter().rfold(range, post_range_to_pre_range))
+        .collect_vec();
+
+    assert_eq!(pre_after_post_ranges, pre_ranges);
+}
+
+fn collect_node_ranges(tree: &tree_sitter_c2rust::Tree) -> Vec<Range> {
+    let mut ranges = Vec::new();
+    let mut cursor = tree.root_node().walk();
+    loop {
+        ranges.push(Range::from(cursor.node().range()));
+        if cursor.goto_first_child() {
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return ranges;
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "experiment"]
+fn post_range_to_pre_range_with_syntax_changes_should_inverse_apply_changes() {
+    setup();
+    let mut parser = arrange_parser();
+
+    let source_code = indoc! {"
+Ontology: Foobar
+    # The foo class
+    Class: Foo
+    Datatype: Bar
+    Class: FooBar
+    "};
+    let mut rope = Rope::from(source_code);
+
+    info!("pre:\n{rope}");
+
+    let mut tree = {
+        let rope_provider = RopeProvider::new(&rope);
+        parser
+            .parse_with_options(&mut |i, _| rope_provider.chunk_callback(i), None, None)
+            .unwrap()
+    };
+
+    let changes = [
+        Change {
+            range: Range::new(Position::new(0, 10), Position::new(0, 16)),
+            text: "Foo Bar".to_string(),
+        },
+        Change {
+            range: Range::new(Position::new(3, 0), Position::new(3, 0)),
+            text: "#".to_string(),
+        },
+    ];
+
+    // collect some pre-edit ranges from the tree to use as test cases
+    // let pre_ranges: Vec<Range> = collect_node_ranges(&tree);
+
+    // apply changes, tracking what the post ranges become
+    for change in &changes {
+        apply_change_to_rope_and_tree(&mut tree, &mut rope, change).unwrap();
+    }
+
+    // reparse to get post-edit tree
+    let rope_provider = RopeProvider::new(&rope);
+    let new_tree = parser
+        .parse_with_options(
+            &mut |i, _| rope_provider.chunk_callback(i),
+            Some(&tree),
+            None,
+        )
+        .unwrap();
+
+    info!("post:\n{rope}");
+
+    let syntax_changes = tree
+        .changed_ranges(&new_tree)
+        .map(Range::from)
+        .collect_vec();
+    // let post_ranges: Vec<Range> = collect_node_ranges(&new_tree);
+
+    for sc in &syntax_changes {
+        info!("syntax change {sc}");
+    }
+
+    let pre_after_post_ranges = syntax_changes
+        .into_iter()
+        .map(|range| changes.iter().rfold(range, post_range_to_pre_range))
+        .collect_vec();
+
+    for sc in &pre_after_post_ranges {
+        info!("pre change {sc}");
+    }
+
+    // assert_eq!(pre_after_post_ranges, pre_ranges);
+    panic!()
+}
+
 ///////////////////////////////////////////
 // Backend Tests
 //////////////////////////////////////////
 
 #[test]
-#[ignore = "This was just a spice for messing around"]
+#[ignore = "This was just a spike for messing around"]
 fn horned_owl_should_parse_rdf_xml() {
     let x = r##"    
 <rdf:RDF xmlns="http://www.example.com/iri#"
@@ -178,7 +345,7 @@ fn horned_owl_should_parse_rdf_xml() {
 }
 
 #[test]
-#[ignore = "This was just a spice for messing around"]
+#[ignore = "This was just a spike for messing around"]
 fn sophia_should_parse_rdf_xml() {
     use sophia::api::prelude::*;
     use sophia::inmem::graph::LightGraph;
@@ -3898,7 +4065,6 @@ async fn backend_did_change_with_syntax_change_should_update_ontology_id() {
 }
 
 #[test(tokio::test)]
-#[ignore = "not ready"]
 async fn backend_did_change_with_large_syntax_change_should_update_ontology_id() {
     setup();
     // Arrange
@@ -3935,14 +4101,33 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
                 uri: ontology_url.clone(),
                 version: 1,
             },
-            content_changes: vec![TextDocumentContentChangeEvent {
-                text: "Ontology: <http://invalid/othername> <http://invalid/ontology/321>\n".into(),
-                range: Some(lsp_types::Range {
-                    start: lsp_types::Position::new(1, 0),
-                    end: lsp_types::Position::new(1, 0),
-                }),
-                range_length: None,
-            }],
+            content_changes: vec![
+                TextDocumentContentChangeEvent {
+                    text: "Ontology: <http://invalid/othername> <http://invalid/ontology/321>\n"
+                        .into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(1, 0),
+                        end: lsp_types::Position::new(1, 0),
+                    }),
+                    range_length: None,
+                },
+                TextDocumentContentChangeEvent {
+                    text: "#".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(2, 0),
+                        end: lsp_types::Position::new(2, 0),
+                    }),
+                    range_length: None,
+                },
+                TextDocumentContentChangeEvent {
+                    text: "#".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(3, 0),
+                        end: lsp_types::Position::new(3, 0),
+                    }),
+                    range_length: None,
+                },
+            ],
         })
         .await;
 
@@ -3961,8 +4146,8 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
         indoc! { r#"
             Prefix: foo: <http://invalid/foo>
             Ontology: <http://invalid/othername> <http://invalid/ontology/321>
-            Prefix: bar: <http://invalid/bar>
-            Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            #Prefix: bar: <http://invalid/bar>
+            #Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
                 Class: SomeClass
                     Annotations: rdfs:label "Some Class annotation"
         "#}
@@ -3982,5 +4167,4 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
             Some("http://invalid/ontology/321".to_string())
         )
     );
-    panic!();
 }

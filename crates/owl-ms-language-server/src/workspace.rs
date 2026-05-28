@@ -5,7 +5,7 @@ use crate::pos::Position;
 use crate::queries::{
     self, treesitter_highlight_capture_into_semantic_token_type_index, NODE_TYPES,
 };
-use crate::range::RangeBox;
+use crate::range::{Change, RangeBox};
 use crate::web::{url_to_filename, HttpClient};
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
@@ -903,7 +903,7 @@ impl InternalDocument {
                     &parsed_document.rope,
                     encoding,
                 )
-                .map(|r| (r, text))
+                .map(|range| Change { range, text })
             })
             .filter_and_log()
             .collect_vec();
@@ -1342,7 +1342,7 @@ impl InternalDocument {
 }
 
 fn edit_parsed_document<'a>(
-    changes: impl Iterator<Item = &'a (Range, String)>,
+    changes: impl Iterator<Item = &'a Change>,
     new_version: i32,
     path: &PathBuf,
     uri: &Url,
@@ -1391,7 +1391,10 @@ fn edit_parsed_document<'a>(
 pub fn apply_change_to_rope_and_tree(
     new_tree: &mut Tree,
     new_rope: &mut Rope, // This rope is always in UTF-8
-    (old_range, text): &(Range, String),
+    Change {
+        range: old_range,
+        text,
+    }: &Change,
 ) -> Result<()> {
     // let range = range.expect("range to be defined");
     // let old_range = range: Range = Range::from_lsp(&range, &*new_rope, encoding)?;
@@ -1871,16 +1874,18 @@ impl QueriedDocument {
         }
     }
 
-    fn update(&mut self, (range, _): &(Range, String), parsed_document: &ParsedDocument) {
+    fn update(&mut self, Change { range, .. }: &Change, parsed_document: &ParsedDocument) {
         // Update ontology id
-        if let Some(id) = &self.ontology_id {
-            debug!("Check {} overlap with {range}", id.range());
-            if id.range().overlaps(range) {
-                self.ontology_id = parsed_document.ontology_id();
-            }
-        } else {
-            self.ontology_id = parsed_document.ontology_id();
-        }
+        // if let Some(id) = &self.ontology_id {
+        //     debug!("Check {} overlap with {range}", id.range());
+        //     if id.range().overlaps(range) {
+        //         self.ontology_id = parsed_document.ontology_id();
+        //     }
+        // } else {
+        //     self.ontology_id = parsed_document.ontology_id();
+        // }
+
+        self.ontology_id = parsed_document.ontology_id();
 
         // TODO other stuff
     }
