@@ -924,10 +924,10 @@ impl InternalDocument {
         // } = queried_document;
 
         // Note that these ranges are in the pre edit form
-        for change in &change_ranges {
-            debug!("Updating changed range (pre edit) {change:?}");
-            queried_document.update(change, &parsed_document);
-        }
+        // for change in &change_ranges {
+        //     debug!("Updating changed range (pre edit) {change:?}");
+        //     queried_document.update(change, &parsed_document);
+        // }
 
         // TODO do I need this?
         // Syntax changes only
@@ -943,9 +943,11 @@ impl InternalDocument {
         //     timeit("document.edit / querie", || parsed_document.into_queried());
 
         // TODO incremental update of this analyze step
-        let stage2 = timeit("document.edit / analyze", || {
-            queried_document.analyze(&parsed_document)
-        });
+        // let stage2 = timeit("document.edit / analyze", || {
+        //     queried_document.analyze(&parsed_document)
+        // });
+
+        // TODO I removed all analysis
 
         let doc = InternalDocument {
             path,
