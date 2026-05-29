@@ -1,6 +1,8 @@
 use crate::error::Result;
 use crate::pos::Position;
+use itertools::Itertools;
 use ropey::Rope;
+use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::hash::Hash;
 
@@ -134,12 +136,82 @@ impl<T> RangeBox<T> {
     pub fn unpack(self) -> (T, Range) {
         (self.0, self.1)
     }
+
+    pub fn edit<'a>(&mut self, changes: impl Iterator<Item = &'a Change>) {
+        for change in changes {
+            self.1 = pre_range_to_post_range(self.1, change);
+        }
+    }
+}
+
+fn pre_range_to_post_range(pre_range: Range, change: &Change) -> Range {
+    let change_start = change.range.start;
+    let change_pre_end = change.range.end;
+    let change_post_end = post_end_of_change(change);
+
+    Range::new(
+        translate_pos_pre_to_post(
+            pre_range.start,
+            change_start,
+            change_pre_end,
+            change_post_end,
+        ),
+        translate_pos_pre_to_post(pre_range.end, change_start, change_pre_end, change_post_end),
+    )
+}
+
+fn translate_pos_pre_to_post(
+    pos: Position,
+    change_start: Position,
+    change_pre_end: Position,
+    change_post_end: Position,
+) -> Position {
+    if pos < change_start {
+        // before the change: unchanged
+        pos
+    } else if pos < change_pre_end {
+        // strictly inside the deleted region: clamp to start of change
+        change_start
+    } else {
+        // at or after pre_end: shift forward
+        if pos.line() == change_pre_end.line() {
+            let new_line = pos.line() - change_pre_end.line() + change_post_end.line();
+            let new_char = pos.character_byte() - change_pre_end.character_byte()
+                + change_post_end.character_byte();
+            Position::new(new_line, new_char)
+        } else {
+            let new_line = pos.line() - change_pre_end.line() + change_post_end.line();
+            Position::new(new_line, pos.character_byte())
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct Change {
     pub range: Range,
     pub text: String,
+}
+
+impl Change {
+    /// Returns the position that a `text` insertion at
+    /// a range occupies in the post-edit document.
+    fn end_after_change(&self) -> Position {
+        let parts: Vec<&str> = self.text.split('\n').collect();
+        if parts.len() == 1 {
+            Position::new(
+                self.range.start.line(),
+                self.range.start.character_byte() + self.text.len() as u32,
+            )
+        } else {
+            let end_line = self.range.start.line() + (parts.len() - 1) as u32;
+            let end_col = parts.last().unwrap().len() as u32;
+            Position::new(end_line, end_col)
+        }
+    }
+
+    pub fn range_after_change(&self) -> Range {
+        Range::new(self.range.start, self.end_after_change())
+    }
 }
 
 pub fn post_range_to_pre_range(post_range: Range, change: &Change) -> Range {
@@ -207,6 +279,70 @@ fn translate_pos_post_to_pre(
             Position::new(new_line, pos.character_byte())
         }
     }
+}
+
+// TODO this is an idea, this has to be deleted if unused
+// TODO and also when you keep it, make it iterative!
+
+struct RangeIndex<V> {
+    // -------------------------
+    // | 0 | 1 | 2 | 3 | 4 | 5 |
+    // -------------------------
+    // | A     |   | B         |
+    // -------------------------
+    // | 0 - 1 |   | 3 - 5     |
+    // -------------------------
+    // |    |==========|       |
+    // -------------------------
+    start_map: BTreeMap<Position, (Range, V)>,
+}
+
+impl<V> RangeIndex<V> {
+    fn new() -> Self {
+        Self {
+            start_map: BTreeMap::new(),
+        }
+    }
+    fn query(&self, query: Range) -> impl Iterator<Item = (Range, &V)> {
+        // let stored_start = self.translate_to_stored(query.start);
+        // let stored_end = self.translate_to_stored(query.end);
+
+        // Since non-overlapping: any range overlapping [qs,qe] must have
+        // start < qe  AND  end > qs
+        // The first condition lets us bound the BTreeMap scan:
+        self.start_map
+            .range(..query.end)
+            .rev()
+            .take_while(move |(_, (r, _))| r.overlaps(&query))
+            .map(|(_, (range, v))| (*range, v))
+    }
+
+    /// O(log n) insert
+    fn insert(&mut self, range: Range, value: V) {
+        self.start_map.insert(range.start, (range, value));
+    }
+
+    /// O(log n) edit — just push a delta, no range re-keying
+    fn edit(&mut self, edit: &Change) {
+        // self.deltas.entry(edit.start).or_default().accumulate(edit);
+        // TODO
+    }
+
+    // fn compact(&mut self) {
+    //     // Rebuild map with all deltas applied, then clear deltas
+    //     let new_map = self
+    //         .map
+    //         .iter()
+    //         .map(|(start, (end, v))| {
+    //             (
+    //                 self.translate_to_logical(*start),
+    //                 (self.translate_to_logical(*end), v.clone()),
+    //             )
+    //         })
+    //         .collect();
+    //     self.map = new_map;
+    //     self.deltas.clear();
+    // }
 }
 
 #[cfg(test)]
@@ -516,5 +652,138 @@ mod tests {
         // post pos inside inserted region clamps to change start
         let result = post_range_to_pre_range(range(pos(2, 1), pos(2, 3)), &change);
         assert_eq!(result, range(pos(2, 0), pos(2, 0)));
+    }
+
+    // --- tests for the edit of range box ---
+
+    #[test]
+    fn range_box_edit_no_changes() {
+        let mut rb = RangeBox::new(42, range(pos(2, 0), pos(2, 5)));
+        rb.edit(std::iter::empty());
+        assert_eq!(*rb.range(), range(pos(2, 0), pos(2, 5)));
+    }
+
+    #[test]
+    fn range_box_edit_single_insertion_before() {
+        // insert "hello " (6 chars) at line 1 col 0 — range is on line 2, unchanged
+        let changes = vec![Change {
+            range: range(pos(1, 0), pos(1, 0)),
+            text: "hello ".to_string(),
+        }];
+        let mut rb = RangeBox::new((), range(pos(2, 0), pos(2, 5)));
+        rb.edit(changes.iter());
+        assert_eq!(*rb.range(), range(pos(2, 0), pos(2, 5)));
+    }
+
+    #[test]
+    fn range_box_edit_single_insertion_same_line_before_range() {
+        // insert "hi " (3 chars) at col 0, range starts at col 5
+        let changes = vec![Change {
+            range: range(pos(1, 0), pos(1, 0)),
+            text: "hi ".to_string(),
+        }];
+        let mut rb = RangeBox::new((), range(pos(1, 5), pos(1, 10)));
+        rb.edit(changes.iter());
+        assert_eq!(*rb.range(), range(pos(1, 8), pos(1, 13)));
+    }
+
+    #[test]
+    fn range_box_edit_deletion_before_range() {
+        // delete 3 chars at col 0..3 on line 1, range starts at col 5
+        let changes = vec![Change {
+            range: range(pos(1, 0), pos(1, 3)),
+            text: String::new(),
+        }];
+        let mut rb = RangeBox::new((), range(pos(1, 5), pos(1, 10)));
+        rb.edit(changes.iter());
+        assert_eq!(*rb.range(), range(pos(1, 2), pos(1, 7)));
+    }
+
+    #[test]
+    fn range_box_edit_multiline_insertion_before_range() {
+        // insert two lines before line 3
+        let changes = vec![Change {
+            range: range(pos(2, 0), pos(2, 0)),
+            text: "line a\nline b\n".to_string(),
+        }];
+        let mut rb = RangeBox::new((), range(pos(3, 0), pos(3, 5)));
+        rb.edit(changes.iter());
+        assert_eq!(*rb.range(), range(pos(5, 0), pos(5, 5)));
+    }
+
+    #[test]
+    fn range_box_edit_multiline_deletion_before_range() {
+        // delete lines 1-2
+        let changes = vec![Change {
+            range: range(pos(1, 0), pos(3, 0)),
+            text: String::new(),
+        }];
+        let mut rb = RangeBox::new((), range(pos(3, 0), pos(3, 5)));
+        rb.edit(changes.iter());
+        assert_eq!(*rb.range(), range(pos(1, 0), pos(1, 5)));
+    }
+
+    #[test]
+    fn range_box_edit_range_inside_deleted_region_clamps() {
+        // delete line 2 entirely, range is inside it
+        let changes = vec![Change {
+            range: range(pos(2, 0), pos(3, 0)),
+            text: String::new(),
+        }];
+        let mut rb = RangeBox::new((), range(pos(2, 3), pos(2, 8)));
+        rb.edit(changes.iter());
+        assert_eq!(*rb.range(), range(pos(2, 0), pos(2, 0)));
+    }
+
+    #[test]
+    fn range_box_edit_multiple_changes_applied_in_order() {
+        // first insert a line, then delete some chars — both affect our range
+        let changes = vec![
+            Change {
+                range: range(pos(0, 0), pos(0, 0)),
+                text: "new line\n".to_string(),
+            },
+            Change {
+                range: range(pos(1, 0), pos(1, 3)),
+                text: String::new(),
+            },
+        ];
+        // original range: line 0, col 5..10
+        // after first change (insert line before): line 1, col 5..10
+        // after second change (delete col 0..3 on line 1): line 1, col 2..7
+        let mut rb = RangeBox::new((), range(pos(0, 5), pos(0, 10)));
+        rb.edit(changes.iter());
+        assert_eq!(*rb.range(), range(pos(1, 2), pos(1, 7)));
+    }
+
+    #[test]
+    fn range_box_edit_round_trip() {
+        let original = range(pos(3, 4), pos(3, 9));
+        let changes = vec![
+            Change {
+                range: range(pos(1, 0), pos(1, 5)),
+                text: "hi".to_string(),
+            },
+            Change {
+                range: range(pos(2, 0), pos(2, 0)),
+                text: "inserted\n".to_string(),
+            },
+        ];
+
+        // apply forward
+        let mut rb = RangeBox::new((), original);
+        rb.edit(changes.iter());
+        let post = *rb.range();
+
+        // apply inverse — changes must be applied in reverse order with inverted coords
+        // this is just a sanity check that pre->post->pre round trips via single change
+        for change in &changes {
+            let roundtripped =
+                post_range_to_pre_range(pre_range_to_post_range(original, change), change);
+            assert_eq!(
+                original, roundtripped,
+                "Round-trip failed for change {change:?}"
+            );
+        }
     }
 }

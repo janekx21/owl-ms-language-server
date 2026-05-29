@@ -22,6 +22,7 @@ use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use pretty::RcDoc;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use ropey::Rope;
 use sophia::api::graph::{Graph, MutableGraph};
 use sophia::api::ns::Namespace;
@@ -943,24 +944,40 @@ impl InternalDocument {
         //     ..
         // } = queried_document;
 
+        let syntax_change_ranges = old_tree
+            .changed_ranges(&parsed_document.tree)
+            .map(Range::from)
+            .collect_vec();
+
+        let post_change_ranges = change_ranges
+            .iter()
+            .map(Change::range_after_change)
+            .collect_vec();
+
         // Note that these ranges are in the pre edit form
-        // for change in &change_ranges {
-        //     debug!("Updating changed range (pre edit) {change:?}");
-        //     queried_document.update(change, &parsed_document);
-        // }
+        for change in &change_ranges {
+            debug!("Updating changed range (pre edit) {change:?}");
+        }
+        queried_document.update(
+            &change_ranges,
+            &syntax_change_ranges
+                .into_iter()
+                .chain(post_change_ranges)
+                .collect_vec(),
+            &parsed_document,
+        );
 
         // TODO do I need this?
         // Syntax changes only
         // Note that these ranges are in the post edit form
-        // let syntax_change_ranges = old_tree.changed_ranges(&parsed_document.tree);
         // for range in syntax_change_ranges {
         //     let range: Range = range.into();
         //     debug!("Updating changed syntax range (post edit) {range}");
         //     queried_document.update(range, &parsed_document);
         // }
 
-        let queried_document: QueriedDocument =
-            timeit("document.edit / querie", || parsed_document.into_queried());
+        // let queried_document: QueriedDocument =
+        //     timeit("document.edit / querie", || parsed_document.into_queried());
 
         // TODO incremental update of this analyze step
         let stage2 = timeit("document.edit / analyze", || {
@@ -1583,14 +1600,27 @@ impl ParsedDocument {
             .collect()
     }
 
-    pub fn imports(&self) -> Vec<Iri> {
+    pub fn imports(&self) -> Vec<RangeBox<Iri>> {
         self.query(&ALL_QUERIES.import_query)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri] => Oxiri::parse(trim_full_iri(iri.node.text.clone())).ok(),
+                [iri] => Oxiri::parse(trim_full_iri(iri.node.text.clone()))
+                    .ok()
+                    .map(|iri_| RangeBox::new(iri_.as_str().to_string(), iri.node.range)),
                 _ => unimplemented!(),
             })
-            .map(|iri| iri.as_str().to_string())
+            .collect_vec()
+    }
+
+    pub fn imports_in_range(&self, range: Range) -> Vec<RangeBox<Iri>> {
+        self.query_range(&ALL_QUERIES.import_query, range)
+            .iter()
+            .filter_map(|m| match &m.captures[..] {
+                [iri] => Oxiri::parse(trim_full_iri(iri.node.text.clone()))
+                    .ok()
+                    .map(|iri_| RangeBox::new(iri_.as_str().to_string(), iri.node.range)),
+                _ => unimplemented!(),
+            })
             .collect_vec()
     }
 }
@@ -1653,7 +1683,7 @@ pub struct QueriedDocument {
     pub ontology_id: Option<RangeBox<OntologyId>>,
 
     prefixes: HashMap<String, Iri>,
-    imports: Vec<Iri>,
+    pub imports: Vec<RangeBox<Iri>>,
 }
 
 impl QueriedDocument {
@@ -1666,7 +1696,7 @@ impl QueriedDocument {
         let imports = self
             .imports
             .iter()
-            .filter_map(|iri| Url::parse(iri).ok())
+            .filter_map(|rb| Url::parse(rb.value()).ok())
             .collect_vec();
 
         // Other urls include prefixes
@@ -1877,18 +1907,68 @@ impl QueriedDocument {
         }
     }
 
-    fn update(&mut self, Change { range, .. }: &Change, parsed_document: &ParsedDocument) {
+    fn update(
+        &mut self,
+        changes: &[Change],
+        post_change_ranges: &[Range],
+        parsed_document: &ParsedDocument,
+    ) {
         // Update ontology id
-        // if let Some(id) = &self.ontology_id {
-        //     debug!("Check {} overlap with {range}", id.range());
-        //     if id.range().overlaps(range) {
-        //         self.ontology_id = parsed_document.ontology_id();
-        //     }
-        // } else {
-        //     self.ontology_id = parsed_document.ontology_id();
+        let mut dirty = false;
+        if let Some(o_id) = &mut self.ontology_id {
+            o_id.edit(changes.iter());
+
+            for sc in post_change_ranges {
+                debug!("Check {} overlap with {}", o_id.range(), sc);
+                if o_id.range().overlaps(sc) {
+                    dirty = true;
+                }
+            }
+        } else {
+            dirty = true;
+        }
+
+        if dirty {
+            self.ontology_id = parsed_document.ontology_id();
+        }
+
+        for import in &mut self.imports {
+            import.edit(changes.iter());
+        }
+
+        let dirty_imports = self
+            .imports
+            .extract_if(.., |import| {
+                for sc in post_change_ranges {
+                    debug!("Check {} overlap with {}", import.range(), sc);
+                    if import.range().overlaps(sc) {
+                        // I dont know!
+                        return true;
+                    }
+                }
+                false
+            })
+            .collect_vec();
+
+        // TODO handle dirty imports
+        debug!("Dirty imports: {dirty_imports:#?}");
+
+        // TODO I dont thing we need this, because they are all overlapping with the post change ranges right?
+        // for di in dirty_imports {
+        //     let additional_imports = parsed_document.imports_in_range(*di.range());
+
+        //     self.imports.extend(additional_imports);
         // }
 
-        self.ontology_id = parsed_document.ontology_id();
+        for di in post_change_ranges {
+            let additional_imports = parsed_document.imports_in_range(*di);
+
+            self.imports.extend(additional_imports);
+        }
+
+        // for import in &mut self.imports {
+        //     import.edit(changes.iter());
+        // }
 
         // TODO other stuff
     }
@@ -2635,7 +2715,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
     for diff in uses
         .difference(&defines)
         .filter(|iri| !prefixes.contains(*iri))
-        .filter(|iri| !imports.contains(*iri))
+        .filter(|iri| !imports.iter().map(|r| r.value()).contains(*iri))
     {
         // Skip ontology and version IRIs
         if let Some((iri, version)) = ontology_id.as_ref().map(RangeBox::value) {

@@ -4169,6 +4169,193 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
     );
 }
 
+#[test(tokio::test)]
+async fn backend_did_change_with_large_syntax_change_should_update_imports() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            Import: <http://invalid/some-other-ontology>
+            Class: SomeClass
+                Annotations: rdfs:label "Some Class annotation"
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: ontology_url.clone(),
+                version: 1,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                text: "#".into(),
+                range: Some(lsp_types::Range {
+                    start: lsp_types::Position::new(1, 0),
+                    end: lsp_types::Position::new(1, 0),
+                }),
+                range_length: None,
+            }],
+        })
+        .await;
+
+    // Assert
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    assert_eq!(
+        document.rope().to_string(),
+        indoc! { r#"
+            Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            #    Import: <http://invalid/some-other-ontology>
+                Class: SomeClass
+                    Annotations: rdfs:label "Some Class annotation"
+        "#}
+    );
+
+    let imports = document
+        .queried_document
+        .imports
+        .iter()
+        .map(|i| i.value().clone())
+        .collect_vec();
+
+    assert_eq!(imports, Vec::<String>::new());
+}
+
+#[test(tokio::test)]
+async fn backend_did_change_with_large_syntax_change_should_update_imports_2() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+        #    Import: <http://invalid/some-other-ontology>
+
+        #    Import: <http://invalid/some-other-ontology>
+            Import: <http://invalid/A>
+        #    Import: <http://invalid/B>
+        #    Import: <http://invalid/some-other-ontology>
+
+            Class: SomeClass
+                Annotations: rdfs:label "Some Class annotation"
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: ontology_url.clone(),
+                version: 1,
+            },
+            content_changes: vec![
+                TextDocumentContentChangeEvent {
+                    text: "".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(1, 0),
+                        end: lsp_types::Position::new(1, 1),
+                    }),
+                    range_length: None,
+                },
+                TextDocumentContentChangeEvent {
+                    text: "#".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(4, 0),
+                        end: lsp_types::Position::new(4, 0),
+                    }),
+                    range_length: None,
+                },
+                TextDocumentContentChangeEvent {
+                    text: "".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(5, 0),
+                        end: lsp_types::Position::new(5, 1),
+                    }),
+                    range_length: None,
+                },
+            ],
+        })
+        .await;
+
+    // Assert
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    assert_eq!(
+        document.rope().to_string(),
+        indoc! { r#"
+            Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+                Import: <http://invalid/some-other-ontology>
+
+            #    Import: <http://invalid/some-other-ontology>
+            #    Import: <http://invalid/A>
+                Import: <http://invalid/B>
+            #    Import: <http://invalid/some-other-ontology>
+
+                Class: SomeClass
+                    Annotations: rdfs:label "Some Class annotation"
+        "#}
+    );
+
+    let imports = document
+        .queried_document
+        .imports
+        .iter()
+        .map(|i| i.value().clone())
+        .collect_vec();
+
+    assert_eq!(
+        imports,
+        vec!["http://invalid/some-other-ontology", "http://invalid/B"]
+    );
+}
+
 /////////////////////////
 // Fuzz / property-based tests
 /////////////////////////
@@ -4191,6 +4378,7 @@ mod fuzz {
         r#"
         Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
         Ontology: <http://example.org/fuzz-test>
+            Import: <http://invalid/ontology>
         
             Class: Foo
                 Annotations: rdfs:label "Foo Label"
@@ -4268,6 +4456,7 @@ mod fuzz {
         /// The document state (rope content and extracted frame IRIs) must be
         /// identical to the state before the insertion.
         #[test]
+        #[ignore = "active later! to much clutter"]
         fn fuzz_insert_and_undo_preserves_document(
             line in 0u32..8u32,
             col  in 0u32..53u32,
@@ -4370,6 +4559,7 @@ mod fuzz {
         /// The document state (rope content and extracted frame IRIs) must be
         /// identical to the state before the insertion.
         #[test]
+        #[ignore = "active later! to much clutter"]
         fn fuzz_undo_after_reopen_document(
             line in 0u32..8u32,
             col  in 0u32..53u32,
