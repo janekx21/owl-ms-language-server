@@ -4174,11 +4174,16 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
 /////////////////////////
 
 mod fuzz {
-    use crate::{test_helpers::*, *};
+    use crate::{workspace::FrameInfo, Backend};
+
+    use super::{
+        arrange_backend, lsp_types, setup, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
+        LanguageServer, TempDir, TextDocumentContentChangeEvent, TextDocumentItem, Url,
+        VersionedTextDocumentIdentifier,
+    };
     use itertools::Itertools;
     use proptest::prelude::*;
-    use tempdir::TempDir;
-    use tower_lsp::lsp_types;
+    use tower_lsp::LspService;
 
     /// A simple single-file ontology used as the base for all fuzz cases.
     const ONTOLOGY: &str = concat!(
@@ -4197,10 +4202,10 @@ mod fuzz {
     fn compute_end_after_insert(start_line: u32, start_col: u32, text: &str) -> (u32, u32) {
         let parts: Vec<&str> = text.split('\n').collect();
         if parts.len() == 1 {
-            (start_line, start_col + text.chars().count() as u32)
+            (start_line, start_col + text.len() as u32)
         } else {
             let end_line = start_line + (parts.len() - 1) as u32;
-            let end_col = parts.last().unwrap().chars().count() as u32;
+            let end_col = parts.last().unwrap().len() as u32;
             (end_line, end_col)
         }
     }
@@ -4208,11 +4213,41 @@ mod fuzz {
     /// Generates either random printable text or a complete class frame.
     fn insert_text_strategy() -> impl Strategy<Value = String> {
         prop_oneof![
-            3 => "[a-zA-Z0-9 \t\n]{0,60}",
+            3 => "[a-zA-Z0-9 \t\n\\p{L}]{0,60}",
             1 => Just("Class: FuzzClass\n    Annotations: rdfs:label \"fuzz label\"\n"
                 .to_string()),
             1 => Just("Class: AnotherFuzzClass\n".to_string()),
         ]
+    }
+
+    type DocumentState = String;
+
+    async fn capture_document_state(
+        service: &LspService<Backend>,
+        ontology_url: &Url,
+    ) -> DocumentState {
+        let sync = service.inner().read_sync().await;
+        let (doc, _) = sync.get_internal_document(ontology_url).unwrap();
+        let initial_rope = doc.rope().to_string();
+        let initial_frame_infos = doc
+            .all_frame_infos()
+            .map(
+                |FrameInfo {
+                     iri,
+                     annotations,
+                     frame_type,
+                     definitions,
+                 }| {
+                    format!(
+                        "- Frame Info for `{iri}` of kind `{frame_type}`\n  - Annotations\n{annotations:#?}\n  - Definitions \n{:#?}",
+                        definitions.iter().map(|d| d.range).collect_vec()
+                    )
+                },
+            )
+            .sorted()
+            .join("\n");
+
+        format!("# Internal Document\n{initial_rope}\n\n---\n\n{initial_frame_infos}")
     }
 
     proptest! {
@@ -4231,7 +4266,7 @@ mod fuzz {
                 .build()
                 .unwrap();
 
-            let (initial_rope, initial_frame_iris, final_rope, final_frame_iris) =
+            let (initial_state, final_state) =
                 rt.block_on(async {
                     setup();
                     let service = arrange_backend(None, vec![]).await;
@@ -4253,18 +4288,7 @@ mod fuzz {
                         .await;
 
                     // Capture initial state
-                    let initial_rope;
-                    let initial_frame_iris: Vec<String>;
-                    {
-                        let sync = service.inner().read_sync().await;
-                        let (doc, _) = sync.get_internal_document(&ontology_url).unwrap();
-                        initial_rope = doc.rope().to_string();
-                        initial_frame_iris = doc
-                            .all_frame_infos()
-                            .map(|f| f.iri.clone())
-                            .sorted()
-                            .collect();
-                    }
+                    let initial_state = capture_document_state(&service, &ontology_url).await;
 
                     // Clamp (line, col) to the actual document boundaries
                     let lines: Vec<&str> = ONTOLOGY.lines().collect();
@@ -4315,34 +4339,153 @@ mod fuzz {
                         .await;
 
                     // Capture final state
-                    let final_rope;
-                    let final_frame_iris: Vec<String>;
-                    {
-                        let sync = service.inner().read_sync().await;
-                        let (doc, _) = sync.get_internal_document(&ontology_url).unwrap();
-                        final_rope = doc.rope().to_string();
-                        final_frame_iris = doc
-                            .all_frame_infos()
-                            .map(|f| f.iri.clone())
-                            .sorted()
-                            .collect();
-                    }
+                    let final_state = capture_document_state(&service, &ontology_url).await;
 
-                    (initial_rope, initial_frame_iris, final_rope, final_frame_iris)
+                    (initial_state, final_state)
                 });
 
+
             prop_assert_eq!(
-                &final_rope,
-                &initial_rope,
-                "rope mismatch after insert+undo of {:?} at ({}, {})",
+                &initial_state,
+                &final_state,
+                "state mismatch after insert+undo of {:?} at ({}, {})",
                 insert_text,
                 line,
                 col
             );
+        }
+
+        /// Insert arbitrary text at a random position, then undo the insertion.
+        /// The document state (rope content and extracted frame IRIs) must be
+        /// identical to the state before the insertion.
+        #[test]
+        fn fuzz_undo_after_reopen_document(
+            line in 0u32..8u32,
+            col  in 0u32..53u32,
+            insert_text in insert_text_strategy(),
+        ) {
+            // Clamp (line, col) to the actual document boundaries
+            let lines: Vec<&str> = ONTOLOGY.lines().collect();
+            let line = line.min(lines.len() as u32 - 1);
+            let line_len = lines[line as usize].chars().count() as u32;
+            let col = col.min(line_len);
+
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+
+            let (initial_state, final_state) =
+                rt.block_on(async {
+                    setup();
+                    let (initial_state, ontology_after_edit, (end_line, end_col)) = {
+                        let service = arrange_backend(None, vec![]).await;
+                        let dir = TempDir::new("owl-ms-fuzz").unwrap();
+                        let ontology_url =
+                            Url::from_file_path(dir.path().join("fuzz.omn")).unwrap();
+
+                        // Open the document
+                        service
+                            .inner()
+                            .did_open(DidOpenTextDocumentParams {
+                                text_document: TextDocumentItem {
+                                    uri: ontology_url.clone(),
+                                    language_id: "owl2md".to_string(),
+                                    version: 0,
+                                    text: ONTOLOGY.to_string(),
+                                },
+                            })
+                            .await;
+
+                        // Capture initial state
+                        let initial_state = capture_document_state(&service, &ontology_url).await;
+
+
+                        // Apply insert change
+                        service
+                            .inner()
+                            .did_change(DidChangeTextDocumentParams {
+                                text_document: VersionedTextDocumentIdentifier {
+                                    uri: ontology_url.clone(),
+                                    version: 1,
+                                },
+                                content_changes: vec![TextDocumentContentChangeEvent {
+                                    range: Some(lsp_types::Range {
+                                        start: lsp_types::Position::new(line, col),
+                                        end: lsp_types::Position::new(line, col),
+                                    }),
+                                    range_length: None,
+                                    text: insert_text.clone(),
+                                }],
+                            })
+                            .await;
+
+                        // Compute the range occupied by the inserted text in the
+                        // post-edit document, then delete it to undo the change
+                        let (end_line, end_col) =
+                            compute_end_after_insert(line, col, &insert_text);
+
+                        let ontology_after_edit = {
+
+                            let sync = service.inner().read_sync().await;
+                            let (doc, _) = sync.get_internal_document(&ontology_url).unwrap();
+                            doc.rope().to_string()
+                        };
+
+                        (initial_state, ontology_after_edit, (end_line, end_col))
+                    };
+
+
+                    let service = arrange_backend(None, vec![]).await;
+                    let dir = TempDir::new("owl-ms-fuzz").unwrap();
+                    let ontology_url =
+                        Url::from_file_path(dir.path().join("fuzz.omn")).unwrap();
+
+                    // Reopen the changed as if it where new document
+                    service
+                        .inner()
+                        .did_open(DidOpenTextDocumentParams {
+                            text_document: TextDocumentItem {
+                                uri: ontology_url.clone(),
+                                language_id: "owl2md".to_string(),
+                                version: 0,
+                                text: ontology_after_edit,
+                            },
+                        })
+                        .await;
+
+                    // Undo after reopen
+
+                    service
+                        .inner()
+                        .did_change(DidChangeTextDocumentParams {
+                            text_document: VersionedTextDocumentIdentifier {
+                                uri: ontology_url.clone(),
+                                version: 2,
+                            },
+                            content_changes: vec![TextDocumentContentChangeEvent {
+                                range: Some(lsp_types::Range {
+                                    start: lsp_types::Position::new(line, col),
+                                    end: lsp_types::Position::new(end_line, end_col),
+                                }),
+                                range_length: None,
+                                text: String::new(),
+                            }],
+                        })
+                        .await;
+
+                    // Capture final state
+                    let final_state = capture_document_state(&service, &ontology_url).await;
+
+                    (initial_state, final_state)
+                });
+
+
+            print!("{}", pretty_assertions::StrComparison::new(&initial_state, &final_state));
+
             prop_assert_eq!(
-                final_frame_iris,
-                initial_frame_iris,
-                "frame IRIs mismatch after insert+undo of {:?} at ({}, {})",
+                &initial_state,
+                &final_state,
+                "state mismatch after insert+reopen+undo of {:?} at ({}, {})",
                 insert_text,
                 line,
                 col

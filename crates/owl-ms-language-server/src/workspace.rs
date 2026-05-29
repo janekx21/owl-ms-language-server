@@ -939,13 +939,13 @@ impl InternalDocument {
         //     queried_document.update(range, &parsed_document);
         // }
 
-        // let queried_document: QueriedDocument =
-        //     timeit("document.edit / querie", || parsed_document.into_queried());
+        let queried_document: QueriedDocument =
+            timeit("document.edit / querie", || parsed_document.into_queried());
 
         // TODO incremental update of this analyze step
-        // let stage2 = timeit("document.edit / analyze", || {
-        //     queried_document.analyze(&parsed_document)
-        // });
+        let stage2 = timeit("document.edit / analyze", || {
+            queried_document.analyze(&parsed_document)
+        });
 
         // TODO I removed all analysis
 
