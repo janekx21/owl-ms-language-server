@@ -4356,6 +4356,125 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports_2() {
     );
 }
 
+#[test(tokio::test)]
+async fn backend_did_change_with_large_syntax_change_should_update_prefixes() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        # -----------
+        #    Prefix: c: <http://invalid/some-other-ontology>
+
+        #    Prefix: d: <http://invalid/some-other-ontology>
+            Prefix: a: <http://invalid/A>
+        #    Prefix: b: <http://invalid/B>
+        #    Prefix: e: <http://invalid/some-other-ontology>
+
+        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            Class: SomeClass
+                Annotations: rdfs:label "Some Class annotation"
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: ontology_url.clone(),
+                version: 1,
+            },
+            content_changes: vec![
+                TextDocumentContentChangeEvent {
+                    text: "".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(1, 0),
+                        end: lsp_types::Position::new(1, 1),
+                    }),
+                    range_length: None,
+                },
+                TextDocumentContentChangeEvent {
+                    text: "#".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(4, 0),
+                        end: lsp_types::Position::new(4, 0),
+                    }),
+                    range_length: None,
+                },
+                TextDocumentContentChangeEvent {
+                    text: "".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(5, 0),
+                        end: lsp_types::Position::new(5, 1),
+                    }),
+                    range_length: None,
+                },
+            ],
+        })
+        .await;
+
+    // Assert
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    assert_eq!(
+        document.rope().to_string(),
+        indoc! { r#"
+            # -----------
+                Prefix: c: <http://invalid/some-other-ontology>
+
+            #    Prefix: d: <http://invalid/some-other-ontology>
+            #    Prefix: a: <http://invalid/A>
+                Prefix: b: <http://invalid/B>
+            #    Prefix: e: <http://invalid/some-other-ontology>
+
+            Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+                Class: SomeClass
+                    Annotations: rdfs:label "Some Class annotation"
+        "#}
+    );
+
+    let prefixes = document
+        .queried_document
+        .prefixes
+        .iter()
+        .map(|(k, v)| (k.clone(), v.value().clone()))
+        .sorted() // Hash map entry orders are random. Lets sort them.
+        .collect_vec();
+
+    assert_eq!(
+        prefixes,
+        vec![
+            ("b".to_string(), "http://invalid/B".to_string()),
+            (
+                "c".to_string(),
+                "http://invalid/some-other-ontology".to_string()
+            ),
+        ]
+    );
+}
+
 /////////////////////////
 // Fuzz / property-based tests
 /////////////////////////

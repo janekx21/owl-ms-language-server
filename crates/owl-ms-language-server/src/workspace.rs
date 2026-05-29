@@ -776,8 +776,12 @@ impl InternalDocument {
         &self.parsed_document.tree
     }
 
-    pub fn prefixes(&self) -> &HashMap<String, String> {
-        &self.queried_document.prefixes
+    pub fn prefixes(&self) -> HashMap<String, String> {
+        self.queried_document
+            .prefixes
+            .iter()
+            .map(|(k, v)| (k.clone(), v.value().clone()))
+            .collect()
     }
 
     pub fn diagnostics(&self, workspace: &Workspace) -> Vec<Diagnostic> {
@@ -958,14 +962,17 @@ impl InternalDocument {
         for change in &change_ranges {
             debug!("Updating changed range (pre edit) {change:?}");
         }
-        queried_document.update(
-            &change_ranges,
-            &syntax_change_ranges
-                .into_iter()
-                .chain(post_change_ranges)
-                .collect_vec(),
-            &parsed_document,
-        );
+
+        timeit("document.edit / queries", || {
+            queried_document.update(
+                &change_ranges,
+                &syntax_change_ranges
+                    .into_iter()
+                    .chain(post_change_ranges)
+                    .collect_vec(),
+                &parsed_document,
+            );
+        });
 
         // TODO do I need this?
         // Syntax changes only
@@ -976,8 +983,9 @@ impl InternalDocument {
         //     queried_document.update(range, &parsed_document);
         // }
 
-        // let queried_document: QueriedDocument =
-        //     timeit("document.edit / querie", || parsed_document.into_queried());
+        // let queried_document: QueriedDocument = timeit("document.edit / queries", || {
+        //     timeit("document.edit / querie", || parsed_document.into_queried())
+        // });
 
         // TODO incremental update of this analyze step
         let stage2 = timeit("document.edit / analyze", || {
@@ -1580,13 +1588,16 @@ impl ParsedDocument {
     /// Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
     /// Prefix: owl: <http://www.w3.org/2002/07/owl#>
     /// ```
-    pub fn prefixes(&self) -> HashMap<String, String> {
+    pub fn prefixes(&self) -> HashMap<String, RangeBox<String>> {
         self.query(&ALL_QUERIES.prefix)
             .into_iter()
             .map(|m| match &m.captures[..] {
                 [name, iri] => (
                     name.node.text.trim_end_matches(':').to_string(),
-                    trim_full_iri(iri.node.text.clone()),
+                    RangeBox::new(
+                        trim_full_iri(iri.node.text.clone()),
+                        Range::new(name.node.range.start, iri.node.range.end),
+                    ),
                 ),
                 _ => unreachable!(),
             })
@@ -1596,7 +1607,24 @@ impl ParsedDocument {
             //         .iter()
             //         .map(|(a, b)| (a.to_string(), b.to_string())),
             // )
-            .unique()
+            .unique_by(|(k, v)| (k.clone(), v.value().clone()))
+            .collect()
+    }
+
+    pub fn prefixes_in_range(&self, range: Range) -> HashMap<String, RangeBox<String>> {
+        self.query_range(&ALL_QUERIES.prefix, range)
+            .into_iter()
+            .map(|m| match &m.captures[..] {
+                [name, iri] => (
+                    name.node.text.trim_end_matches(':').to_string(),
+                    RangeBox::new(
+                        trim_full_iri(iri.node.text.clone()),
+                        Range::new(name.node.range.start, iri.node.range.end),
+                    ),
+                ),
+                _ => unreachable!(),
+            })
+            .unique_by(|(k, v)| (k.clone(), v.value().clone()))
             .collect()
     }
 
@@ -1677,12 +1705,8 @@ type OntologyId = (Iri, Option<Iri>);
 
 #[derive(Debug)]
 pub struct QueriedDocument {
-    #[cfg(not(test))]
-    ontology_id: Option<RangeBox<OntologyId>>,
-    #[cfg(test)]
     pub ontology_id: Option<RangeBox<OntologyId>>,
-
-    prefixes: HashMap<String, Iri>,
+    pub prefixes: HashMap<String, RangeBox<Iri>>,
     pub imports: Vec<RangeBox<Iri>>,
 }
 
@@ -1704,7 +1728,13 @@ impl QueriedDocument {
             .prefixes
             .iter()
             // Filter out the empty prefix ":"
-            .filter_map(|(prefix, url)| if prefix.is_empty() { None } else { Some(url) })
+            .filter_map(|(prefix, url)| {
+                if prefix.is_empty() {
+                    None
+                } else {
+                    Some(url.value())
+                }
+            })
             .filter_map(|url| Url::parse(url).ok())
             // Filter out the current document as a prefix (most likely the empty prefix ":")
             .filter(|url| url != own_uri)
@@ -1742,13 +1772,13 @@ impl QueriedDocument {
         if let Some((prefix, simple_iri)) = abbreviated_iri.split_once(':') {
             prefixes
                 .get(prefix)
-                .map(|resolved_prefix| resolved_prefix.clone() + simple_iri)
+                .map(|resolved_prefix| resolved_prefix.value().clone() + simple_iri)
         } else {
             // Simple IRIs get a free colon prepended
             // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
             prefixes
                 .get("")
-                .map(|resolved_prefix| resolved_prefix.clone() + abbreviated_iri)
+                .map(|resolved_prefix| resolved_prefix.value().clone() + abbreviated_iri)
         }
     }
 
@@ -1932,10 +1962,18 @@ impl QueriedDocument {
             self.ontology_id = parsed_document.ontology_id();
         }
 
+        // Edit
+
         for import in &mut self.imports {
             import.edit(changes.iter());
         }
 
+        for prefix_value in self.prefixes.values_mut() {
+            prefix_value.edit(changes.iter());
+        }
+
+        // TODO I think I dont need the removed items, they overlap with the
+        // post_change_ranges, so I can just use the ranges.
         let dirty_imports = self
             .imports
             .extract_if(.., |import| {
@@ -1950,6 +1988,18 @@ impl QueriedDocument {
             })
             .collect_vec();
 
+        // Retain
+
+        self.prefixes.retain(|_, prefix_value| {
+            for sc in post_change_ranges {
+                debug!("Prefix: Check {} overlap with {}", prefix_value.range(), sc);
+                if prefix_value.range().overlaps(sc) {
+                    return false;
+                }
+            }
+            true
+        });
+
         // TODO handle dirty imports
         debug!("Dirty imports: {dirty_imports:#?}");
 
@@ -1960,17 +2010,19 @@ impl QueriedDocument {
         //     self.imports.extend(additional_imports);
         // }
 
+        // Add
+
         for di in post_change_ranges {
             let additional_imports = parsed_document.imports_in_range(*di);
 
             self.imports.extend(additional_imports);
         }
 
-        // for import in &mut self.imports {
-        //     import.edit(changes.iter());
-        // }
+        for di in post_change_ranges {
+            let additional_prefixes = parsed_document.prefixes_in_range(*di);
 
-        // TODO other stuff
+            self.prefixes.extend(additional_prefixes);
+        }
     }
 }
 
@@ -2707,7 +2759,12 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
     }
 
     // TODO this is a quick fix for now. The correct way will be not not include prefixes in the used Iris
-    let prefixes: HashSet<&Iri> = doc.queried_document.prefixes.values().collect();
+    let prefixes: HashSet<&Iri> = doc
+        .queried_document
+        .prefixes
+        .values()
+        .map(RangeBox::value)
+        .collect();
     let imports = &doc.queried_document.imports;
 
     let ontology_id = &doc.queried_document.ontology_id;
@@ -2715,7 +2772,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
     for diff in uses
         .difference(&defines)
         .filter(|iri| !prefixes.contains(*iri))
-        .filter(|iri| !imports.iter().map(|r| r.value()).contains(*iri))
+        .filter(|iri| !imports.iter().map(RangeBox::value).contains(*iri))
     {
         // Skip ontology and version IRIs
         if let Some((iri, version)) = ontology_id.as_ref().map(RangeBox::value) {
