@@ -85,10 +85,11 @@ pub fn lock_global_build_arc() -> MutexGuard<'static, Build<ArcStr>> {
 /// Clears all global caches used by the workspace.
 /// This is useful for benchmarks to prevent memory accumulation across iterations.
 pub fn clear_caches() {
-    {
-        let mut cache = QUERY_HELPER.write();
-        cache.cache_clear();
-    }
+    // TODO can I remove this?
+    // {
+    //     let mut cache = QUERY_HELPER.write();
+    //     cache.cache_clear();
+    // }
 
     {
         let mut cache = GET_FRAME_INFO_HELPER_EX.write();
@@ -137,7 +138,7 @@ impl Workspace {
     /// This will replace the document with the same URL if there was one.
     pub fn insert_internal_document(&mut self, document: InternalDocument) -> &InternalDocument {
         debug!("Insert internal document {document}");
-        let path = document.path.clone();
+        let path = document.path().to_path_buf();
         self.internal_documents.insert(path.clone(), document);
         self.internal_documents
             .get(&path)
@@ -318,7 +319,7 @@ impl Workspace {
             }
             "simple_iri" | "abbreviated_iri" => {
                 let iri = node_text(node, doc.rope());
-                debug!("Getting node info for {iri} at doc {}", doc.uri);
+                debug!("Getting node info for {iri} at doc {}", doc.uri());
                 let iri = doc
                     .abbreviated_iri_to_full_iri(&iri)
                     .unwrap_or(iri.to_string());
@@ -353,7 +354,11 @@ impl Workspace {
 
         // TODO maybe change this
         // Lets try to find the doc in internal docs
-        if let Some(doc) = self.internal_documents.values().find(|doc| &doc.uri == url) {
+        if let Some(doc) = self
+            .internal_documents
+            .values()
+            .find(|doc| doc.uri() == url)
+        {
             return Some(DocumentReference::Internal(doc));
         }
 
@@ -580,17 +585,22 @@ pub enum Document {
 /// Text -> Parsed -> Queried -> Analyzed -> ``InternalDocument``
 #[derive(Debug)]
 pub struct InternalDocument {
-    /// File location
-    pub path: PathBuf,
-    /// URL and location where this document was loaded from
-    pub uri: Url,
-    pub version: i32,
+    id: DocumentId,
     parsed_document: ParsedDocument,
     #[cfg(not(test))]
     queried_document: QueriedDocument,
     #[cfg(test)]
     pub queried_document: QueriedDocument,
     stage2: Stage2Document,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct DocumentId {
+    /// File location
+    pub path: PathBuf,
+    /// URL and location where this document was loaded from
+    pub uri: Url,
+    pub version: i32,
 }
 
 /// An internal document that has analysis results.
@@ -692,9 +702,9 @@ impl Display for InternalDocument {
         write!(
             f,
             "InternalDocument {{ path = \"{}\", url = \"{}\" version = {}, rope.len_bytes = {}}}",
-            self.path.display(),
-            self.uri,
-            self.version,
+            self.path().display(),
+            self.uri(),
+            self.version(),
             self.rope().len_bytes()
         )
     }
@@ -702,8 +712,8 @@ impl Display for InternalDocument {
 
 impl core::hash::Hash for InternalDocument {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.path.hash(state);
-        Hash::hash(&self.version, state);
+        self.path().hash(state);
+        Hash::hash(&self.version(), state);
     }
 }
 impl Eq for InternalDocument {}
@@ -719,7 +729,21 @@ impl InternalDocument {
         Self::new_with_path(uri, version, text, path)
     }
 
+    pub fn path(&self) -> &Path {
+        &self.id.path
+    }
+
+    pub fn uri(&self) -> &Url {
+        &self.id.uri
+    }
+
+    pub fn version(&self) -> i32 {
+        self.id.version
+    }
+
     pub fn new_with_path(uri: Url, version: i32, text: String, path: PathBuf) -> InternalDocument {
+        let id = DocumentId { path, uri, version };
+
         let tree = timeit("create_document / parse", || {
             lock_global_parser()
                 .parse(&text, None)
@@ -727,24 +751,16 @@ impl InternalDocument {
         });
 
         let rope = Rope::from(text);
-        let parsed_document = ParsedDocument {
-            path: path.clone(),
-            uri: uri.clone(),
-            version,
-            tree,
-            rope,
-        };
+        let parsed_document = ParsedDocument { tree, rope };
 
         let queried_document: QueriedDocument = parsed_document.into_queried();
 
-        let stage2: Stage2Document = queried_document.analyze(&parsed_document);
+        let stage2: Stage2Document = queried_document.analyze(&parsed_document, &id);
 
         debug!("Stage2Document -> InternalDocument");
 
         InternalDocument {
-            path,
-            uri,
-            version,
+            id,
             parsed_document,
             queried_document,
             stage2,
@@ -800,12 +816,12 @@ impl InternalDocument {
         workspace: &Workspace,
         include_prefix: bool,
     ) -> Result<()> {
-        if result.contains(&self.uri) {
+        if result.contains(&self.uri()) {
             // Do nothing
             return Ok(());
         }
 
-        result.insert(self.uri.clone());
+        result.insert(self.uri().clone());
 
         let urls = self.reachable_urls(include_prefix);
 
@@ -866,7 +882,7 @@ impl InternalDocument {
         encoding: &PositionEncodingKind,
     ) -> Result<InternalDocument> {
         let new_version = params.text_document.version;
-        if self.version >= new_version {
+        if self.version() >= new_version {
             return Ok(self); // no change needed
         }
 
@@ -886,9 +902,7 @@ impl InternalDocument {
         // Deconstruct the internal document into its parts
 
         let InternalDocument {
-            path,
-            uri,
-            version,
+            id,
             parsed_document,
             mut queried_document,
             stage2,
@@ -911,10 +925,16 @@ impl InternalDocument {
         let (old_tree, parsed_document) = edit_parsed_document(
             change_ranges.iter(),
             new_version,
-            &path,
-            &uri,
+            &id.path,
+            &id.uri,
             parsed_document,
         )?;
+
+        // Increment ID
+        let id = DocumentId {
+            version: new_version,
+            ..id
+        };
 
         // let QueriedDocument {
         //     ontology_id,
@@ -944,15 +964,13 @@ impl InternalDocument {
 
         // TODO incremental update of this analyze step
         let stage2 = timeit("document.edit / analyze", || {
-            queried_document.analyze(&parsed_document)
+            queried_document.analyze(&parsed_document, &id)
         });
 
         // TODO I removed all analysis
 
         let doc = InternalDocument {
-            path,
-            uri,
-            version: new_version,
+            id,
             parsed_document,
             queried_document,
             stage2,
@@ -990,7 +1008,7 @@ impl InternalDocument {
         workspace: &Workspace,
     ) -> Vec<tower_lsp::lsp_types::InlayHint> {
         let reachable_docs = self.reachable_docs_recursive(workspace, true);
-        debug!("Reachable docs for {} are {reachable_docs:#?}", self.uri);
+        debug!("Reachable docs for {} are {reachable_docs:#?}", self.uri());
         // TODO cache this in stage2
         self
             .parsed_document
@@ -1333,12 +1351,12 @@ impl InternalDocument {
         // TODO create diagnostics for files that depend on this file
         debug!(
             "Publish diagnostics for {} {:#?}",
-            self.path.display(),
+            self.path().display(),
             diagnostics
         );
 
         client
-            .publish_diagnostics(self.uri.clone(), diagnostics, Some(self.version))
+            .publish_diagnostics(self.uri().clone(), diagnostics, Some(self.version()))
             .await;
     }
 }
@@ -1372,9 +1390,6 @@ fn edit_parsed_document<'a>(
         })
     };
     let parsed_document = ParsedDocument {
-        uri: uri.clone(),
-        path: path.clone(),
-        version: new_version,
         tree: new_tree,
         rope: new_rope,
     };
@@ -1431,21 +1446,8 @@ pub struct FormattingSettings {
 /// An internal document that has no semantic analysis. Just text and syntax tree.
 #[derive(Debug, Clone)]
 struct ParsedDocument {
-    /// File location
-    path: PathBuf,
-    /// URL and location where this document was loaded from
-    uri: Url,
-    version: i32,
     tree: Tree,
     rope: Rope,
-}
-
-impl Hash for ParsedDocument {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.path.hash(state);
-        self.uri.hash(state);
-        Hash::hash(&self.version, state);
-    }
 }
 
 impl From<ParsedDocument> for QueriedDocument {
@@ -1457,9 +1459,6 @@ impl From<ParsedDocument> for QueriedDocument {
         let imports = val.imports();
 
         QueriedDocument {
-            path: val.path.clone(),
-            uri: val.uri.clone(),
-            _version: val.version,
             ontology_id,
             prefixes,
             imports,
@@ -1477,9 +1476,6 @@ impl ParsedDocument {
         );
 
         QueriedDocument {
-            path: self.path.clone(),
-            uri: self.uri.clone(),
-            _version: self.version,
             ontology_id,
             prefixes,
             imports,
@@ -1599,19 +1595,20 @@ impl ParsedDocument {
     }
 }
 
-#[cached(
-    key = "u64",
-    convert = r#"{
-        let mut hasher = DefaultHasher::new();
-        stage1.hash(&mut hasher);
-        range.hash(&mut hasher);
-        query.capture_names().hash(&mut hasher);
-        Hash::hash(&query.start_byte_for_pattern(0), &mut hasher);
-        Hash::hash(&query.end_byte_for_pattern(0), &mut hasher);
-        hasher.finish()
-     } "#,
-    size = 100
-)]
+// TODO do I need this cache?
+// #[cached(
+//     key = "u64",
+//     convert = r#"{
+//         let mut hasher = DefaultHasher::new();
+//         stage1.hash(&mut hasher);
+//         range.hash(&mut hasher);
+//         query.capture_names().hash(&mut hasher);
+//         Hash::hash(&query.start_byte_for_pattern(0), &mut hasher);
+//         Hash::hash(&query.end_byte_for_pattern(0), &mut hasher);
+//         hasher.finish()
+//      } "#,
+//     size = 100
+// )]
 fn query_helper(
     stage1: &ParsedDocument,
     query: &Query,
@@ -1650,12 +1647,6 @@ type OntologyId = (Iri, Option<Iri>);
 
 #[derive(Debug)]
 pub struct QueriedDocument {
-    /// File location
-    path: PathBuf,
-    /// URL and location where this document was loaded from
-    uri: Url,
-    _version: i32,
-
     #[cfg(not(test))]
     ontology_id: Option<RangeBox<OntologyId>>,
     #[cfg(test)]
@@ -1667,7 +1658,11 @@ pub struct QueriedDocument {
 
 impl QueriedDocument {
     /// Finds flat references to other document URL's in this document
-    pub fn reachable_urls(&self, document_references: &[(Iri, Range)]) -> (Vec<Url>, Vec<Url>) {
+    pub fn reachable_urls(
+        &self,
+        document_references: &[(Iri, Range)],
+        own_uri: &Url,
+    ) -> (Vec<Url>, Vec<Url>) {
         let imports = self
             .imports
             .iter()
@@ -1682,7 +1677,7 @@ impl QueriedDocument {
             .filter_map(|(prefix, url)| if prefix.is_empty() { None } else { Some(url) })
             .filter_map(|url| Url::parse(url).ok())
             // Filter out the current document as a prefix (most likely the empty prefix ":")
-            .filter(|url| url != &self.uri)
+            .filter(|url| url != own_uri)
             .map(|url| {
                 // Remove fragments from prefixes
                 if url.fragment().is_some() {
@@ -1703,7 +1698,7 @@ impl QueriedDocument {
 
         debug!(
             "Extending {} with {}",
-            self.uri,
+            own_uri,
             referenced_urls.iter().join(", ")
         );
 
@@ -1788,7 +1783,11 @@ impl QueriedDocument {
             .collect_vec()
     }
 
-    fn document_definitions(&self, parsed_document: &ParsedDocument) -> Vec<IriDefinition> {
+    fn document_definitions(
+        &self,
+        parsed_document: &ParsedDocument,
+        own_path: &Path,
+    ) -> Vec<IriDefinition> {
         let node_by_id = node_by_id_map(&parsed_document.tree);
         parsed_document
             .query(&ALL_QUERIES.frame_query)
@@ -1808,7 +1807,7 @@ impl QueriedDocument {
                     IriDefinition {
                         iri: frame_iri,
                         location: Location {
-                            uri: Url::from_file_path(&self.path)
+                            uri: Url::from_file_path(&own_path)
                                 .expect("Path should be valid file URL"),
                             range: frame.node.range,
                         },
@@ -1836,14 +1835,14 @@ impl QueriedDocument {
             .collect()
     }
 
-    fn analyze(&self, parsed_document: &ParsedDocument) -> Stage2Document {
+    fn analyze(&self, parsed_document: &ParsedDocument, id: &DocumentId) -> Stage2Document {
         debug!("QueriedDocument -> Stage2Document");
 
         let ((references, definitions), annotations) = rayon::join(
             || {
                 rayon::join(
                     || self.document_references(parsed_document),
-                    || self.document_definitions(parsed_document),
+                    || self.document_definitions(parsed_document, &id.path),
                 )
             },
             || self.document_annotations(parsed_document),
@@ -1860,7 +1859,9 @@ impl QueriedDocument {
         });
 
         let (directly_reachable_import_urls, directly_reachable_other_urls) =
-            timeit("reachable urls", || self.reachable_urls(&references));
+            timeit("reachable urls", || {
+                self.reachable_urls(&references, &id.uri)
+            });
 
         Stage2Document {
             all_frame_infos,
@@ -2610,7 +2611,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
         // This takes the longes :<
         doc.reachable_docs_recursive(workspace, false)
     });
-    debug!("Imports recursive {} {:#?}", doc.uri, imports_recursive);
+    debug!("Imports recursive {} {:#?}", doc.uri(), imports_recursive);
 
     for url in imports_recursive {
         if let Some(doc) = workspace.document_by_url(&url) {

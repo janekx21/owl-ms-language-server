@@ -451,8 +451,8 @@ async fn backend_did_open_should_create_document() {
         .exactly_one()
         .unwrap_or_else(|_| panic!("Should be exactly one"));
 
-    assert_eq!(doc.uri, url);
-    assert_eq!(doc.version, 0);
+    assert_eq!(doc.uri(), &url);
+    assert_eq!(doc.version(), 0);
     assert_eq!(doc.rope().to_string(), "abc");
     assert!(doc.tree().root_node().is_error());
 }
@@ -4181,20 +4181,23 @@ mod fuzz {
         LanguageServer, TempDir, TextDocumentContentChangeEvent, TextDocumentItem, Url,
         VersionedTextDocumentIdentifier,
     };
+    use indoc::indoc;
     use itertools::Itertools;
     use proptest::prelude::*;
     use tower_lsp::LspService;
 
     /// A simple single-file ontology used as the base for all fuzz cases.
-    const ONTOLOGY: &str = concat!(
-        "Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n",
-        "Ontology: <http://example.org/fuzz-test>\n",
-        "\n",
-        "Class: Foo\n",
-        "    Annotations: rdfs:label \"Foo Label\"\n",
-        "\n",
-        "Class: Bar\n",
-        "    Annotations: rdfs:label \"Bar Label\"\n",
+    const ONTOLOGY: &str = indoc!(
+        r#"
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Ontology: <http://example.org/fuzz-test>
+        
+            Class: Foo
+                Annotations: rdfs:label "Foo Label"
+        
+            Class: Bar
+                Annotations: rdfs:label "Bar Label"
+        "#
     );
 
     /// Returns the (end_line, end_col) position that a `text` insertion at
@@ -4210,24 +4213,28 @@ mod fuzz {
         }
     }
 
-    /// Generates either random printable text or a complete class frame.
+    /// Generates either random printable text or a complete frame, or comment.
     fn insert_text_strategy() -> impl Strategy<Value = String> {
         prop_oneof![
-            3 => "[a-zA-Z0-9 \t\n\\p{L}]{0,60}",
+            3 => "[a-zA-Z0-9 \t\n]{0,60}",
+            1 => "[p{L}]{0,60}",
             1 => Just("Class: FuzzClass\n    Annotations: rdfs:label \"fuzz label\"\n"
                 .to_string()),
             1 => Just("Class: AnotherFuzzClass\n".to_string()),
+            1 => Just("Datatype: SomeDatatype\n".to_string()),
+            1 => Just("#".to_string()), // Just a comment
         ]
     }
 
     type DocumentState = String;
 
+    /// We use this "state" to compare if two documents are congruent when the text is eq
     async fn capture_document_state(
         service: &LspService<Backend>,
         ontology_url: &Url,
     ) -> DocumentState {
         let sync = service.inner().read_sync().await;
-        let (doc, _) = sync.get_internal_document(ontology_url).unwrap();
+        let (doc, ws) = sync.get_internal_document(ontology_url).unwrap();
         let initial_rope = doc.rope().to_string();
         let initial_frame_infos = doc
             .all_frame_infos()
@@ -4247,7 +4254,11 @@ mod fuzz {
             .sorted()
             .join("\n");
 
-        format!("# Internal Document\n{initial_rope}\n\n---\n\n{initial_frame_infos}")
+        let diagnostics = doc.diagnostics(ws);
+        let prefixes = doc.prefixes();
+        let qd = &doc.queried_document;
+
+        format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes:#?}\n\n# Queried Document\n{qd:#?}")
     }
 
     proptest! {
