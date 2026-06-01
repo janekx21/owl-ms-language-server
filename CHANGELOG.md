@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/janekx21/owl-ms-language-server/compare/v0.13.0...v0.13.1) (2026-06-01)
+
+
+### Bug Fixes
+
+* change mocha import style ([#162](https://github.com/janekx21/owl-ms-language-server/issues/162)) ([02e7f5a](https://github.com/janekx21/owl-ms-language-server/commit/02e7f5a99212d7b2b5bc009e4d8e731c257e41a3))
+
 ## [0.13.0](https://github.com/janekx21/owl-ms-language-server/compare/v0.12.1...v0.13.0) (2026-05-26)
 
 
