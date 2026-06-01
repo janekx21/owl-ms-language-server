@@ -4525,10 +4525,10 @@ mod fuzz {
         prop_oneof![
             3 => "[a-zA-Z0-9 \t\n]{0,60}",
             1 => "[p{L}]{0,60}",
-            1 => Just("Class: FuzzClass\n    Annotations: rdfs:label \"fuzz label\"\n"
+            1 => Just("\nClass: FuzzClass\n    Annotations: rdfs:label \"fuzz label\"\n"
                 .to_string()),
-            1 => Just("Class: AnotherFuzzClass\n".to_string()),
-            1 => Just("Datatype: SomeDatatype\n".to_string()),
+            1 => Just("\nClass: AnotherFuzzClass\n".to_string()),
+            1 => Just("\nDatatype: SomeDatatype\n".to_string()),
             1 => Just("#".to_string()), // Just a comment
         ]
     }
@@ -4565,7 +4565,10 @@ mod fuzz {
         let prefixes = doc.prefixes();
         let qd = &doc.queried_document;
 
-        format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes:#?}\n\n# Queried Document\n{qd:#?}")
+        let definitions = &doc.stage2.definitions.iter().sorted();
+        let references = &doc.stage2.references.iter().sorted();
+
+        format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes:#?}\n\n# Queried Document\n{qd:#?}\n\n# Definitions\n{definitions:#?}\n\n# References\n{references:#?}")
     }
 
     proptest! {
@@ -4575,7 +4578,7 @@ mod fuzz {
         /// The document state (rope content and extracted frame IRIs) must be
         /// identical to the state before the insertion.
         #[test]
-        #[ignore = "active later! to much clutter"]
+        // #[ignore = "active later! to much clutter"]
         fn fuzz_insert_and_undo_preserves_document(
             line in 0u32..8u32,
             col  in 0u32..53u32,
@@ -4664,6 +4667,7 @@ mod fuzz {
                 });
 
 
+            print!("{}", pretty_assertions::StrComparison::new(&initial_state, &final_state));
             prop_assert_eq!(
                 &initial_state,
                 &final_state,
@@ -4678,7 +4682,7 @@ mod fuzz {
         /// The document state (rope content and extracted frame IRIs) must be
         /// identical to the state before the insertion.
         #[test]
-        #[ignore = "active later! to much clutter"]
+        // #[ignore = "active later! to much clutter"]
         fn fuzz_undo_after_reopen_document(
             line in 0u32..8u32,
             col  in 0u32..53u32,

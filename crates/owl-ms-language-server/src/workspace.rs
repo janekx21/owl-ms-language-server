@@ -588,7 +588,7 @@ pub struct InternalDocument {
     id: DocumentId,
     parsed_document: ParsedDocument,
     pub queried_document: QueriedDocument,
-    stage2: Stage2Document,
+    pub stage2: Stage2Document,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -602,15 +602,15 @@ pub struct DocumentId {
 
 /// An internal document that has analysis results.
 #[derive(Debug)]
-struct Stage2Document {
+pub struct Stage2Document {
     // TODO maybe move everything into Internal document or here
     // /// File location
     // path: PathBuf,
     // /// URL and location where this document was loaded from
     // uri: Url,
     // version: i32,
-    definitions: HashSet<Iri>,
-    references: HashSet<Iri>,
+    pub definitions: HashSet<Iri>,
+    pub references: HashSet<Iri>,
 
     all_frame_infos: HashMap<Iri, FrameInfo>,
     local_diagnostics: Vec<Diagnostic>,
@@ -920,6 +920,11 @@ impl InternalDocument {
 
         let changes = changes_from_lsp(params, encoding, &parsed_document.rope);
 
+        // Note that these ranges are in the pre edit form
+        for change in &changes {
+            debug!("Updating changed range (pre edit) {change:?}");
+        }
+
         let (parsed_document, old_tree) = parsed_document.edit_parsed_document(changes.iter())?;
 
         // Increment ID
@@ -929,16 +934,7 @@ impl InternalDocument {
         };
 
         // This is a combination of syntax and text changes
-        let post_change_ranges = old_tree
-            .changed_ranges(&parsed_document.tree)
-            .map(Range::from)
-            .chain(changes.iter().map(Change::range_after_change))
-            .collect_vec();
-
-        // Note that these ranges are in the pre edit form
-        for change in &changes {
-            debug!("Updating changed range (pre edit) {change:?}");
-        }
+        let post_change_ranges = post_change_ranges(&changes, &parsed_document, &old_tree);
 
         timeit("document.edit / queries", || {
             queried_document.update(&changes, &post_change_ranges, &parsed_document);
@@ -958,16 +954,18 @@ impl InternalDocument {
         // });
 
         // TODO incremental update of this analyze step
-        // let stage2 = timeit("document.edit / analyze", || {
-        //     queried_document.analyze(&parsed_document, &id)
-        // });
+        let stage2 = timeit("document.edit / analyze", || {
+            queried_document.analyze(&parsed_document, &id)
+        });
 
-        stage2.update(
-            &changes,
-            &post_change_ranges,
-            &parsed_document,
-            &queried_document,
-        );
+        // timeit("document.edit / analyze", || {
+        //     stage2.update(
+        //         &changes,
+        //         &post_change_ranges,
+        //         &parsed_document,
+        //         &queried_document,
+        //     );
+        // });
 
         // TODO I removed all analysis
 
@@ -1361,6 +1359,26 @@ impl InternalDocument {
             .publish_diagnostics(self.uri().clone(), diagnostics, Some(self.version()))
             .await;
     }
+}
+
+const RANGE_GROW: u32 = 1;
+
+/// This is a combination of syntax and text changes
+fn post_change_ranges(
+    changes: &[Change],
+    parsed_document: &ParsedDocument,
+    old_tree: &Tree,
+) -> Vec<Range> {
+    old_tree
+        .changed_ranges(&parsed_document.tree)
+        .map(Range::from)
+        .chain(changes.iter().map(Change::range_after_change))
+        // Increase the range of a change by one char so that adjacent nodes are checked
+        .map(|r| Range {
+            start: r.start.moved_left(RANGE_GROW, &parsed_document.rope),
+            end: r.end.moved_right(RANGE_GROW, &parsed_document.rope),
+        })
+        .collect_vec()
 }
 
 fn changes_from_lsp(
@@ -1941,8 +1959,9 @@ impl QueriedDocument {
             o_id.edit(changes.iter());
 
             for sc in post_change_ranges {
-                debug!("Check {} overlap with {}", o_id.range(), sc);
+                debug!("Ontology id Check {} overlap with {}", o_id.range(), sc);
                 if o_id.range().overlaps(sc) {
+                    debug!("Yes");
                     dirty = true;
                 }
             }
@@ -1970,8 +1989,9 @@ impl QueriedDocument {
             .imports
             .extract_if(.., |import| {
                 for sc in post_change_ranges {
-                    debug!("Check {} overlap with {}", import.range(), sc);
+                    debug!("Import Check {} overlap with {}", import.range(), sc);
                     if import.range().overlaps(sc) {
+                        debug!("Yes");
                         // I dont know!
                         return true;
                     }
@@ -1986,6 +2006,7 @@ impl QueriedDocument {
             for sc in post_change_ranges {
                 debug!("Prefix: Check {} overlap with {}", prefix_value.range(), sc);
                 if prefix_value.range().overlaps(sc) {
+                    debug!("Yes");
                     return false;
                 }
             }
@@ -2015,6 +2036,10 @@ impl QueriedDocument {
 
             self.prefixes.extend(additional_prefixes);
         }
+
+        // Cleanup
+
+        self.imports.dedup_by_key(|r| *r.range());
     }
 }
 
