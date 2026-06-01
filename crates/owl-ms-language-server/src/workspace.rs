@@ -22,7 +22,6 @@ use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use pretty::RcDoc;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use ropey::Rope;
 use sophia::api::graph::{Graph, MutableGraph};
 use sophia::api::ns::Namespace;
@@ -588,9 +587,6 @@ pub enum Document {
 pub struct InternalDocument {
     id: DocumentId,
     parsed_document: ParsedDocument,
-    #[cfg(not(test))]
-    queried_document: QueriedDocument,
-    #[cfg(test)]
     pub queried_document: QueriedDocument,
     stage2: Stage2Document,
 }
@@ -623,6 +619,17 @@ struct Stage2Document {
     /// These include all other URL's that can be found in this document
     directly_reachable_other_urls: Vec<Url>,
     iri_locations: HashMap<Iri, Vec<Range>>,
+}
+
+impl Stage2Document {
+    fn update(
+        &mut self,
+        changes: &[Change],
+        post_change_ranges: &[Range],
+        parsed_document: &ParsedDocument,
+        queried_document: &QueriedDocument,
+    ) {
+    }
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -821,7 +828,7 @@ impl InternalDocument {
         workspace: &Workspace,
         include_prefix: bool,
     ) -> Result<()> {
-        if result.contains(&self.uri()) {
+        if result.contains(self.uri()) {
             // Do nothing
             return Ok(());
         }
@@ -904,36 +911,16 @@ impl InternalDocument {
 
         debug!("content changes {:#?}", params.content_changes);
 
-        // Deconstruct the internal document into its parts
-
         let InternalDocument {
             id,
             parsed_document,
             mut queried_document,
-            stage2,
+            mut stage2,
         } = self;
 
-        let change_ranges = params
-            .content_changes
-            .into_iter()
-            .map(|TextDocumentContentChangeEvent { range, text, .. }| {
-                Range::from_lsp(
-                    &range.expect("range to be defined"),
-                    &parsed_document.rope,
-                    encoding,
-                )
-                .map(|range| Change { range, text })
-            })
-            .filter_and_log()
-            .collect_vec();
+        let changes = changes_from_lsp(params, encoding, &parsed_document.rope);
 
-        let (old_tree, parsed_document) = edit_parsed_document(
-            change_ranges.iter(),
-            new_version,
-            &id.path,
-            &id.uri,
-            parsed_document,
-        )?;
+        let (parsed_document, old_tree) = parsed_document.edit_parsed_document(changes.iter())?;
 
         // Increment ID
         let id = DocumentId {
@@ -941,37 +928,20 @@ impl InternalDocument {
             ..id
         };
 
-        // let QueriedDocument {
-        //     ontology_id,
-        //     prefixes,
-        //     imports,
-        //     ..
-        // } = queried_document;
-
-        let syntax_change_ranges = old_tree
+        // This is a combination of syntax and text changes
+        let post_change_ranges = old_tree
             .changed_ranges(&parsed_document.tree)
             .map(Range::from)
-            .collect_vec();
-
-        let post_change_ranges = change_ranges
-            .iter()
-            .map(Change::range_after_change)
+            .chain(changes.iter().map(Change::range_after_change))
             .collect_vec();
 
         // Note that these ranges are in the pre edit form
-        for change in &change_ranges {
+        for change in &changes {
             debug!("Updating changed range (pre edit) {change:?}");
         }
 
         timeit("document.edit / queries", || {
-            queried_document.update(
-                &change_ranges,
-                &syntax_change_ranges
-                    .into_iter()
-                    .chain(post_change_ranges)
-                    .collect_vec(),
-                &parsed_document,
-            );
+            queried_document.update(&changes, &post_change_ranges, &parsed_document);
         });
 
         // TODO do I need this?
@@ -988,9 +958,16 @@ impl InternalDocument {
         // });
 
         // TODO incremental update of this analyze step
-        let stage2 = timeit("document.edit / analyze", || {
-            queried_document.analyze(&parsed_document, &id)
-        });
+        // let stage2 = timeit("document.edit / analyze", || {
+        //     queried_document.analyze(&parsed_document, &id)
+        // });
+
+        stage2.update(
+            &changes,
+            &post_change_ranges,
+            &parsed_document,
+            &queried_document,
+        );
 
         // TODO I removed all analysis
 
@@ -1386,39 +1363,54 @@ impl InternalDocument {
     }
 }
 
-fn edit_parsed_document<'a>(
-    changes: impl Iterator<Item = &'a Change>,
-    new_version: i32,
-    path: &PathBuf,
-    uri: &Url,
-    parsed_document: ParsedDocument,
-) -> Result<(Tree, ParsedDocument)> {
-    let ParsedDocument { tree, rope, .. } = parsed_document;
-    let mut old_tree = tree;
-    let mut new_rope = rope;
-
-    for change in changes {
-        apply_change_to_rope_and_tree(&mut old_tree, &mut new_rope, change)?;
-    }
-
-    let rope_provider = RopeProvider::new(&new_rope);
-    let new_tree = {
-        let mut parser_guard = lock_global_parser();
-        timeit("parsing", || {
-            parser_guard
-                .parse_with_options(
-                    &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
-                    Some(&old_tree),
-                    None,
-                )
-                .expect("language to be set, no timeout to be used, no cancellation flag")
+fn changes_from_lsp(
+    params: DidChangeTextDocumentParams,
+    encoding: &PositionEncodingKind,
+    rope: &Rope,
+) -> Vec<Change> {
+    params
+        .content_changes
+        .into_iter()
+        .map(|TextDocumentContentChangeEvent { range, text, .. }| {
+            Range::from_lsp(&range.expect("range to be defined"), rope, encoding)
+                .map(|range| Change { range, text })
         })
-    };
-    let parsed_document = ParsedDocument {
-        tree: new_tree,
-        rope: new_rope,
-    };
-    Ok((old_tree, parsed_document))
+        .filter_and_log()
+        .collect_vec()
+}
+
+impl ParsedDocument {
+    fn edit_parsed_document<'a>(
+        self,
+        changes: impl Iterator<Item = &'a Change>,
+    ) -> Result<(Self, Tree)> {
+        let ParsedDocument { tree, rope, .. } = self;
+        let mut old_tree = tree;
+        let mut new_rope = rope;
+
+        for change in changes {
+            apply_change_to_rope_and_tree(&mut old_tree, &mut new_rope, change)?;
+        }
+
+        let rope_provider = RopeProvider::new(&new_rope);
+        let new_tree = {
+            let mut parser_guard = lock_global_parser();
+            timeit("parsing", || {
+                parser_guard
+                    .parse_with_options(
+                        &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+                        Some(&old_tree),
+                        None,
+                    )
+                    .expect("language to be set, no timeout to be used, no cancellation flag")
+            })
+        };
+        let parsed_document = ParsedDocument {
+            tree: new_tree,
+            rope: new_rope,
+        };
+        Ok((parsed_document, old_tree))
+    }
 }
 
 /// .
@@ -1867,7 +1859,7 @@ impl QueriedDocument {
                     IriDefinition {
                         iri: frame_iri,
                         location: Location {
-                            uri: Url::from_file_path(&own_path)
+                            uri: Url::from_file_path(own_path)
                                 .expect("Path should be valid file URL"),
                             range: frame.node.range,
                         },
