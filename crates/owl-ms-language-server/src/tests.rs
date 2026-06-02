@@ -4504,6 +4504,9 @@ mod fuzz {
         
             Class: Bar
                 Annotations: rdfs:label "Bar Label"
+
+
+            SomeSyntaxError
         "#
     );
 
@@ -4565,8 +4568,8 @@ mod fuzz {
         let prefixes = doc.prefixes();
         let qd = &doc.queried_document;
 
-        let definitions = &doc.stage2.definitions.iter().sorted();
-        let references = &doc.stage2.references.iter().sorted();
+        let definitions = &doc.stage2.definitions.iter().sorted_by_key(|rb| rb.value());
+        let references = &doc.stage2.references.iter().sorted_by_key(|rb| rb.value());
 
         format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes:#?}\n\n# Queried Document\n{qd:#?}\n\n# Definitions\n{definitions:#?}\n\n# References\n{references:#?}")
     }

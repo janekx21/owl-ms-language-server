@@ -603,14 +603,8 @@ pub struct DocumentId {
 /// An internal document that has analysis results.
 #[derive(Debug)]
 pub struct Stage2Document {
-    // TODO maybe move everything into Internal document or here
-    // /// File location
-    // path: PathBuf,
-    // /// URL and location where this document was loaded from
-    // uri: Url,
-    // version: i32,
-    pub definitions: HashSet<Iri>,
-    pub references: HashSet<Iri>,
+    pub definitions: Vec<RangeBox<Iri>>,
+    pub references: Vec<RangeBox<Iri>>,
 
     all_frame_infos: HashMap<Iri, FrameInfo>,
     local_diagnostics: Vec<Diagnostic>,
@@ -628,7 +622,94 @@ impl Stage2Document {
         post_change_ranges: &[Range],
         parsed_document: &ParsedDocument,
         queried_document: &QueriedDocument,
+        id: &DocumentId,
     ) {
+        for rb in &mut self.definitions {
+            rb.edit(changes.iter());
+        }
+
+        // Retain
+        self.definitions.retain(|range_box| {
+            for sc in post_change_ranges {
+                debug!(
+                    "Definition: Check {} overlap with {}",
+                    range_box.range(),
+                    sc
+                );
+                if range_box.range().overlaps(sc) {
+                    debug!("Yes");
+                    return false;
+                }
+            }
+            true
+        });
+
+        // Add
+
+        for di in post_change_ranges {
+            let document_definitions_in_range =
+                queried_document.document_definitions_in_range(parsed_document, &id.path, *di);
+            let additional_definitions = document_definitions_in_range
+                .iter()
+                .map(|r| RangeBox::new(r.value().iri.clone(), *r.range()));
+
+            self.definitions.extend(additional_definitions);
+        }
+        // Cleanup
+        self.definitions.sort();
+        self.definitions.dedup_by_key(|rb| *rb.range());
+
+        // References
+
+        for rb in &mut self.references {
+            rb.edit(changes.iter());
+        }
+        // Retain
+        self.references.retain(|range_box| {
+            for sc in post_change_ranges {
+                debug!("Reference: Check {} overlap with {}", range_box.range(), sc);
+                if range_box.range().overlaps(sc) {
+                    debug!("Yes");
+                    return false;
+                }
+            }
+            true
+        });
+        for di in post_change_ranges {
+            let additional_values =
+                queried_document.document_references_in_range(parsed_document, *di);
+
+            self.references.extend(additional_values);
+        }
+        // Cleanup
+        self.references.sort();
+        self.references.dedup_by_key(|rb| *rb.range());
+
+        // TODO
+        // The problem is that the references and definitions (and other stuff) depends on
+        // prefixes. So the change in a prefix can change a lot of references that are not
+        // located at the prefix.
+        // Solution 1: Remove the dependency and move the resolution of abbriv iri -> full iri
+        // into a later step.
+        // Solution 2: Mark all references dirty when ever a prefix changes, which is not often.
+        // Solution 3: TODO
+
+        // TODO --------------------------
+        let all_frame_infos = timeit("all frame infos", || {
+            QueriedDocument::document_all_frame_infos(
+                queried_document
+                    .document_definitions(parsed_document, &id.path)
+                    .iter(),
+                queried_document
+                    .document_annotations(parsed_document)
+                    .into_iter(),
+            )
+        });
+
+        // self.references = queried_document.document_references(parsed_document);
+        self.local_diagnostics = parsed_document.syntax_errors();
+        self.all_frame_infos = all_frame_infos;
+        self.iri_locations = build_iri_locations(&self.references);
     }
 }
 
@@ -954,18 +1035,19 @@ impl InternalDocument {
         // });
 
         // TODO incremental update of this analyze step
-        let stage2 = timeit("document.edit / analyze", || {
-            queried_document.analyze(&parsed_document, &id)
-        });
-
-        // timeit("document.edit / analyze", || {
-        //     stage2.update(
-        //         &changes,
-        //         &post_change_ranges,
-        //         &parsed_document,
-        //         &queried_document,
-        //     );
+        // let stage2 = timeit("document.edit / analyze", || {
+        //     queried_document.analyze(&parsed_document, &id)
         // });
+
+        timeit("document.edit / analyze", || {
+            stage2.update(
+                &changes,
+                &post_change_ranges,
+                &parsed_document,
+                &queried_document,
+                &id,
+            );
+        });
 
         // TODO I removed all analysis
 
@@ -1429,6 +1511,76 @@ impl ParsedDocument {
         };
         Ok((parsed_document, old_tree))
     }
+
+    /// Generate the diagnostics for a single node, walking recursively down to every child and every syntax error within
+    fn syntax_errors(self: &ParsedDocument) -> Vec<Diagnostic> {
+        let mut cursor = self.tree.root_node().walk();
+        let mut diagnostics = Vec::<Diagnostic>::new();
+
+        loop {
+            let node = cursor.node();
+
+            if node.is_error() {
+                // log
+                let range: Range = cursor.node().range().into();
+
+                // root has no parents so use itself
+                let parent_kind = node.parent().unwrap_or(node).kind();
+
+                if let Some(static_node) = NODE_TYPES.get(parent_kind) {
+                    let valid_children: String = Itertools::intersperse(
+                        static_node
+                            .children
+                            .types
+                            .iter()
+                            .map(|sn| node_type_to_string(&sn.type_)),
+                        ", ".to_string(),
+                    )
+                    .collect();
+
+                    let parent = node_type_to_string(parent_kind);
+
+                    diagnostics.push(Diagnostic {
+                        range,
+                        kind: DiagnosticKind::SyntaxError {
+                            valid_children,
+                            parent,
+                        },
+                    });
+                }
+                // move along
+                while !cursor.goto_next_sibling() {
+                    // move out
+                    if !cursor.goto_parent() {
+                        // this node has no parent, it's the root
+                        return diagnostics;
+                    }
+                }
+            } else if node.has_error() {
+                // move in
+                let has_child = cursor.goto_first_child(); // should always work
+
+                if !has_child {
+                    while !cursor.goto_next_sibling() {
+                        // move out
+                        if !cursor.goto_parent() {
+                            // this node has no parent, it's the root
+                            return diagnostics;
+                        }
+                    }
+                }
+            } else {
+                // move along
+                while !cursor.goto_next_sibling() {
+                    // move out
+                    if !cursor.goto_parent() {
+                        // this node has no parent, it's the root
+                        return diagnostics;
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// .
@@ -1724,7 +1876,7 @@ impl QueriedDocument {
     /// Finds flat references to other document URL's in this document
     pub fn reachable_urls(
         &self,
-        document_references: &[(Iri, Range)],
+        document_references: &[RangeBox<Iri>],
         own_uri: &Url,
     ) -> (Vec<Url>, Vec<Url>) {
         let imports = self
@@ -1762,7 +1914,7 @@ impl QueriedDocument {
 
         let referenced_urls = document_references
             .iter()
-            .filter_map(|(iri, _)| iri_to_parent_url(iri))
+            .filter_map(|rb| iri_to_parent_url(rb.value()))
             .unique()
             .collect_vec();
 
@@ -1793,7 +1945,7 @@ impl QueriedDocument {
     }
 
     fn document_all_frame_infos<'a>(
-        definitions: impl Iterator<Item = &'a IriDefinition>,
+        definitions: impl Iterator<Item = &'a RangeBox<IriDefinition>>,
         annotations: impl Iterator<Item = (String, String, String)>,
     ) -> HashMap<Iri, FrameInfo> {
         let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
@@ -1815,10 +1967,10 @@ impl QueriedDocument {
 
         // Second we collect the location and frame type (definitions)
         for frame_info in definitions.map(|definiton| FrameInfo {
-            iri: definiton.iri.clone(),
+            iri: definiton.value().iri.clone(),
             annotations: HashMap::new(),
-            frame_type: definiton.kind,
-            definitions: vec![definiton.location.clone()],
+            frame_type: definiton.value().kind,
+            definitions: vec![definiton.value().location.clone()],
         }) {
             if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
                 // Merge the frame info for the same IRI
@@ -1857,7 +2009,7 @@ impl QueriedDocument {
         &self,
         parsed_document: &ParsedDocument,
         own_path: &Path,
-    ) -> Vec<IriDefinition> {
+    ) -> Vec<RangeBox<IriDefinition>> {
         let node_by_id = node_by_id_map(&parsed_document.tree);
         parsed_document
             .query(&ALL_QUERIES.frame_query)
@@ -1874,22 +2026,65 @@ impl QueriedDocument {
                         .kind();
                     let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
-                    IriDefinition {
-                        iri: frame_iri,
-                        location: Location {
-                            uri: Url::from_file_path(own_path)
-                                .expect("Path should be valid file URL"),
-                            range: frame.node.range,
+                    RangeBox::new(
+                        IriDefinition {
+                            iri: frame_iri,
+                            location: Location {
+                                uri: Url::from_file_path(own_path)
+                                    .expect("Path should be valid file URL"),
+                                range: frame.node.range,
+                            },
+                            kind: FrameType::parse(iri_parent_kind),
                         },
-                        kind: FrameType::parse(iri_parent_kind),
-                    }
+                        frame.node.range,
+                    )
                 }
                 _ => unreachable!(),
             })
             .collect()
     }
 
-    fn document_references(&self, parsed_document: &ParsedDocument) -> Vec<(String, Range)> {
+    fn document_definitions_in_range(
+        &self,
+        parsed_document: &ParsedDocument,
+        own_path: &Path,
+        range: Range,
+    ) -> Vec<RangeBox<IriDefinition>> {
+        let node_by_id = node_by_id_map(&parsed_document.tree);
+        parsed_document
+            .query_range(&ALL_QUERIES.frame_query, range)
+            .iter()
+            .map(|m| match &m.captures[..] {
+                [frame_iri, frame] => {
+                    let iri = trim_full_iri(frame_iri.node.text.clone());
+                    let frame_node_id = frame_iri.node.id;
+                    let iri_parent_kind = node_by_id
+                        .get(&frame_node_id)
+                        .expect("Node id must be valid after query")
+                        .parent()
+                        .expect("All frame IRIs should have paretns")
+                        .kind();
+                    let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+
+                    RangeBox::new(
+                        IriDefinition {
+                            iri: frame_iri,
+                            location: Location {
+                                uri: Url::from_file_path(own_path)
+                                    .expect("Path should be valid file URL"),
+                                range: frame.node.range,
+                            },
+                            kind: FrameType::parse(iri_parent_kind),
+                        },
+                        frame.node.range,
+                    )
+                }
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn document_references(&self, parsed_document: &ParsedDocument) -> Vec<RangeBox<String>> {
         parsed_document
             .query(&ALL_QUERIES.iri_query_references)
             .iter()
@@ -1898,7 +2093,27 @@ impl QueriedDocument {
                     let iri = trim_full_iri(iri_capture.node.text.clone());
                     let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
-                    (iri, iri_capture.node.range)
+                    RangeBox::new(iri, iri_capture.node.range)
+                }
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn document_references_in_range(
+        &self,
+        parsed_document: &ParsedDocument,
+        range: Range,
+    ) -> Vec<RangeBox<String>> {
+        parsed_document
+            .query_range(&ALL_QUERIES.iri_query_references, range)
+            .iter()
+            .map(|m| match &m.captures[..] {
+                [iri_capture] => {
+                    let iri = trim_full_iri(iri_capture.node.text.clone());
+                    let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+
+                    RangeBox::new(iri, iri_capture.node.range)
                 }
                 _ => unreachable!(),
             })
@@ -1919,11 +2134,6 @@ impl QueriedDocument {
         );
 
         // Find iri locations
-        let mut iri_locations: HashMap<String, Vec<Range>> = HashMap::new();
-        for (iri, range) in &references {
-            iri_locations.entry(iri.clone()).or_default().push(*range);
-        }
-
         let all_frame_infos = timeit("all frame infos", || {
             QueriedDocument::document_all_frame_infos(definitions.iter(), annotations.into_iter())
         });
@@ -1935,14 +2145,14 @@ impl QueriedDocument {
 
         Stage2Document {
             all_frame_infos,
-            local_diagnostics: timeit("syntax errors", || syntax_errors(parsed_document)),
+            local_diagnostics: timeit("syntax errors", || parsed_document.syntax_errors()),
             directly_reachable_import_urls,
             directly_reachable_other_urls,
-            iri_locations,
-            references: references.into_iter().map(|(iri, _)| iri).collect(),
+            iri_locations: build_iri_locations(&references),
+            references,
             definitions: definitions
                 .into_iter()
-                .map(|IriDefinition { iri, .. }| iri)
+                .map(|rb| rb.map(|v| v.iri))
                 .collect(),
         }
     }
@@ -2041,6 +2251,17 @@ impl QueriedDocument {
 
         self.imports.dedup_by_key(|r| *r.range());
     }
+}
+
+fn build_iri_locations(references: &Vec<RangeBox<String>>) -> HashMap<String, Vec<Range>> {
+    let mut iri_locations: HashMap<String, Vec<Range>> = HashMap::new();
+    for rb in references {
+        iri_locations
+            .entry(rb.value().clone())
+            .or_default()
+            .push(*rb.range());
+    }
+    iri_locations
 }
 
 /// Returns the word before the [`character`] position in the [`line`]
@@ -2679,82 +2900,22 @@ pub fn node_text(node: &Node, rope: &Rope) -> String {
         .map_or(String::new(), |rs| rs.to_string())
 }
 
-/// Generate the diagnostics for a single node, walking recursively down to every child and every syntax error within
-fn syntax_errors(stage1: &ParsedDocument) -> Vec<Diagnostic> {
-    let mut cursor = stage1.tree.root_node().walk();
-    let mut diagnostics = Vec::<Diagnostic>::new();
-
-    loop {
-        let node = cursor.node();
-
-        if node.is_error() {
-            // log
-            let range: Range = cursor.node().range().into();
-
-            // root has no parents so use itself
-            let parent_kind = node.parent().unwrap_or(node).kind();
-
-            if let Some(static_node) = NODE_TYPES.get(parent_kind) {
-                let valid_children: String = Itertools::intersperse(
-                    static_node
-                        .children
-                        .types
-                        .iter()
-                        .map(|sn| node_type_to_string(&sn.type_)),
-                    ", ".to_string(),
-                )
-                .collect();
-
-                let parent = node_type_to_string(parent_kind);
-
-                diagnostics.push(Diagnostic {
-                    range,
-                    kind: DiagnosticKind::SyntaxError {
-                        valid_children,
-                        parent,
-                    },
-                });
-            }
-            // move along
-            while !cursor.goto_next_sibling() {
-                // move out
-                if !cursor.goto_parent() {
-                    // this node has no parent, it's the root
-                    return diagnostics;
-                }
-            }
-        } else if node.has_error() {
-            // move in
-            let has_child = cursor.goto_first_child(); // should always work
-
-            if !has_child {
-                while !cursor.goto_next_sibling() {
-                    // move out
-                    if !cursor.goto_parent() {
-                        // this node has no parent, it's the root
-                        return diagnostics;
-                    }
-                }
-            }
-        } else {
-            // move along
-            while !cursor.goto_next_sibling() {
-                // move out
-                if !cursor.goto_parent() {
-                    // this node has no parent, it's the root
-                    return diagnostics;
-                }
-            }
-        }
-    }
-}
-
 fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    let uses: &HashSet<Iri> = &doc.stage2.references;
+    let uses: &HashSet<Iri> = &doc
+        .stage2
+        .references
+        .iter()
+        .map(|rb| rb.value().clone())
+        .collect();
 
-    let mut defines: HashSet<String> = doc.stage2.definitions.clone();
+    let mut defines: HashSet<String> = doc
+        .stage2
+        .definitions
+        .iter()
+        .map(|rb| rb.value().clone())
+        .collect();
 
     let imports_recursive = timeit("semantic errors  reachable", || {
         // This takes the longes :<
@@ -2766,7 +2927,13 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
         if let Some(doc) = workspace.document_by_url(&url) {
             match doc {
                 DocumentReference::Internal(internal_document) => {
-                    defines.extend(internal_document.stage2.definitions.clone());
+                    defines.extend(
+                        internal_document
+                            .stage2
+                            .definitions
+                            .iter()
+                            .map(|rb| rb.value().clone()),
+                    );
                 }
                 DocumentReference::External(external_document) => {
                     defines.extend(external_document.definitions().clone());

@@ -117,8 +117,23 @@ impl From<Range> for std::ops::Range<tree_sitter_c2rust::Point> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash, Eq, PartialEq)]
 pub struct RangeBox<T>(T, Range);
+
+impl<T: PartialEq + Eq> PartialOrd for RangeBox<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T: Eq> Ord for RangeBox<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.1
+            .start
+            .cmp(&other.1.start)
+            .then(self.1.end.cmp(&other.1.end))
+    }
+}
 
 impl<T> RangeBox<T> {
     pub fn new(value: T, range: Range) -> Self {
@@ -135,6 +150,10 @@ impl<T> RangeBox<T> {
 
     pub fn unpack(self) -> (T, Range) {
         (self.0, self.1)
+    }
+
+    pub fn map<O>(self, f: impl FnOnce(T) -> O) -> RangeBox<O> {
+        RangeBox(f(self.0), self.1)
     }
 
     pub fn edit<'a>(&mut self, changes: impl Iterator<Item = &'a Change>) {
