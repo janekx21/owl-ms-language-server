@@ -612,7 +612,7 @@ pub struct Stage2Document {
     directly_reachable_import_urls: Vec<Url>,
     /// These include all other URL's that can be found in this document
     directly_reachable_other_urls: Vec<Url>,
-    iri_locations: HashMap<Iri, Vec<Range>>,
+    iri_locations: HashMap<Iri, Vec<RangeBox<()>>>,
 }
 
 impl Stage2Document {
@@ -624,52 +624,69 @@ impl Stage2Document {
         queried_document: &QueriedDocument,
         id: &DocumentId,
     ) {
-        for rb in &mut self.definitions {
-            rb.edit(changes.iter());
-        }
-
-        // Retain
-        self.definitions.retain(|range_box| {
-            for sc in post_change_ranges {
-                debug!(
-                    "Definition: Check {} overlap with {}",
-                    range_box.range(),
-                    sc
-                );
-                if range_box.range().overlaps(sc) {
-                    debug!("Yes");
-                    return false;
-                }
+        timeit("document.edit / analysis / def edit", || {
+            for rb in &mut self.definitions {
+                rb.edit(changes.iter());
             }
-            true
+        });
+        timeit("document.edit / analysis / def retain", || {
+            // Retain
+            self.definitions.retain(|range_box| {
+                for sc in post_change_ranges {
+                    if range_box.range().overlaps(sc) {
+                        return false;
+                    }
+                }
+                true
+            });
         });
 
         // Add
 
-        for di in post_change_ranges {
-            let document_definitions_in_range =
-                queried_document.document_definitions_in_range(parsed_document, &id.path, *di);
-            let additional_definitions = document_definitions_in_range
-                .iter()
-                .map(|r| RangeBox::new(r.value().iri.clone(), *r.range()));
+        timeit("document.edit / analysis / def add", || {
+            for di in post_change_ranges {
+                let document_definitions_in_range =
+                    queried_document.document_definitions_in_range(parsed_document, &id.path, *di);
 
-            self.definitions.extend(additional_definitions);
-        }
-        // Cleanup
-        self.definitions.sort();
-        self.definitions.dedup_by_key(|rb| *rb.range());
+                let additional_definitions = document_definitions_in_range
+                    .iter()
+                    .map(|r| RangeBox::new(r.value().iri.clone(), *r.range()));
+
+                self.definitions.extend(additional_definitions);
+            }
+        });
+        timeit("document.edit / analysis / def cleanup", || {
+            // Cleanup
+            self.definitions.sort();
+            self.definitions.dedup_by_key(|rb| *rb.range());
+        });
 
         // References
+        // TODO Not rebuilding the iri location index is no large speedup
+
+        // TODO remove | took 3ms
+        // timeit("document.edit / analysis / iri locations rebuild", || {
+        //     self.iri_locations = build_iri_locations(&self.references);
+        // });
 
         for rb in &mut self.references {
             rb.edit(changes.iter());
         }
+        // Edit iri location index first
+        for rbs in self.iri_locations.values_mut() {
+            for rb in rbs {
+                rb.edit(changes.iter());
+            }
+        }
+
         // Retain
         self.references.retain(|range_box| {
             for sc in post_change_ranges {
-                debug!("Reference: Check {} overlap with {}", range_box.range(), sc);
                 if range_box.range().overlaps(sc) {
-                    debug!("Yes");
+                    if let Some(values) = self.iri_locations.get_mut(range_box.value()) {
+                        // Remove all indexed iri locations
+                        values.retain(|rb| rb.range() != range_box.range());
+                    }
                     return false;
                 }
             }
@@ -678,6 +695,14 @@ impl Stage2Document {
         for di in post_change_ranges {
             let additional_values =
                 queried_document.document_references_in_range(parsed_document, *di);
+
+            // Readd the index values
+            for rb in &additional_values {
+                let ranges = self.iri_locations.entry(rb.value().into()).or_default();
+                ranges.push(RangeBox::new((), *rb.range()));
+                ranges.sort(); // TODO maybe remove all sorts :) (I dont think we need them actualy)
+                ranges.dedup();
+            }
 
             self.references.extend(additional_values);
         }
@@ -695,21 +720,22 @@ impl Stage2Document {
         // Solution 3: TODO
 
         // TODO --------------------------
-        let all_frame_infos = timeit("all frame infos", || {
-            QueriedDocument::document_all_frame_infos(
-                queried_document
-                    .document_definitions(parsed_document, &id.path)
-                    .iter(),
-                queried_document
-                    .document_annotations(parsed_document)
-                    .into_iter(),
-            )
-        });
+        timeit("document.edit / analysis (TODO)", || {
+            let all_frame_infos = timeit("all frame infos", || {
+                QueriedDocument::document_all_frame_infos(
+                    queried_document
+                        .document_definitions(parsed_document, &id.path)
+                        .iter(),
+                    queried_document
+                        .document_annotations(parsed_document)
+                        .into_iter(),
+                )
+            });
 
-        // self.references = queried_document.document_references(parsed_document);
-        self.local_diagnostics = parsed_document.syntax_errors();
-        self.all_frame_infos = all_frame_infos;
-        self.iri_locations = build_iri_locations(&self.references);
+            // self.references = queried_document.document_references(parsed_document);
+            self.local_diagnostics = parsed_document.syntax_errors();
+            self.all_frame_infos = all_frame_infos;
+        });
     }
 }
 
@@ -1015,10 +1041,11 @@ impl InternalDocument {
         };
 
         // This is a combination of syntax and text changes
-        let post_change_ranges = post_change_ranges(&changes, &parsed_document, &old_tree);
+        let mut post_change_ranges: &[Range] =
+            &post_change_ranges(&changes, &parsed_document, &old_tree);
 
-        timeit("document.edit / queries", || {
-            queried_document.update(&changes, &post_change_ranges, &parsed_document);
+        let dirty_prefix = timeit("document.edit / queries", || {
+            queried_document.update(&changes, post_change_ranges, &parsed_document)
         });
 
         // TODO do I need this?
@@ -1038,11 +1065,20 @@ impl InternalDocument {
         // let stage2 = timeit("document.edit / analyze", || {
         //     queried_document.analyze(&parsed_document, &id)
         // });
+        //
+
+        // Do a whole new analysis when the prefixes change!
+        if dirty_prefix {
+            info!("document.edit Dirty prefix. New post change range is the max range.");
+            post_change_ranges = &[Range::FULL_RANGE];
+        }
+
+        // debug!("document.edit Changes {changes:?}, Post change ranges {post_change_ranges:?}");
 
         timeit("document.edit / analyze", || {
             stage2.update(
                 &changes,
-                &post_change_ranges,
+                post_change_ranges,
                 &parsed_document,
                 &queried_document,
                 &id,
@@ -1672,7 +1708,7 @@ impl ParsedDocument {
 
 /// This acts the same way as ``node_by_id`` but for all nodes
 pub fn node_by_id_map(tree: &Tree) -> HashMap<usize, Node<'_>> {
-    let mut res = HashMap::new();
+    let mut res = HashMap::with_capacity(4048);
     let mut w = tree.walk();
     'outer: loop {
         res.insert(w.node().id(), w.node());
@@ -1855,6 +1891,7 @@ fn query_helper(
                         text: node_text(&c.node, &stage1.rope).to_string(),
                         range: c.node.range().into(),
                         kind: c.node.kind().into(),
+                        parent_kind: c.node.parent().map(|p| p.kind().to_string()),
                     },
                     index: c.index,
                 })
@@ -2050,20 +2087,20 @@ impl QueriedDocument {
         own_path: &Path,
         range: Range,
     ) -> Vec<RangeBox<IriDefinition>> {
-        let node_by_id = node_by_id_map(&parsed_document.tree);
+        // TODO remove
+        // let node_by_id = node_by_id_map(&parsed_document.tree);
         parsed_document
             .query_range(&ALL_QUERIES.frame_query, range)
             .iter()
             .map(|m| match &m.captures[..] {
                 [frame_iri, frame] => {
                     let iri = trim_full_iri(frame_iri.node.text.clone());
-                    let frame_node_id = frame_iri.node.id;
-                    let iri_parent_kind = node_by_id
-                        .get(&frame_node_id)
-                        .expect("Node id must be valid after query")
-                        .parent()
-                        .expect("All frame IRIs should have paretns")
-                        .kind();
+                    // let frame_node_id = frame_iri.node.id;
+                    let iri_parent_kind = frame_iri
+                        .node
+                        .parent_kind
+                        .as_ref()
+                        .expect("All frame IRIs should have paretns");
                     let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
                     RangeBox::new(
@@ -2162,7 +2199,7 @@ impl QueriedDocument {
         changes: &[Change],
         post_change_ranges: &[Range],
         parsed_document: &ParsedDocument,
-    ) {
+    ) -> bool {
         // Update ontology id
         let mut dirty = false;
         if let Some(o_id) = &mut self.ontology_id {
@@ -2241,8 +2278,13 @@ impl QueriedDocument {
             self.imports.extend(additional_imports);
         }
 
+        let mut dirty_prefix = false;
         for di in post_change_ranges {
             let additional_prefixes = parsed_document.prefixes_in_range(*di);
+
+            if !additional_prefixes.is_empty() {
+                dirty_prefix = true;
+            }
 
             self.prefixes.extend(additional_prefixes);
         }
@@ -2250,16 +2292,19 @@ impl QueriedDocument {
         // Cleanup
 
         self.imports.dedup_by_key(|r| *r.range());
+
+        dirty_prefix
     }
 }
 
-fn build_iri_locations(references: &Vec<RangeBox<String>>) -> HashMap<String, Vec<Range>> {
-    let mut iri_locations: HashMap<String, Vec<Range>> = HashMap::new();
+fn build_iri_locations(references: &Vec<RangeBox<String>>) -> HashMap<String, Vec<RangeBox<()>>> {
+    let mut iri_locations: HashMap<String, Vec<RangeBox<()>>> =
+        HashMap::with_capacity(references.len());
     for rb in references {
         iri_locations
             .entry(rb.value().clone())
             .or_default()
-            .push(*rb.range());
+            .push(RangeBox::new((), *rb.range()));
     }
     iri_locations
 }
@@ -2716,6 +2761,7 @@ pub struct UnwrappedNode {
     /// This information can be outdated
     pub range: Range,
     pub kind: String,
+    pub parent_kind: Option<String>,
 }
 
 /// This represents information about a frame.
@@ -2973,7 +3019,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
         if let Some(vec) = doc.stage2.iri_locations.get(diff) {
             for ele in vec {
                 diagnostics.push(Diagnostic {
-                    range: *ele,
+                    range: *ele.range(),
                     kind: DiagnosticKind::MissingIri(diff.clone()),
                 });
             }

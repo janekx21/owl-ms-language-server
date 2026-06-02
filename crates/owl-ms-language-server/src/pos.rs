@@ -17,6 +17,10 @@ impl Position {
         line: 0,
         character: 0,
     };
+    pub const MAX: Self = Self {
+        line: u32::MAX,
+        character: u32::MAX,
+    };
 
     pub fn new(line: u32, character: u32) -> Self {
         Self { line, character }

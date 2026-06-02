@@ -19,7 +19,9 @@ impl Range {
         end: Position::ZERO,
     };
 
-    pub fn new(start: Position, end: Position) -> Self {
+    pub const FULL_RANGE: Range = Range::new(Position::ZERO, Position::MAX);
+
+    pub const fn new(start: Position, end: Position) -> Self {
         Self { start, end }
     }
 

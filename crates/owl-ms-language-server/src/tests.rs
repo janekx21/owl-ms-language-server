@@ -4480,7 +4480,10 @@ async fn backend_did_change_with_large_syntax_change_should_update_prefixes() {
 /////////////////////////
 
 mod fuzz {
-    use crate::{workspace::FrameInfo, Backend};
+    use crate::{
+        workspace::{FrameInfo, QueriedDocument},
+        Backend,
+    };
 
     use super::{
         arrange_backend, lsp_types, setup, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
@@ -4496,6 +4499,7 @@ mod fuzz {
     const ONTOLOGY: &str = indoc!(
         r#"
         Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Prefix: oth: <http://invalis/other/>
         Ontology: <http://example.org/fuzz-test>
             Import: <http://invalid/ontology>
         
@@ -4505,6 +4509,14 @@ mod fuzz {
             Class: Bar
                 Annotations: rdfs:label "Bar Label"
 
+            Class: other:Bar
+                Annotations: rdfs:label "Other Bar Label"
+
+            Class: <http://example.org/full/bar>
+                Annotations: rdfs:label "Full Bar Label"
+
+            Datatype: D
+                Annotations: rdfs:label "D"
 
             SomeSyntaxError
         "#
@@ -4565,13 +4577,18 @@ mod fuzz {
             .join("\n");
 
         let diagnostics = doc.diagnostics(ws);
-        let prefixes = doc.prefixes();
-        let qd = &doc.queried_document;
+        let prefixes_ = doc.prefixes().into_iter().sorted().collect_vec();
+        let QueriedDocument {
+            ontology_id,
+            prefixes,
+            imports,
+        } = &doc.queried_document;
+        let prefixes = prefixes.iter().sorted().collect_vec();
 
         let definitions = &doc.stage2.definitions.iter().sorted_by_key(|rb| rb.value());
         let references = &doc.stage2.references.iter().sorted_by_key(|rb| rb.value());
 
-        format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes:#?}\n\n# Queried Document\n{qd:#?}\n\n# Definitions\n{definitions:#?}\n\n# References\n{references:#?}")
+        format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes_:#?}\n\n# Queried Document\n{ontology_id:#?}{prefixes:#?}{imports:#?}\n\n# Definitions\n{definitions:#?}\n\n# References\n{references:#?}")
     }
 
     proptest! {
@@ -4671,9 +4688,9 @@ mod fuzz {
 
 
             print!("{}", pretty_assertions::StrComparison::new(&initial_state, &final_state));
-            prop_assert_eq!(
-                &initial_state,
-                &final_state,
+            print!("{}", initial_state == final_state);
+            prop_assert!(
+                initial_state == final_state,
                 "state mismatch after insert+undo of {:?} at ({}, {})",
                 insert_text,
                 line,
@@ -4809,9 +4826,9 @@ mod fuzz {
 
             print!("{}", pretty_assertions::StrComparison::new(&initial_state, &final_state));
 
-            prop_assert_eq!(
-                &initial_state,
-                &final_state,
+            print!("{}", initial_state == final_state);
+            prop_assert!(
+                initial_state== final_state,
                 "state mismatch after insert+reopen+undo of {:?} at ({}, {})",
                 insert_text,
                 line,
