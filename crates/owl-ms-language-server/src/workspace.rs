@@ -663,7 +663,7 @@ impl Stage2Document {
         // References
 
         // TODO Not rebuilding the iri location index is no large speedup
-        // TODO remove | took 3ms
+        // TODO remove | took 3ms/16k
         // timeit("document.edit / analysis / iri locations rebuild", || {
         //     self.iri_locations = build_iri_locations(&self.references);
         // });
@@ -725,28 +725,36 @@ impl Stage2Document {
 
         // This is pritty slow?
         timeit("document.edit / analyse / annotations incremental", || {
-            for rb in &mut self.annotations {
-                rb.edit(changes.iter());
-            }
-
-            self.annotations.retain(|range_box| {
-                for sc in post_change_ranges {
-                    if range_box.range().overlaps(sc) {
-                        // debug!("Removing Annotation {range_box:#?}");
-                        return false;
-                    }
+            timeit("document.edit / analyse / annotations edit", || {
+                for rb in &mut self.annotations {
+                    rb.edit(changes.iter());
                 }
-                true
             });
 
-            for range in post_change_ranges {
-                let annotations =
-                    queried_document.document_annotations_in_range(parsed_document, *range);
-                // debug!("Adding Annotations {annotations:#?}");
-                self.annotations.extend(annotations);
-            }
-            self.annotations.sort();
-            self.annotations.dedup();
+            timeit("document.edit / analyse / annotations retain", || {
+                self.annotations.retain(|range_box| {
+                    for sc in post_change_ranges {
+                        if range_box.range().overlaps(sc) {
+                            // debug!("Removing Annotation {range_box:#?}");
+                            return false;
+                        }
+                    }
+                    true
+                });
+            });
+
+            timeit("document.edit / analyse / annotations extend", || {
+                for range in post_change_ranges {
+                    let annotations =
+                        queried_document.document_annotations_in_range(parsed_document, *range);
+                    // debug!("Adding Annotations {annotations:#?}");
+                    self.annotations.extend(annotations);
+                }
+            });
+            timeit("document.edit / analyse / annotations cleanup", || {
+                self.annotations.sort();
+                self.annotations.dedup();
+            });
         });
 
         // TODO remove
@@ -756,7 +764,7 @@ impl Stage2Document {
 
         // TODO --------------------------
         // This is pritty fast now.
-        // 10ms
+        // 10ms/16k
         timeit("document.edit / analysis (TODO)", || {
             let all_frame_infos = timeit("all frame infos", || {
                 QueriedDocument::document_all_frame_infos(
@@ -1572,7 +1580,8 @@ impl ParsedDocument {
         let rope_provider = RopeProvider::new(&new_rope);
         let new_tree = {
             let mut parser_guard = lock_global_parser();
-            timeit("parsing", || {
+            // This takes a long time 190ms/16k
+            timeit("document.edit / parsing", || {
                 parser_guard
                     .parse_with_options(
                         &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
@@ -2270,9 +2279,7 @@ impl QueriedDocument {
             o_id.edit(changes.iter());
 
             for sc in post_change_ranges {
-                debug!("Ontology id Check {} overlap with {}", o_id.range(), sc);
                 if o_id.range().overlaps(sc) {
-                    debug!("Yes");
                     dirty = true;
                 }
             }
@@ -2294,22 +2301,16 @@ impl QueriedDocument {
             prefix_value.edit(changes.iter());
         }
 
-        // TODO I think I dont need the removed items, they overlap with the
+        // I think I dont need the removed items, they overlap with the
         // post_change_ranges, so I can just use the ranges.
-        let dirty_imports = self
-            .imports
-            .extract_if(.., |import| {
-                for sc in post_change_ranges {
-                    debug!("Import Check {} overlap with {}", import.range(), sc);
-                    if import.range().overlaps(sc) {
-                        debug!("Yes");
-                        // I dont know!
-                        return true;
-                    }
+        self.imports.retain(|import| {
+            for sc in post_change_ranges {
+                if import.range().overlaps(sc) {
+                    return false;
                 }
-                false
-            })
-            .collect_vec();
+            }
+            true
+        });
 
         // Retain
 
@@ -2325,7 +2326,7 @@ impl QueriedDocument {
         });
 
         // TODO handle dirty imports
-        debug!("Dirty imports: {dirty_imports:#?}");
+        // debug!("Dirty imports: {dirty_imports:#?}");
 
         // TODO I dont thing we need this, because they are all overlapping with the post change ranges right?
         // for di in dirty_imports {
