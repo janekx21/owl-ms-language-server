@@ -1274,3 +1274,14 @@ impl Backend {
             .expect("position should be set")
     }
 }
+
+pub trait USizeextra
+where
+    Self: Sized + TryInto<u32>,
+{
+    fn to_u32(self) -> u32 {
+        TryInto::<u32>::try_into(self).unwrap_or(u32::MAX)
+    }
+}
+
+impl USizeextra for usize {}

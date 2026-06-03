@@ -2,6 +2,7 @@ use criterion::{
     criterion_group, criterion_main, AxisScale, BatchSize, BenchmarkId, Criterion,
     PlotConfiguration, Throughput,
 };
+use owl_ms_language_server::USizeextra;
 use owl_ms_language_server::{clear_caches, web::HttpClient, Backend};
 #[cfg(unix)]
 use pprof::criterion::{Output, PProfProfiler};
@@ -184,7 +185,7 @@ fn generate_ontology(target_lines: usize) -> String {
 fn generate_object_property(
     rng: &mut SeededRng,
     lines: &mut Vec<String>,
-    classes: &Vec<String>,
+    classes: &[String],
     object_properties: &mut Vec<String>,
     characteristics: [&'static str; 7],
     entity_counter: i32,
@@ -226,7 +227,7 @@ fn generate_object_property(
 fn generate_data_property(
     rng: &mut SeededRng,
     lines: &mut Vec<String>,
-    classes: &Vec<String>,
+    classes: &[String],
     data_properties: &mut Vec<String>,
     data_types: [&'static str; 5],
     entity_counter: i32,
@@ -259,9 +260,9 @@ fn generate_data_property(
 fn generate_individual(
     rng: &mut SeededRng,
     lines: &mut Vec<String>,
-    classes: &Vec<String>,
-    object_properties: &Vec<String>,
-    data_properties: &Vec<String>,
+    classes: &[String],
+    object_properties: &[String],
+    data_properties: &[String],
     individuals: &mut Vec<String>,
     entity_counter: i32,
 ) {
@@ -415,7 +416,7 @@ fn setup_with_size(size: usize) -> (Runtime, LspService<Backend>, Url, TempDir, 
     let ontology = generate_ontology(size);
     let line_count = count_lines(&ontology);
     let (service, url, dir) = rt.block_on(setup_backend_with_ontology(ontology));
-    let target_line = (line_count / 4).max(7) as u32;
+    let target_line = (line_count / 4).max(7).to_u32();
     (rt, service, url, dir, target_line)
 }
 
@@ -446,7 +447,7 @@ fn bench_hover(c: &mut Criterion) {
         let ontology = generate_hover_ontology(size);
         let setup = setup_with_onto(ontology);
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
                 let (rt, service, url, dir, line_count) = &setup;
                 let result = rt.block_on(async {
@@ -456,7 +457,7 @@ fn bench_hover(c: &mut Criterion) {
                             .hover(HoverParams {
                                 text_document_position_params: TextDocumentPositionParams {
                                     text_document: TextDocumentIdentifier { uri: url.clone() },
-                                    position: Position::new(*line_count as u32 - 1, 18),
+                                    position: Position::new((*line_count - 1).to_u32(), 18),
                                 },
                                 work_done_progress_params: WorkDoneProgressParams {
                                     work_done_token: None,
@@ -492,7 +493,7 @@ fn bench_goto_definition(c: &mut Criterion) {
         let ontology = generate_goto_definition_ontology(size);
         let setup = setup_with_onto(ontology);
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
                 let (rt, service, url, dir, line_count) = &setup;
                 let result = rt.block_on(async {
@@ -502,7 +503,7 @@ fn bench_goto_definition(c: &mut Criterion) {
                             .goto_definition(GotoDefinitionParams {
                                 text_document_position_params: TextDocumentPositionParams {
                                     text_document: TextDocumentIdentifier { uri: url.clone() },
-                                    position: Position::new(*line_count as u32 - 1, 18),
+                                    position: Position::new((*line_count - 1).to_u32(), 18),
                                 },
                                 work_done_progress_params: WorkDoneProgressParams {
                                     work_done_token: None,
@@ -541,7 +542,7 @@ fn bench_completion(c: &mut Criterion) {
         let ontology = generate_completion_ontology(size);
         let setup = &setup_with_onto(ontology);
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
                 let (rt, service, url, dir, line_count) = setup;
                 let result = rt.block_on(async {
@@ -551,7 +552,7 @@ fn bench_completion(c: &mut Criterion) {
                             .completion(CompletionParams {
                                 text_document_position: TextDocumentPositionParams {
                                     text_document: TextDocumentIdentifier { uri: url.clone() },
-                                    position: Position::new(*line_count as u32 - 1, 16),
+                                    position: Position::new((*line_count - 1).to_u32(), 16),
                                 },
                                 work_done_progress_params: WorkDoneProgressParams {
                                     work_done_token: None,
@@ -590,7 +591,7 @@ fn bench_completion_keywords(c: &mut Criterion) {
         let setup = &setup_with_onto(onto);
         group.measurement_time(Duration::from_millis(500));
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
                 let (rt, service, url, dir, line_count) = &setup;
                 let result = rt.block_on(async {
@@ -600,7 +601,7 @@ fn bench_completion_keywords(c: &mut Criterion) {
                             .completion(CompletionParams {
                                 text_document_position: TextDocumentPositionParams {
                                     text_document: TextDocumentIdentifier { uri: url.clone() },
-                                    position: Position::new(*line_count as u32 - 1, 6),
+                                    position: Position::new((*line_count - 1).to_u32(), 6),
                                 },
                                 work_done_progress_params: WorkDoneProgressParams {
                                     work_done_token: None,
@@ -639,7 +640,7 @@ fn bench_references(c: &mut Criterion) {
         let ontology = generate_reference_ontology(size);
         let setup = setup_with_onto(ontology);
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
                 let (rt, service, url, dir, line_count) = &setup;
                 let result = rt.block_on(async {
@@ -649,7 +650,7 @@ fn bench_references(c: &mut Criterion) {
                             .references(ReferenceParams {
                                 text_document_position: TextDocumentPositionParams {
                                     text_document: TextDocumentIdentifier { uri: url.clone() },
-                                    position: Position::new(*line_count as u32 - 1, 18),
+                                    position: Position::new((*line_count - 1).to_u32(), 18),
                                 },
                                 work_done_progress_params: WorkDoneProgressParams {
                                     work_done_token: None,
@@ -683,7 +684,7 @@ fn bench_prepare_rename(c: &mut Criterion) {
         let ontology = generate_rename_ontology(size);
         let setup = setup_with_onto(ontology);
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
                 let (rt, service, url, dir, line_count) = &setup;
                 let result = rt.block_on(async {
@@ -692,7 +693,7 @@ fn bench_prepare_rename(c: &mut Criterion) {
                             .inner()
                             .prepare_rename(TextDocumentPositionParams {
                                 text_document: TextDocumentIdentifier { uri: url.clone() },
-                                position: Position::new(*line_count as u32 - 1, 18),
+                                position: Position::new((*line_count - 1).to_u32(), 18),
                             })
                             .await,
                     )
@@ -724,7 +725,7 @@ fn bench_rename(c: &mut Criterion) {
         let ontology = generate_rename_ontology(size);
         let setup = setup_with_onto(ontology);
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
                 let (rt, service, url, dir, line_count) = &setup;
                 let result = rt.block_on(async {
@@ -734,7 +735,7 @@ fn bench_rename(c: &mut Criterion) {
                             .rename(RenameParams {
                                 text_document_position: TextDocumentPositionParams {
                                     text_document: TextDocumentIdentifier { uri: url.clone() },
-                                    position: Position::new(*line_count as u32 - 1, 18),
+                                    position: Position::new((*line_count - 1).to_u32(), 18),
                                 },
                                 new_name: "RenamedEntity".to_string(),
                                 work_done_progress_params: WorkDoneProgressParams {
@@ -768,7 +769,7 @@ fn bench_document_symbol(c: &mut Criterion) {
         group.measurement_time(Duration::from_millis(500));
         let setup = setup_with_size(size);
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
                 let (rt, service, url, dir, _) = &setup;
                 let result = rt.block_on(async {
@@ -804,7 +805,7 @@ fn bench_formatting(c: &mut Criterion) {
         group.warm_up_time(Duration::from_millis(100));
         group.measurement_time(Duration::from_millis(500));
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter_batched(
                 || {
                     let rt = Runtime::new().unwrap();
@@ -850,7 +851,7 @@ fn bench_semantic_tokens_full(c: &mut Criterion) {
         group.measurement_time(Duration::from_millis(500));
         let setup = setup_with_size(size);
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _size| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
                 let (rt, service, url, dir, _) = &setup;
                 let result = rt.block_on(async {
@@ -887,7 +888,7 @@ fn bench_semantic_tokens_range(c: &mut Criterion) {
         group.measurement_time(Duration::from_millis(500));
         let setup = setup_with_size(size);
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
                 let (rt, service, url, dir, _) = &setup;
                 let result = rt.block_on(async {
@@ -928,11 +929,11 @@ fn bench_code_action(c: &mut Criterion) {
         // group.measurement_time(Duration::from_millis(500));
         let setup = setup_with_size(size);
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
-                let (rt, service, url, dir, line_count) = &setup;
+                let (rt, service, url, _, line_count) = &setup;
 
-                let result = rt.block_on(async {
+                let _result = rt.block_on(async {
                     black_box(
                         service
                             .inner()
@@ -974,9 +975,9 @@ fn bench_inlay_hint(c: &mut Criterion) {
         // group.measurement_time(Duration::from_millis(500));
         let setup = setup_with_size(size);
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
-                let (rt, service, url, dir, line_count) = &setup;
+                let (rt, service, url, dir, _) = &setup;
                 let result = rt.block_on(async {
                     black_box(
                         service
@@ -1011,7 +1012,7 @@ fn bench_symbol(c: &mut Criterion) {
         group.measurement_time(Duration::from_millis(500));
         let setup = setup_with_size(size);
 
-        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
                 let (rt, service, url, dir, _) = &setup;
                 let result = rt.block_on(async {

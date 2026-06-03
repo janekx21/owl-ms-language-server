@@ -85,12 +85,6 @@ pub fn lock_global_build_arc() -> MutexGuard<'static, Build<ArcStr>> {
 /// Clears all global caches used by the workspace.
 /// This is useful for benchmarks to prevent memory accumulation across iterations.
 pub fn clear_caches() {
-    // TODO can I remove this?
-    // {
-    //     let mut cache = QUERY_HELPER.write();
-    //     cache.cache_clear();
-    // }
-
     {
         let mut cache = GET_FRAME_INFO_HELPER_EX.write();
         cache.cache_clear();
@@ -108,7 +102,6 @@ pub struct Workspace {
     external_documents: HashMap<Url, ExternalDocument>,
     folder: WorkspaceFolder,
     catalogs: Vec<Catalog>,
-    // TODO remove pub
     pub index_handles: Vec<JoinHandle<()>>,
 }
 
@@ -662,12 +655,6 @@ impl Stage2Document {
 
         // References
 
-        // TODO Not rebuilding the iri location index is no large speedup
-        // TODO remove | took 3ms/16k
-        // timeit("document.edit / analysis / iri locations rebuild", || {
-        //     self.iri_locations = build_iri_locations(&self.references);
-        // });
-
         for rb in &mut self.references {
             rb.edit(changes.iter());
         }
@@ -699,7 +686,9 @@ impl Stage2Document {
             for rb in &additional_values {
                 let ranges = self.iri_locations.entry(rb.value().into()).or_default();
                 ranges.push(RangeBox::new((), *rb.range()));
-                ranges.sort(); // TODO maybe remove all sorts :) (I dont think we need them actualy)
+                // TODO maybe remove all sorts :) (I dont think we need them actualy)
+                // Lets keep them for now
+                ranges.sort();
                 ranges.dedup();
             }
 
@@ -757,15 +746,10 @@ impl Stage2Document {
             });
         });
 
-        // TODO remove
-        // let annotations = timeit("document.edit / analyse / annotations rebuild", || {
-        //     queried_document.document_annotations(parsed_document)
-        // });
-
-        // TODO --------------------------
+        // Not incremental part --------------------------
         // This is pritty fast now.
         // 10ms/16k
-        timeit("document.edit / analysis (TODO)", || {
+        timeit("document.edit / analysis (not incremental part)", || {
             let all_frame_infos = timeit("all frame infos", || {
                 QueriedDocument::document_all_frame_infos(
                     self.definitions.iter(),
@@ -823,25 +807,6 @@ impl Diagnostic {
             data: None,
         })
     }
-
-    // TODO parse from diagnostic back
-    // pub fn from_lsp_diagnostic(
-    //     value: lsp_types::Diagnostic,
-    //     rope: &Rope,
-    //     encoding: &PositionEncodingKind,
-    // ) -> Self {
-    //     // Ok(lsp_types::Diagnostic {
-    //     //     range: self.range.into_lsp(rope, encoding)?,
-    //     //     severity: Some(DiagnosticSeverity::ERROR),
-    //     //     code: None,
-    //     //     code_description: None,
-    //     //     source: Some("owl language server".to_string()),
-    //     //     message: self.label(),
-    //     //     related_information: None,
-    //     //     tags: None,
-    //     //     data: None,
-    //     // })
-    // }
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -1089,25 +1054,6 @@ impl InternalDocument {
             queried_document.update(&changes, post_change_ranges, &parsed_document)
         });
 
-        // TODO do I need this?
-        // Syntax changes only
-        // Note that these ranges are in the post edit form
-        // for range in syntax_change_ranges {
-        //     let range: Range = range.into();
-        //     debug!("Updating changed syntax range (post edit) {range}");
-        //     queried_document.update(range, &parsed_document);
-        // }
-
-        // let queried_document: QueriedDocument = timeit("document.edit / queries", || {
-        //     timeit("document.edit / querie", || parsed_document.into_queried())
-        // });
-
-        // TODO incremental update of this analyze step
-        // let stage2 = timeit("document.edit / analyze", || {
-        //     queried_document.analyze(&parsed_document, &id)
-        // });
-        //
-
         // The problem is that the references and definitions (and other stuff) depends on
         // prefixes. So the change in a prefix can change a lot of references that are not
         // located at the prefix.
@@ -1122,8 +1068,6 @@ impl InternalDocument {
             post_change_ranges = &[Range::FULL_RANGE];
         }
 
-        // debug!("document.edit Changes {changes:?}, Post change ranges {post_change_ranges:?}");
-
         timeit("document.edit / analyze", || {
             stage2.update(
                 &changes,
@@ -1133,8 +1077,6 @@ impl InternalDocument {
                 &id,
             );
         });
-
-        // TODO I removed all analysis
 
         let doc = InternalDocument {
             id,
@@ -1756,26 +1698,6 @@ impl ParsedDocument {
     }
 }
 
-// TODO remove
-// /// This acts the same way as ``node_by_id`` but for all nodes
-// pub fn node_by_id_map(tree: &Tree) -> HashMap<usize, Node<'_>> {
-//     let mut res = HashMap::with_capacity(4048);
-//     let mut w = tree.walk();
-//     'outer: loop {
-//         res.insert(w.node().id(), w.node());
-
-//         // In order traversal
-//         if !w.goto_first_child() {
-//             while !w.goto_next_sibling() {
-//                 if !w.goto_parent() {
-//                     break 'outer;
-//                 }
-//             }
-//         }
-//     }
-//     res
-// }
-
 fn node_by_id(parsed_document: &ParsedDocument, id: usize) -> Option<Node<'_>> {
     let mut w = parsed_document.tree.walk();
     loop {
@@ -1902,20 +1824,6 @@ impl ParsedDocument {
     }
 }
 
-// TODO do I need this cache?
-// #[cached(
-//     key = "u64",
-//     convert = r#"{
-//         let mut hasher = DefaultHasher::new();
-//         stage1.hash(&mut hasher);
-//         range.hash(&mut hasher);
-//         query.capture_names().hash(&mut hasher);
-//         Hash::hash(&query.start_byte_for_pattern(0), &mut hasher);
-//         Hash::hash(&query.end_byte_for_pattern(0), &mut hasher);
-//         hasher.finish()
-//      } "#,
-//     size = 100
-// )]
 fn query_helper(
     stage1: &ParsedDocument,
     query: &Query,
@@ -2162,8 +2070,6 @@ impl QueriedDocument {
         parsed_document: &ParsedDocument,
         range: Range,
     ) -> Vec<RangeBox<IriDefinition>> {
-        // TODO remove
-        // let node_by_id = node_by_id_map(&parsed_document.tree);
         parsed_document
             .query_range(&ALL_QUERIES.frame_query, range)
             .iter()
@@ -2324,16 +2230,6 @@ impl QueriedDocument {
             }
             true
         });
-
-        // TODO handle dirty imports
-        // debug!("Dirty imports: {dirty_imports:#?}");
-
-        // TODO I dont thing we need this, because they are all overlapping with the post change ranges right?
-        // for di in dirty_imports {
-        //     let additional_imports = parsed_document.imports_in_range(*di.range());
-
-        //     self.imports.extend(additional_imports);
-        // }
 
         // Add
 

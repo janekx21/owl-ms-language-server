@@ -1,8 +1,7 @@
 use crate::error::Result;
 use crate::pos::Position;
-use itertools::Itertools;
+use crate::USizeextra;
 use ropey::Rope;
-use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::hash::Hash;
 
@@ -221,11 +220,11 @@ impl Change {
         if parts.len() == 1 {
             Position::new(
                 self.range.start.line(),
-                self.range.start.character_byte() + self.text.len() as u32,
+                self.range.start.character_byte() + self.text.len().to_u32(),
             )
         } else {
-            let end_line = self.range.start.line() + (parts.len() - 1) as u32;
-            let end_col = parts.last().unwrap().len() as u32;
+            let end_line = self.range.start.line() + (parts.len() - 1).to_u32();
+            let end_col = parts.last().unwrap().len().to_u32();
             Position::new(end_line, end_col)
         }
     }
@@ -235,135 +234,22 @@ impl Change {
     }
 }
 
-pub fn post_range_to_pre_range(post_range: Range, change: &Change) -> Range {
-    let change_start = change.range.start;
-    let change_post_end = post_end_of_change(change);
-    let change_pre_end = change.range.end;
-
-    Range::new(
-        translate_pos_post_to_pre(
-            post_range.start,
-            change_start,
-            change_post_end,
-            change_pre_end,
-        ),
-        translate_pos_post_to_pre(
-            post_range.end,
-            change_start,
-            change_post_end,
-            change_pre_end,
-        ),
-    )
-}
-
 fn post_end_of_change(change: &Change) -> Position {
     let lines: Vec<&str> = change.text.split('\n').collect();
-    let added_lines = (lines.len() - 1) as u32;
+    let added_lines = (lines.len() - 1).to_u32();
 
     if added_lines == 0 {
         // insertion on same line
         Position::new(
             change.range.start.line(),
-            change.range.start.character_byte() + change.text.len() as u32,
+            change.range.start.character_byte() + change.text.len().to_u32(),
         )
     } else {
         Position::new(
             change.range.start.line() + added_lines,
-            lines.last().map(|l| l.len()).unwrap_or(0) as u32,
+            lines.last().map_or(0, |l| l.len()).to_u32(),
         )
     }
-}
-
-fn translate_pos_post_to_pre(
-    pos: Position,
-    change_start: Position,
-    change_post_end: Position,
-    change_pre_end: Position,
-) -> Position {
-    if pos < change_start {
-        // before the change: unchanged
-        pos
-    } else if pos < change_post_end {
-        // strictly inside the inserted text: clamp to start of change
-        change_start
-    } else {
-        // at or after post_end: shift back
-        if pos.line() == change_post_end.line() {
-            // same line as post_end: adjust character offset too
-            let new_line = pos.line() - change_post_end.line() + change_pre_end.line();
-            let new_char = pos.character_byte() - change_post_end.character_byte()
-                + change_pre_end.character_byte();
-            Position::new(new_line, new_char)
-        } else {
-            // different line: only adjust line number
-            let new_line = pos.line() - change_post_end.line() + change_pre_end.line();
-            Position::new(new_line, pos.character_byte())
-        }
-    }
-}
-
-// TODO this is an idea, this has to be deleted if unused
-// TODO and also when you keep it, make it iterative!
-
-struct RangeIndex<V> {
-    // -------------------------
-    // | 0 | 1 | 2 | 3 | 4 | 5 |
-    // -------------------------
-    // | A     |   | B         |
-    // -------------------------
-    // | 0 - 1 |   | 3 - 5     |
-    // -------------------------
-    // |    |==========|       |
-    // -------------------------
-    start_map: BTreeMap<Position, (Range, V)>,
-}
-
-impl<V> RangeIndex<V> {
-    fn new() -> Self {
-        Self {
-            start_map: BTreeMap::new(),
-        }
-    }
-    fn query(&self, query: Range) -> impl Iterator<Item = (Range, &V)> {
-        // let stored_start = self.translate_to_stored(query.start);
-        // let stored_end = self.translate_to_stored(query.end);
-
-        // Since non-overlapping: any range overlapping [qs,qe] must have
-        // start < qe  AND  end > qs
-        // The first condition lets us bound the BTreeMap scan:
-        self.start_map
-            .range(..query.end)
-            .rev()
-            .take_while(move |(_, (r, _))| r.overlaps(&query))
-            .map(|(_, (range, v))| (*range, v))
-    }
-
-    /// O(log n) insert
-    fn insert(&mut self, range: Range, value: V) {
-        self.start_map.insert(range.start, (range, value));
-    }
-
-    /// O(log n) edit — just push a delta, no range re-keying
-    fn edit(&mut self, edit: &Change) {
-        // self.deltas.entry(edit.start).or_default().accumulate(edit);
-        // TODO
-    }
-
-    // fn compact(&mut self) {
-    //     // Rebuild map with all deltas applied, then clear deltas
-    //     let new_map = self
-    //         .map
-    //         .iter()
-    //         .map(|(start, (end, v))| {
-    //             (
-    //                 self.translate_to_logical(*start),
-    //                 (self.translate_to_logical(*end), v.clone()),
-    //             )
-    //         })
-    //         .collect();
-    //     self.map = new_map;
-    //     self.deltas.clear();
-    // }
 }
 
 #[cfg(test)]
@@ -590,91 +476,6 @@ mod tests {
             .overlaps(&Range::new(Position::new(2, 5), Position::new(3, 0))));
     }
 
-    // --- Range shift tests ---
-
-    #[test]
-    fn post_to_pre_before_change() {
-        // change replaces line 5 col 0-3 with "hello"
-        let change = Change {
-            range: range(pos(5, 0), pos(5, 3)),
-            text: "hello".to_string(),
-        };
-        // position before change is unchanged
-        let result = post_range_to_pre_range(range(pos(2, 0), pos(3, 5)), &change);
-        assert_eq!(result, range(pos(2, 0), pos(3, 5)));
-    }
-
-    #[test]
-    fn post_to_pre_after_single_line_replacement_same_length() {
-        // replace "Bar" (0..3) with "Baz" (0..3) on line 1 — net zero shift
-        let change = Change {
-            range: range(pos(1, 0), pos(1, 3)),
-            text: "Baz".to_string(),
-        };
-        let result = post_range_to_pre_range(range(pos(2, 0), pos(2, 10)), &change);
-        assert_eq!(result, range(pos(2, 0), pos(2, 10)));
-    }
-
-    #[test]
-    fn post_to_pre_after_insertion_same_line() {
-        // insert "Hello " (6 chars) at line 1 col 0, replacing nothing
-        let change = Change {
-            range: range(pos(1, 0), pos(1, 0)),
-            text: "Hello ".to_string(),
-        };
-        // post pos (1, 10) → pre pos (1, 4)
-        let result = post_range_to_pre_range(range(pos(1, 10), pos(1, 15)), &change);
-        assert_eq!(result, range(pos(1, 4), pos(1, 9)));
-    }
-
-    #[test]
-    fn post_to_pre_after_deletion_same_line() {
-        // delete 5 chars at line 1 col 2..7, replacing with ""
-        let change = Change {
-            range: range(pos(1, 2), pos(1, 7)),
-            text: "".to_string(),
-        };
-        // post pos (1, 8) → pre pos (1, 13)
-        let result = post_range_to_pre_range(range(pos(1, 8), pos(1, 10)), &change);
-        assert_eq!(result, range(pos(1, 13), pos(1, 15)));
-    }
-
-    #[test]
-    fn post_to_pre_after_multiline_insertion() {
-        // insert two new lines at line 1, so lines 2+ shift down by 2 in post space
-        let change = Change {
-            range: range(pos(1, 0), pos(1, 0)),
-            text: "line a\nline b\n".to_string(),
-        };
-        // post line 3 → pre line 1
-        let result = post_range_to_pre_range(range(pos(3, 0), pos(3, 5)), &change);
-        assert_eq!(result, range(pos(1, 0), pos(1, 5)));
-    }
-
-    #[test]
-    fn post_to_pre_after_multiline_deletion() {
-        // delete lines 1-2 entirely (replace with "")
-        let change = Change {
-            range: range(pos(1, 0), pos(3, 0)),
-            text: String::new(),
-        };
-        // post line 1 → pre line 3
-        let result = post_range_to_pre_range(range(pos(1, 0), pos(1, 5)), &change);
-        assert_eq!(result, range(pos(3, 0), pos(3, 5)));
-    }
-
-    #[test]
-    fn post_to_pre_inside_inserted_text_clamps_to_start() {
-        // insert "foo\nbar" at line 2 col 0
-        let change = Change {
-            range: range(pos(2, 0), pos(2, 0)),
-            text: "foo\nbar".to_string(),
-        };
-        // post pos inside inserted region clamps to change start
-        let result = post_range_to_pre_range(range(pos(2, 1), pos(2, 3)), &change);
-        assert_eq!(result, range(pos(2, 0), pos(2, 0)));
-    }
-
     // --- tests for the edit of range box ---
 
     #[test]
@@ -687,7 +488,7 @@ mod tests {
     #[test]
     fn range_box_edit_single_insertion_before() {
         // insert "hello " (6 chars) at line 1 col 0 — range is on line 2, unchanged
-        let changes = vec![Change {
+        let changes = [Change {
             range: range(pos(1, 0), pos(1, 0)),
             text: "hello ".to_string(),
         }];
@@ -699,7 +500,7 @@ mod tests {
     #[test]
     fn range_box_edit_single_insertion_same_line_before_range() {
         // insert "hi " (3 chars) at col 0, range starts at col 5
-        let changes = vec![Change {
+        let changes = [Change {
             range: range(pos(1, 0), pos(1, 0)),
             text: "hi ".to_string(),
         }];
@@ -711,7 +512,7 @@ mod tests {
     #[test]
     fn range_box_edit_deletion_before_range() {
         // delete 3 chars at col 0..3 on line 1, range starts at col 5
-        let changes = vec![Change {
+        let changes = [Change {
             range: range(pos(1, 0), pos(1, 3)),
             text: String::new(),
         }];
@@ -723,7 +524,7 @@ mod tests {
     #[test]
     fn range_box_edit_multiline_insertion_before_range() {
         // insert two lines before line 3
-        let changes = vec![Change {
+        let changes = [Change {
             range: range(pos(2, 0), pos(2, 0)),
             text: "line a\nline b\n".to_string(),
         }];
@@ -735,7 +536,7 @@ mod tests {
     #[test]
     fn range_box_edit_multiline_deletion_before_range() {
         // delete lines 1-2
-        let changes = vec![Change {
+        let changes = [Change {
             range: range(pos(1, 0), pos(3, 0)),
             text: String::new(),
         }];
@@ -747,7 +548,7 @@ mod tests {
     #[test]
     fn range_box_edit_range_inside_deleted_region_clamps() {
         // delete line 2 entirely, range is inside it
-        let changes = vec![Change {
+        let changes = [Change {
             range: range(pos(2, 0), pos(3, 0)),
             text: String::new(),
         }];
@@ -759,7 +560,7 @@ mod tests {
     #[test]
     fn range_box_edit_multiple_changes_applied_in_order() {
         // first insert a line, then delete some chars — both affect our range
-        let changes = vec![
+        let changes = [
             Change {
                 range: range(pos(0, 0), pos(0, 0)),
                 text: "new line\n".to_string(),
@@ -775,36 +576,5 @@ mod tests {
         let mut rb = RangeBox::new((), range(pos(0, 5), pos(0, 10)));
         rb.edit(changes.iter());
         assert_eq!(*rb.range(), range(pos(1, 2), pos(1, 7)));
-    }
-
-    #[test]
-    fn range_box_edit_round_trip() {
-        let original = range(pos(3, 4), pos(3, 9));
-        let changes = vec![
-            Change {
-                range: range(pos(1, 0), pos(1, 5)),
-                text: "hi".to_string(),
-            },
-            Change {
-                range: range(pos(2, 0), pos(2, 0)),
-                text: "inserted\n".to_string(),
-            },
-        ];
-
-        // apply forward
-        let mut rb = RangeBox::new((), original);
-        rb.edit(changes.iter());
-        let post = *rb.range();
-
-        // apply inverse — changes must be applied in reverse order with inverted coords
-        // this is just a sanity check that pre->post->pre round trips via single change
-        for change in &changes {
-            let roundtripped =
-                post_range_to_pre_range(pre_range_to_post_range(original, change), change);
-            assert_eq!(
-                original, roundtripped,
-                "Round-trip failed for change {change:?}"
-            );
-        }
     }
 }
