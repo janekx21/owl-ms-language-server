@@ -4587,8 +4587,9 @@ mod fuzz {
 
         let definitions = &doc.stage2.definitions.iter().sorted_by_key(|rb| rb.value());
         let references = &doc.stage2.references.iter().sorted_by_key(|rb| rb.value());
+        let annotations = &doc.stage2.annotations.iter().sorted_by_key(|rb| rb.value());
 
-        format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes_:#?}\n\n# Queried Document\n{ontology_id:#?}{prefixes:#?}{imports:#?}\n\n# Definitions\n{definitions:#?}\n\n# References\n{references:#?}")
+        format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes_:#?}\n\n# Queried Document\n{ontology_id:#?}{prefixes:#?}{imports:#?}\n\n# Definitions\n{definitions:#?}\n\n# References\n{references:#?}\n\n# Annotations\n{annotations:#?}")
     }
 
     proptest! {

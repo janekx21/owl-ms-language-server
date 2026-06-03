@@ -605,6 +605,7 @@ pub struct DocumentId {
 pub struct Stage2Document {
     pub definitions: Vec<RangeBox<Iri>>,
     pub references: Vec<RangeBox<Iri>>,
+    pub annotations: Vec<RangeBox<Annotation>>,
 
     all_frame_infos: HashMap<Iri, FrameInfo>,
     local_diagnostics: Vec<Diagnostic>,
@@ -624,6 +625,8 @@ impl Stage2Document {
         queried_document: &QueriedDocument,
         id: &DocumentId,
     ) {
+        debug!("document.edit / analysis post change ranges {post_change_ranges:#?}");
+
         timeit("document.edit / analysis / def edit", || {
             for rb in &mut self.definitions {
                 rb.edit(changes.iter());
@@ -662,8 +665,8 @@ impl Stage2Document {
         });
 
         // References
-        // TODO Not rebuilding the iri location index is no large speedup
 
+        // TODO Not rebuilding the iri location index is no large speedup
         // TODO remove | took 3ms
         // timeit("document.edit / analysis / iri locations rebuild", || {
         //     self.iri_locations = build_iri_locations(&self.references);
@@ -710,14 +713,45 @@ impl Stage2Document {
         self.references.sort();
         self.references.dedup_by_key(|rb| *rb.range());
 
-        // TODO
-        // The problem is that the references and definitions (and other stuff) depends on
-        // prefixes. So the change in a prefix can change a lot of references that are not
-        // located at the prefix.
-        // Solution 1: Remove the dependency and move the resolution of abbriv iri -> full iri
-        // into a later step.
-        // Solution 2: Mark all references dirty when ever a prefix changes, which is not often.
-        // Solution 3: TODO
+        // Annotations
+        // TODO The problem is the following insert not removin a falty info:
+        //
+        //  Ontology: <http://example.org/fuzz-test>
+        //      Class: Foo
+        //  Class: OTHER Annotations: rdfs:label "OTHER"
+        //          Annotations: rdfs:label "Foo Label"
+        //
+        // After removing the OTHER class the annotations still contain
+        // OTHER label "Foo Label"
+        // So the syntax change ranges do not include the annotation that follows :(
+        timeit("document.edit / analyse / annotations incremental", || {
+            for rb in &mut self.annotations {
+                rb.edit(changes.iter());
+            }
+
+            self.annotations.retain(|range_box| {
+                for sc in post_change_ranges {
+                    if range_box.range().overlaps(sc) {
+                        debug!("Removing Annotation {range_box:#?}");
+                        return false;
+                    }
+                }
+                true
+            });
+
+            for range in post_change_ranges {
+                let annotations =
+                    queried_document.document_annotations_in_range(parsed_document, *range);
+                debug!("Adding Annotations {annotations:#?}");
+                self.annotations.extend(annotations);
+            }
+            self.annotations.sort();
+            self.annotations.dedup();
+        });
+
+        let annotations = timeit("document.edit / analyse / annotations rebuild", || {
+            queried_document.document_annotations(parsed_document)
+        });
 
         // TODO --------------------------
         timeit("document.edit / analysis (TODO)", || {
@@ -726,9 +760,7 @@ impl Stage2Document {
                     queried_document
                         .document_definitions(parsed_document, &id.path)
                         .iter(),
-                    queried_document
-                        .document_annotations(parsed_document)
-                        .into_iter(),
+                    self.annotations.iter(),
                 )
             });
 
@@ -1067,6 +1099,14 @@ impl InternalDocument {
         // });
         //
 
+        // The problem is that the references and definitions (and other stuff) depends on
+        // prefixes. So the change in a prefix can change a lot of references that are not
+        // located at the prefix.
+        // Solution 1: Remove the dependency and move the resolution of abbriv iri -> full iri
+        // into a later step.
+        // Solution 2: Mark all references dirty when ever a prefix changes, which is not often.
+        // ==========
+        // I Chose Solution 2
         // Do a whole new analysis when the prefixes change!
         if dirty_prefix {
             info!("document.edit Dirty prefix. New post change range is the max range.");
@@ -1909,6 +1949,9 @@ pub struct QueriedDocument {
     pub imports: Vec<RangeBox<Iri>>,
 }
 
+/// Frame IRI, Annotation IRI, Literal
+type Annotation = (String, String, String);
+
 impl QueriedDocument {
     /// Finds flat references to other document URL's in this document
     pub fn reachable_urls(
@@ -1983,16 +2026,19 @@ impl QueriedDocument {
 
     fn document_all_frame_infos<'a>(
         definitions: impl Iterator<Item = &'a RangeBox<IriDefinition>>,
-        annotations: impl Iterator<Item = (String, String, String)>,
+        annotations: impl Iterator<Item = &'a RangeBox<Annotation>>,
     ) -> HashMap<Iri, FrameInfo> {
         let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
 
         // First we collect the annotations
-        for frame_info in annotations.map(|(frame_iri, annotation_iri, literal)| FrameInfo {
-            iri: frame_iri.clone(),
-            annotations: HashMap::from([(annotation_iri, vec![literal])]),
-            frame_type: FrameType::Unknown,
-            definitions: Vec::new(),
+        for frame_info in annotations.map(|rb| {
+            let (frame_iri, annotation_iri, literal) = rb.value();
+            FrameInfo {
+                iri: frame_iri.clone(),
+                annotations: HashMap::from([(annotation_iri.clone(), vec![literal.clone()])]),
+                frame_type: FrameType::Unknown,
+                definitions: Vec::new(),
+            }
         }) {
             if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
                 // Merge the frame info for the same IRI
@@ -2023,7 +2069,7 @@ impl QueriedDocument {
     fn document_annotations(
         &self,
         parsed_document: &ParsedDocument,
-    ) -> Vec<(String, String, String)> {
+    ) -> Vec<RangeBox<(String, String, String)>> {
         parsed_document
             .query(&ALL_QUERIES.annotation_query)
             .iter()
@@ -2032,10 +2078,39 @@ impl QueriedDocument {
                     let iri = trim_full_iri(frame_iri.node.text.clone());
                     let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
                     let iri = trim_full_iri(annotation_iri.node.text.clone());
-                    let annotation_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-                    let literal = trim_string_value(&literal.node.text);
+                    let annotation_iri_ = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                    let literal_ = trim_string_value(&literal.node.text);
 
-                    (frame_iri, annotation_iri, literal)
+                    RangeBox::new(
+                        (frame_iri, annotation_iri_, literal_),
+                        Range::new(annotation_iri.node.range.start, literal.node.range.end),
+                    )
+                }
+                _ => unreachable!(),
+            })
+            .collect_vec()
+    }
+
+    fn document_annotations_in_range(
+        &self,
+        parsed_document: &ParsedDocument,
+        range: Range,
+    ) -> Vec<RangeBox<Annotation>> {
+        parsed_document
+            .query_range(&ALL_QUERIES.annotation_query, range)
+            .iter()
+            .map(|m| match &m.captures[..] {
+                [frame_iri, annotation_iri, literal] => {
+                    let iri = trim_full_iri(frame_iri.node.text.clone());
+                    let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                    let iri = trim_full_iri(annotation_iri.node.text.clone());
+                    let annotation_iri_ = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                    let literal_ = trim_string_value(&literal.node.text);
+
+                    RangeBox::new(
+                        (frame_iri, annotation_iri_, literal_),
+                        Range::new(annotation_iri.node.range.start, literal.node.range.end),
+                    )
                 }
                 _ => unreachable!(),
             })
@@ -2172,7 +2247,7 @@ impl QueriedDocument {
 
         // Find iri locations
         let all_frame_infos = timeit("all frame infos", || {
-            QueriedDocument::document_all_frame_infos(definitions.iter(), annotations.into_iter())
+            QueriedDocument::document_all_frame_infos(definitions.iter(), annotations.iter())
         });
 
         let (directly_reachable_import_urls, directly_reachable_other_urls) =
@@ -2180,17 +2255,19 @@ impl QueriedDocument {
                 self.reachable_urls(&references, &id.uri)
             });
 
+        let iri_locations = build_iri_locations(&references);
         Stage2Document {
-            all_frame_infos,
-            local_diagnostics: timeit("syntax errors", || parsed_document.syntax_errors()),
-            directly_reachable_import_urls,
-            directly_reachable_other_urls,
-            iri_locations: build_iri_locations(&references),
             references,
             definitions: definitions
                 .into_iter()
                 .map(|rb| rb.map(|v| v.iri))
                 .collect(),
+            annotations,
+            all_frame_infos,
+            local_diagnostics: timeit("syntax errors", || parsed_document.syntax_errors()),
+            directly_reachable_import_urls,
+            directly_reachable_other_urls,
+            iri_locations,
         }
     }
 
