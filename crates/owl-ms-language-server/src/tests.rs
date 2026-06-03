@@ -4544,6 +4544,7 @@ mod fuzz {
                 .to_string()),
             1 => Just("\nClass: AnotherFuzzClass\n".to_string()),
             1 => Just("\nDatatype: SomeDatatype\n".to_string()),
+            1 => Just("\nAnnotations: rdfs:label \"Fuzzing annotation label\"\n".to_string()),
             1 => Just("#".to_string()), // Just a comment
         ]
     }
@@ -4585,7 +4586,11 @@ mod fuzz {
         } = &doc.queried_document;
         let prefixes = prefixes.iter().sorted().collect_vec();
 
-        let definitions = &doc.stage2.definitions.iter().sorted_by_key(|rb| rb.value());
+        let definitions = &doc
+            .stage2
+            .definitions
+            .iter()
+            .sorted_by_key(|rb| rb.value().iri.clone());
         let references = &doc.stage2.references.iter().sorted_by_key(|rb| rb.value());
         let annotations = &doc.stage2.annotations.iter().sorted_by_key(|rb| rb.value());
 

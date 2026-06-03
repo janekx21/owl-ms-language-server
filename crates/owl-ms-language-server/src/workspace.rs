@@ -603,7 +603,7 @@ pub struct DocumentId {
 /// An internal document that has analysis results.
 #[derive(Debug)]
 pub struct Stage2Document {
-    pub definitions: Vec<RangeBox<Iri>>,
+    pub definitions: Vec<RangeBox<IriDefinition>>,
     pub references: Vec<RangeBox<Iri>>,
     pub annotations: Vec<RangeBox<Annotation>>,
 
@@ -649,13 +649,9 @@ impl Stage2Document {
         timeit("document.edit / analysis / def add", || {
             for di in post_change_ranges {
                 let document_definitions_in_range =
-                    queried_document.document_definitions_in_range(parsed_document, &id.path, *di);
+                    queried_document.document_definitions_in_range(parsed_document, *di);
 
-                let additional_definitions = document_definitions_in_range
-                    .iter()
-                    .map(|r| RangeBox::new(r.value().iri.clone(), *r.range()));
-
-                self.definitions.extend(additional_definitions);
+                self.definitions.extend(document_definitions_in_range);
             }
         });
         timeit("document.edit / analysis / def cleanup", || {
@@ -714,7 +710,7 @@ impl Stage2Document {
         self.references.dedup_by_key(|rb| *rb.range());
 
         // Annotations
-        // TODO The problem is the following insert not removin a falty info:
+        // The problem was the following insert not removing a falty info:
         //
         //  Ontology: <http://example.org/fuzz-test>
         //      Class: Foo
@@ -722,8 +718,12 @@ impl Stage2Document {
         //          Annotations: rdfs:label "Foo Label"
         //
         // After removing the OTHER class the annotations still contain
-        // OTHER label "Foo Label"
-        // So the syntax change ranges do not include the annotation that follows :(
+        // - OTHER label "Foo Label"
+        // So the syntax change ranges did not include the annotation that followed :(
+        //
+        // Now the range, of each annotation, covers the whole frame.
+
+        // This is pritty slow?
         timeit("document.edit / analyse / annotations incremental", || {
             for rb in &mut self.annotations {
                 rb.edit(changes.iter());
@@ -732,7 +732,7 @@ impl Stage2Document {
             self.annotations.retain(|range_box| {
                 for sc in post_change_ranges {
                     if range_box.range().overlaps(sc) {
-                        debug!("Removing Annotation {range_box:#?}");
+                        // debug!("Removing Annotation {range_box:#?}");
                         return false;
                     }
                 }
@@ -742,25 +742,27 @@ impl Stage2Document {
             for range in post_change_ranges {
                 let annotations =
                     queried_document.document_annotations_in_range(parsed_document, *range);
-                debug!("Adding Annotations {annotations:#?}");
+                // debug!("Adding Annotations {annotations:#?}");
                 self.annotations.extend(annotations);
             }
             self.annotations.sort();
             self.annotations.dedup();
         });
 
-        let annotations = timeit("document.edit / analyse / annotations rebuild", || {
-            queried_document.document_annotations(parsed_document)
-        });
+        // TODO remove
+        // let annotations = timeit("document.edit / analyse / annotations rebuild", || {
+        //     queried_document.document_annotations(parsed_document)
+        // });
 
         // TODO --------------------------
+        // This is pritty fast now.
+        // 10ms
         timeit("document.edit / analysis (TODO)", || {
             let all_frame_infos = timeit("all frame infos", || {
                 QueriedDocument::document_all_frame_infos(
-                    queried_document
-                        .document_definitions(parsed_document, &id.path)
-                        .iter(),
+                    self.definitions.iter(),
                     self.annotations.iter(),
+                    &id.path,
                 )
             });
 
@@ -774,7 +776,6 @@ impl Stage2Document {
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct IriDefinition {
     pub iri: Iri,
-    pub location: Location,
     pub kind: FrameType,
 }
 
@@ -1746,24 +1747,25 @@ impl ParsedDocument {
     }
 }
 
-/// This acts the same way as ``node_by_id`` but for all nodes
-pub fn node_by_id_map(tree: &Tree) -> HashMap<usize, Node<'_>> {
-    let mut res = HashMap::with_capacity(4048);
-    let mut w = tree.walk();
-    'outer: loop {
-        res.insert(w.node().id(), w.node());
+// TODO remove
+// /// This acts the same way as ``node_by_id`` but for all nodes
+// pub fn node_by_id_map(tree: &Tree) -> HashMap<usize, Node<'_>> {
+//     let mut res = HashMap::with_capacity(4048);
+//     let mut w = tree.walk();
+//     'outer: loop {
+//         res.insert(w.node().id(), w.node());
 
-        // In order traversal
-        if !w.goto_first_child() {
-            while !w.goto_next_sibling() {
-                if !w.goto_parent() {
-                    break 'outer;
-                }
-            }
-        }
-    }
-    res
-}
+//         // In order traversal
+//         if !w.goto_first_child() {
+//             while !w.goto_next_sibling() {
+//                 if !w.goto_parent() {
+//                     break 'outer;
+//                 }
+//             }
+//         }
+//     }
+//     res
+// }
 
 fn node_by_id(parsed_document: &ParsedDocument, id: usize) -> Option<Node<'_>> {
     let mut w = parsed_document.tree.walk();
@@ -2027,6 +2029,7 @@ impl QueriedDocument {
     fn document_all_frame_infos<'a>(
         definitions: impl Iterator<Item = &'a RangeBox<IriDefinition>>,
         annotations: impl Iterator<Item = &'a RangeBox<Annotation>>,
+        path: &Path,
     ) -> HashMap<Iri, FrameInfo> {
         let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
 
@@ -2053,7 +2056,10 @@ impl QueriedDocument {
             iri: definiton.value().iri.clone(),
             annotations: HashMap::new(),
             frame_type: definiton.value().kind,
-            definitions: vec![definiton.value().location.clone()],
+            definitions: vec![Location {
+                uri: Url::from_file_path(path).expect("valid path"),
+                range: *definiton.range(),
+            }],
         }) {
             if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
                 // Merge the frame info for the same IRI
@@ -2074,17 +2080,14 @@ impl QueriedDocument {
             .query(&ALL_QUERIES.annotation_query)
             .iter()
             .map(|m| match &m.captures[..] {
-                [frame_iri, annotation_iri, literal] => {
+                [frame_iri, annotation_iri, literal, frame] => {
                     let iri = trim_full_iri(frame_iri.node.text.clone());
                     let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
                     let iri = trim_full_iri(annotation_iri.node.text.clone());
                     let annotation_iri_ = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
                     let literal_ = trim_string_value(&literal.node.text);
 
-                    RangeBox::new(
-                        (frame_iri, annotation_iri_, literal_),
-                        Range::new(annotation_iri.node.range.start, literal.node.range.end),
-                    )
+                    RangeBox::new((frame_iri, annotation_iri_, literal_), frame.node.range)
                 }
                 _ => unreachable!(),
             })
@@ -2100,17 +2103,14 @@ impl QueriedDocument {
             .query_range(&ALL_QUERIES.annotation_query, range)
             .iter()
             .map(|m| match &m.captures[..] {
-                [frame_iri, annotation_iri, literal] => {
+                [frame_iri, annotation_iri, literal, frame] => {
                     let iri = trim_full_iri(frame_iri.node.text.clone());
-                    let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                    let frame_iri_ = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
                     let iri = trim_full_iri(annotation_iri.node.text.clone());
                     let annotation_iri_ = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
                     let literal_ = trim_string_value(&literal.node.text);
 
-                    RangeBox::new(
-                        (frame_iri, annotation_iri_, literal_),
-                        Range::new(annotation_iri.node.range.start, literal.node.range.end),
-                    )
+                    RangeBox::new((frame_iri_, annotation_iri_, literal_), frame.node.range)
                 }
                 _ => unreachable!(),
             })
@@ -2120,32 +2120,24 @@ impl QueriedDocument {
     fn document_definitions(
         &self,
         parsed_document: &ParsedDocument,
-        own_path: &Path,
     ) -> Vec<RangeBox<IriDefinition>> {
-        let node_by_id = node_by_id_map(&parsed_document.tree);
+        // let node_by_id = node_by_id_map(&parsed_document.tree);
         parsed_document
             .query(&ALL_QUERIES.frame_query)
             .iter()
             .map(|m| match &m.captures[..] {
                 [frame_iri, frame] => {
                     let iri = trim_full_iri(frame_iri.node.text.clone());
-                    let frame_node_id = frame_iri.node.id;
-                    let iri_parent_kind = node_by_id
-                        .get(&frame_node_id)
-                        .expect("Node id must be valid after query")
-                        .parent()
-                        .expect("All frame IRIs should have paretns")
-                        .kind();
+                    let iri_parent_kind = frame_iri
+                        .node
+                        .parent_kind
+                        .as_ref()
+                        .expect("All frame IRIs should have paretns");
                     let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
                     RangeBox::new(
                         IriDefinition {
                             iri: frame_iri,
-                            location: Location {
-                                uri: Url::from_file_path(own_path)
-                                    .expect("Path should be valid file URL"),
-                                range: frame.node.range,
-                            },
                             kind: FrameType::parse(iri_parent_kind),
                         },
                         frame.node.range,
@@ -2159,7 +2151,6 @@ impl QueriedDocument {
     fn document_definitions_in_range(
         &self,
         parsed_document: &ParsedDocument,
-        own_path: &Path,
         range: Range,
     ) -> Vec<RangeBox<IriDefinition>> {
         // TODO remove
@@ -2181,11 +2172,6 @@ impl QueriedDocument {
                     RangeBox::new(
                         IriDefinition {
                             iri: frame_iri,
-                            location: Location {
-                                uri: Url::from_file_path(own_path)
-                                    .expect("Path should be valid file URL"),
-                                range: frame.node.range,
-                            },
                             kind: FrameType::parse(iri_parent_kind),
                         },
                         frame.node.range,
@@ -2239,7 +2225,7 @@ impl QueriedDocument {
             || {
                 rayon::join(
                     || self.document_references(parsed_document),
-                    || self.document_definitions(parsed_document, &id.path),
+                    || self.document_definitions(parsed_document),
                 )
             },
             || self.document_annotations(parsed_document),
@@ -2247,7 +2233,11 @@ impl QueriedDocument {
 
         // Find iri locations
         let all_frame_infos = timeit("all frame infos", || {
-            QueriedDocument::document_all_frame_infos(definitions.iter(), annotations.iter())
+            QueriedDocument::document_all_frame_infos(
+                definitions.iter(),
+                annotations.iter(),
+                &id.path,
+            )
         });
 
         let (directly_reachable_import_urls, directly_reachable_other_urls) =
@@ -2258,10 +2248,7 @@ impl QueriedDocument {
         let iri_locations = build_iri_locations(&references);
         Stage2Document {
             references,
-            definitions: definitions
-                .into_iter()
-                .map(|rb| rb.map(|v| v.iri))
-                .collect(),
+            definitions,
             annotations,
             all_frame_infos,
             local_diagnostics: timeit("syntax errors", || parsed_document.syntax_errors()),
@@ -3037,7 +3024,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
         .stage2
         .definitions
         .iter()
-        .map(|rb| rb.value().clone())
+        .map(|rb| rb.value().iri.clone())
         .collect();
 
     let imports_recursive = timeit("semantic errors  reachable", || {
@@ -3055,7 +3042,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
                             .stage2
                             .definitions
                             .iter()
-                            .map(|rb| rb.value().clone()),
+                            .map(|rb| rb.value().iri.clone()),
                     );
                 }
                 DocumentReference::External(external_document) => {
