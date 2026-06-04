@@ -4392,6 +4392,7 @@ mod fuzz {
             1 => Just("\nClass: AnotherFuzzClass\n".to_string()),
             1 => Just("\nDatatype: SomeDatatype\n".to_string()),
             1 => Just("\nAnnotations: rdfs:label \"Fuzzing annotation label\"\n".to_string()),
+            1 => Just("\nPrefix: x: <http://invalis/x/>\"\n".to_string()),
             1 => Just("#".to_string()), // Just a comment
         ]
     }

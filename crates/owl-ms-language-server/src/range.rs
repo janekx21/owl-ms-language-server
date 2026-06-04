@@ -88,6 +88,10 @@ impl Range {
     pub fn overlaps(&self, other: &Range) -> bool {
         self.start < other.end && other.start < self.end
     }
+
+    pub fn is_zero(&self) -> bool {
+        self.start >= self.end
+    }
 }
 
 impl Display for Range {

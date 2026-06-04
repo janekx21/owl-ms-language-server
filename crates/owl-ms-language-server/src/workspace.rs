@@ -677,10 +677,6 @@ impl Stage2Document {
                                     let ranges =
                                         self.iri_locations.entry(rb.value().into()).or_default();
                                     ranges.push(RangeBox::new((), *rb.range()));
-                                    // TODO maybe remove all sorts :) (I dont think we need them actualy)
-                                    // Lets keep them for now
-                                    ranges.par_sort();
-                                    ranges.dedup();
                                 }
 
                                 add
@@ -688,7 +684,7 @@ impl Stage2Document {
                         },
                         || {
                             // Annotations
-                            // The problem was the following insert not removing a falty info:
+                            // The problem was the following insert not removing a faulty info:
                             //
                             //  Ontology: <http://example.org/fuzz-test>
                             //      Class: Foo
@@ -714,8 +710,20 @@ impl Stage2Document {
         timeit("document.edit / analyse / cleanup", || {
             rayon::join(
                 || {
-                    self.definitions.par_sort_unstable();
-                    self.definitions.dedup_by_key(|rb| *rb.range());
+                    rayon::join(
+                        || {
+                            self.definitions.par_sort_unstable();
+                            self.definitions.dedup_by_key(|rb| *rb.range());
+                        },
+                        || {
+                            self.iri_locations.par_iter_mut().for_each(|(_, ranges)| {
+                                // TODO maybe remove all sorts :) (I dont think we need them actualy)
+                                // Lets keep them for now
+                                ranges.par_sort();
+                                ranges.dedup();
+                            });
+                        },
+                    )
                 },
                 || {
                     rayon::join(
@@ -733,7 +741,7 @@ impl Stage2Document {
         });
 
         // Not incremental part --------------------------
-        // This is pritty fast now.
+        // This is pretty fast now.
         // 10ms/16k
         timeit("document.edit / analysis (not incremental part)", || {
             let all_frame_infos = timeit("all frame infos", || {
@@ -1095,6 +1103,8 @@ impl InternalDocument {
         let mut post_change_ranges: &[Range] =
             &post_change_ranges(&changes, &parsed_document, &old_tree);
 
+        debug!("Post change ranges: {post_change_ranges:#?}");
+
         let dirty_prefix = timeit("document.edit / queries", || {
             queried_document.update(&changes, post_change_ranges, &parsed_document)
         });
@@ -1403,7 +1413,7 @@ impl InternalDocument {
             .map(|m| {
                 let (iri, range, parent_kind) = match &m.captures[..] {
                     [iri_capture] => (
-                        match iri_capture.node.kind.as_str() {
+                        match iri_capture.node.kind {
                             "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
                             "simple_iri" | "abbreviated_iri" => self
                                 .abbreviated_iri_to_full_iri(&iri_capture.node.text)
@@ -1444,7 +1454,7 @@ impl InternalDocument {
             .map(|m| {
                 let (iri, range, node_id) = match &m.captures[..] {
                     [iri_capture] => (
-                        match iri_capture.node.kind.as_str() {
+                        match iri_capture.node.kind {
                             "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
                             "simple_iri" | "abbreviated_iri" => self
                                 .abbreviated_iri_to_full_iri(&iri_capture.node.text)
@@ -1777,16 +1787,19 @@ impl ParsedDocument {
             [ontology] => match &ontology.captures[..] {
                 [] => None,
                 // This should be a full IRI so lets trim it
-                [iri] => Some(RangeBox::new(
-                    (trim_full_iri(iri.node.text.clone()), None),
-                    iri.node.range,
+                [iri_capture] => Some(RangeBox::new(
+                    (trim_full_iri(iri_capture.node.text.clone()), None),
+                    iri_capture.node.range,
                 )),
-                [iri, version_iri] => Some(RangeBox::new(
+                [iri_capture, version_iri_capture] => Some(RangeBox::new(
                     (
-                        trim_full_iri(iri.node.text.clone()),
-                        Some(trim_full_iri(version_iri.node.text.clone())),
+                        trim_full_iri(iri_capture.node.text.clone()),
+                        Some(trim_full_iri(version_iri_capture.node.text.clone())),
                     ),
-                    Range::new(iri.node.range.start, version_iri.node.range.end),
+                    Range::new(
+                        iri_capture.node.range.start,
+                        version_iri_capture.node.range.end,
+                    ),
                 )),
                 _ => unreachable!("The query has only one capture"),
             },
@@ -1808,11 +1821,11 @@ impl ParsedDocument {
         self.query(&ALL_QUERIES.prefix)
             .into_iter()
             .map(|m| match &m.captures[..] {
-                [name, iri] => (
-                    name.node.text.trim_end_matches(':').to_string(),
+                [name_capture, iri_capture] => (
+                    name_capture.node.text.trim_end_matches(':').to_string(),
                     RangeBox::new(
-                        trim_full_iri(iri.node.text.clone()),
-                        Range::new(name.node.range.start, iri.node.range.end),
+                        trim_full_iri(iri_capture.node.text.clone()),
+                        Range::new(name_capture.node.range.start, iri_capture.node.range.end),
                     ),
                 ),
                 _ => unreachable!(),
@@ -1831,11 +1844,11 @@ impl ParsedDocument {
         self.query_range(&ALL_QUERIES.prefix, range)
             .into_iter()
             .map(|m| match &m.captures[..] {
-                [name, iri] => (
-                    name.node.text.trim_end_matches(':').to_string(),
+                [name_capture, iri_capture] => (
+                    name_capture.node.text.trim_end_matches(':').to_string(),
                     RangeBox::new(
-                        trim_full_iri(iri.node.text.clone()),
-                        Range::new(name.node.range.start, iri.node.range.end),
+                        trim_full_iri(iri_capture.node.text.clone()),
+                        Range::new(name_capture.node.range.start, iri_capture.node.range.end),
                     ),
                 ),
                 _ => unreachable!(),
@@ -1848,9 +1861,9 @@ impl ParsedDocument {
         self.query(&ALL_QUERIES.import_query)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri] => Oxiri::parse(trim_full_iri(iri.node.text.clone()))
+                [iri_capture] => Oxiri::parse(trim_full_iri(iri_capture.node.text.clone()))
                     .ok()
-                    .map(|iri_| RangeBox::new(iri_.as_str().to_string(), iri.node.range)),
+                    .map(|iri_| RangeBox::new(iri_.as_str().to_string(), iri_capture.node.range)),
                 _ => unimplemented!(),
             })
             .collect_vec()
@@ -1860,9 +1873,9 @@ impl ParsedDocument {
         self.query_range(&ALL_QUERIES.import_query, range)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri] => Oxiri::parse(trim_full_iri(iri.node.text.clone()))
+                [iri_capture] => Oxiri::parse(trim_full_iri(iri_capture.node.text.clone()))
                     .ok()
-                    .map(|iri_| RangeBox::new(iri_.as_str().to_string(), iri.node.range)),
+                    .map(|iri_| RangeBox::new(iri_.as_str().to_string(), iri_capture.node.range)),
                 _ => unimplemented!(),
             })
             .collect_vec()
@@ -1876,7 +1889,9 @@ fn query_helper(
 ) -> Vec<UnwrappedQueryMatch> {
     let mut query_cursor = QueryCursor::new();
     if let Some(range) = range {
-        query_cursor.set_point_range(range.into());
+        if range != Range::FULL_RANGE {
+            query_cursor.set_point_range(range.into());
+        }
     }
     let rope_provider = RopeProvider::new(&stage1.rope);
 
@@ -1894,8 +1909,8 @@ fn query_helper(
                         id: c.node.id(),
                         text: node_text(&c.node, &stage1.rope).to_string(),
                         range: c.node.range().into(),
-                        kind: c.node.kind().into(),
-                        parent_kind: c.node.parent().map(|p| p.kind().to_string()),
+                        kind: c.node.kind(),
+                        parent_kind: c.node.parent().map(|p| p.kind()),
                     },
                     index: c.index,
                 })
@@ -2039,22 +2054,7 @@ impl QueriedDocument {
         &self,
         parsed_document: &ParsedDocument,
     ) -> Vec<RangeBox<(String, String, String)>> {
-        parsed_document
-            .query(&ALL_QUERIES.annotation_query)
-            .iter()
-            .map(|m| match &m.captures[..] {
-                [frame_iri, annotation_iri, literal, frame] => {
-                    let iri = trim_full_iri(frame_iri.node.text.clone());
-                    let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-                    let iri = trim_full_iri(annotation_iri.node.text.clone());
-                    let annotation_iri_ = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-                    let literal_ = trim_string_value(&literal.node.text);
-
-                    RangeBox::new((frame_iri, annotation_iri_, literal_), frame.node.range)
-                }
-                _ => unreachable!(),
-            })
-            .collect_vec()
+        self.document_annotations_in_range(parsed_document, Range::FULL_RANGE)
     }
 
     fn document_annotations_in_range(
@@ -2066,14 +2066,23 @@ impl QueriedDocument {
             .query_range(&ALL_QUERIES.annotation_query, range)
             .iter()
             .map(|m| match &m.captures[..] {
-                [frame_iri, annotation_iri, literal, frame] => {
-                    let iri = trim_full_iri(frame_iri.node.text.clone());
-                    let frame_iri_ = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-                    let iri = trim_full_iri(annotation_iri.node.text.clone());
-                    let annotation_iri_ = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-                    let literal_ = trim_string_value(&literal.node.text);
+                [frame_iri_capture, annotation_iri_capture, literal_capture, frame_capture] => {
+                    let frame_iri = trim_full_iri(frame_iri_capture.node.text.clone());
+                    let frame_iri = self
+                        .abbreviated_iri_to_full_iri(&frame_iri)
+                        .unwrap_or(frame_iri);
 
-                    RangeBox::new((frame_iri_, annotation_iri_, literal_), frame.node.range)
+                    let annotation_iri = trim_full_iri(annotation_iri_capture.node.text.clone());
+                    let annotation_iri = self
+                        .abbreviated_iri_to_full_iri(&annotation_iri)
+                        .unwrap_or(annotation_iri);
+
+                    let literal = trim_string_value(&literal_capture.node.text);
+
+                    RangeBox::new(
+                        (frame_iri, annotation_iri, literal),
+                        frame_capture.node.range,
+                    )
                 }
                 _ => unreachable!(),
             })
@@ -2084,31 +2093,7 @@ impl QueriedDocument {
         &self,
         parsed_document: &ParsedDocument,
     ) -> Vec<RangeBox<IriDefinition>> {
-        // let node_by_id = node_by_id_map(&parsed_document.tree);
-        parsed_document
-            .query(&ALL_QUERIES.frame_query)
-            .iter()
-            .map(|m| match &m.captures[..] {
-                [frame_iri, frame] => {
-                    let iri = trim_full_iri(frame_iri.node.text.clone());
-                    let iri_parent_kind = frame_iri
-                        .node
-                        .parent_kind
-                        .as_ref()
-                        .expect("All frame IRIs should have paretns");
-                    let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-
-                    RangeBox::new(
-                        IriDefinition {
-                            iri: frame_iri,
-                            kind: FrameType::parse(iri_parent_kind),
-                        },
-                        frame.node.range,
-                    )
-                }
-                _ => unreachable!(),
-            })
-            .collect()
+        self.document_definitions_in_range(parsed_document, Range::FULL_RANGE)
     }
 
     fn document_definitions_in_range(
@@ -2120,22 +2105,24 @@ impl QueriedDocument {
             .query_range(&ALL_QUERIES.frame_query, range)
             .iter()
             .map(|m| match &m.captures[..] {
-                [frame_iri, frame] => {
-                    let iri = trim_full_iri(frame_iri.node.text.clone());
-                    // let frame_node_id = frame_iri.node.id;
-                    let iri_parent_kind = frame_iri
+                [frame_iri_capture, frame_capture] => {
+                    let frame_iri_parent_kind = frame_iri_capture
                         .node
                         .parent_kind
                         .as_ref()
-                        .expect("All frame IRIs should have paretns");
-                    let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                        .expect("All frame IRIs should have parents");
+
+                    let frame_iri = trim_full_iri(frame_iri_capture.node.text.clone());
+                    let frame_iri = self
+                        .abbreviated_iri_to_full_iri(&frame_iri)
+                        .unwrap_or(frame_iri);
 
                     RangeBox::new(
                         IriDefinition {
                             iri: frame_iri,
-                            kind: FrameType::parse(iri_parent_kind),
+                            kind: FrameType::parse(frame_iri_parent_kind),
                         },
-                        frame.node.range,
+                        frame_capture.node.range,
                     )
                 }
                 _ => unreachable!(),
@@ -2144,19 +2131,7 @@ impl QueriedDocument {
     }
 
     fn document_references(&self, parsed_document: &ParsedDocument) -> Vec<RangeBox<String>> {
-        parsed_document
-            .query(&ALL_QUERIES.iri_query_references)
-            .iter()
-            .map(|m| match &m.captures[..] {
-                [iri_capture] => {
-                    let iri = trim_full_iri(iri_capture.node.text.clone());
-                    let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-
-                    RangeBox::new(iri, iri_capture.node.range)
-                }
-                _ => unreachable!(),
-            })
-            .collect()
+        self.document_references_in_range(parsed_document, Range::FULL_RANGE)
     }
 
     fn document_references_in_range(
@@ -2262,11 +2237,12 @@ impl QueriedDocument {
 
         // Retain
 
+        let mut dirty_prefix = false;
         self.prefixes.retain(|_, prefix_value| {
             for sc in post_change_ranges {
-                debug!("Prefix: Check {} overlap with {}", prefix_value.range(), sc);
-                if prefix_value.range().overlaps(sc) {
-                    debug!("Yes");
+                if prefix_value.range().overlaps(sc) || prefix_value.range().is_zero() {
+                    dirty_prefix = true;
+                    debug!("Removing prefix {prefix_value:?}");
                     return false;
                 }
             }
@@ -2281,7 +2257,6 @@ impl QueriedDocument {
             self.imports.extend(additional_imports);
         }
 
-        let mut dirty_prefix = false;
         for di in post_change_ranges {
             let additional_prefixes = parsed_document.prefixes_in_range(*di);
 
@@ -2763,8 +2738,8 @@ pub struct UnwrappedNode {
     pub text: String,
     /// This information can be outdated
     pub range: Range,
-    pub kind: String,
-    pub parent_kind: Option<String>,
+    pub kind: &'static str,
+    pub parent_kind: Option<&'static str>,
 }
 
 /// This represents information about a frame.
