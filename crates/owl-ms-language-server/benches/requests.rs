@@ -417,6 +417,7 @@ fn setup_with_size(size: usize) -> (Runtime, LspService<Backend>, Url, TempDir, 
     let line_count = count_lines(&ontology);
     let (service, url, dir) = rt.block_on(setup_backend_with_ontology(ontology));
     let target_line = (line_count / 4).max(7).to_u32();
+    eprintln!("Create Ontology with {line_count} lines");
     (rt, service, url, dir, target_line)
 }
 
@@ -1045,38 +1046,72 @@ fn bench_did_change(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        let setup = setup_with_size(size);
+        // let setup = setup_with_size(size);
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &_size| {
-            b.iter(|| {
-                let (rt, service, url, dir, _) = &setup;
-                rt.block_on(async {
-                    service
-                        .inner()
-                        .did_change(DidChangeTextDocumentParams {
-                            text_document: VersionedTextDocumentIdentifier {
-                                uri: url.clone(),
-                                version: 0,
-                            },
-                            content_changes: vec![TextDocumentContentChangeEvent {
-                                range: Some(Range {
-                                    start: Position {
-                                        line: 10,
-                                        character: 0,
-                                    },
-                                    end: Position {
-                                        line: 10,
-                                        character: 0,
-                                    },
-                                }),
-                                text: String::from("Class: InsertedClass\n"),
-                                range_length: None,
-                            }],
-                        })
-                        .await;
-                });
-                (rt, service, dir)
-            });
+            b.iter_batched_ref(
+                || setup_with_size(size),
+                |setup| {
+                    let (rt, service, url, _dir, _) = &setup;
+                    rt.block_on(async {
+                        service
+                            .inner()
+                            .did_change(DidChangeTextDocumentParams {
+                                text_document: VersionedTextDocumentIdentifier {
+                                    uri: url.clone(),
+                                    version: 1,
+                                },
+                                content_changes: vec![TextDocumentContentChangeEvent {
+                                    range: Some(Range {
+                                        start: Position {
+                                            line: 50,
+                                            character: 0,
+                                        },
+                                        end: Position {
+                                            line: 50,
+                                            character: 0,
+                                        },
+                                    }),
+                                    text: String::from("\nClass: InsertedClass\n"),
+                                    range_length: None,
+                                }],
+                            })
+                            .await;
+                    });
+                    // black_box((rt, service, dir))
+                },
+                BatchSize::LargeInput,
+            );
+
+            // b.iter(|| {
+            //     let (rt, service, url, dir, _) = &setup;
+            //     rt.block_on(async {
+            //         service
+            //             .inner()
+            //             .did_change(DidChangeTextDocumentParams {
+            //                 text_document: VersionedTextDocumentIdentifier {
+            //                     uri: url.clone(),
+            //                     version: 1,
+            //                 },
+            //                 content_changes: vec![TextDocumentContentChangeEvent {
+            //                     range: Some(Range {
+            //                         start: Position {
+            //                             line: 50,
+            //                             character: 0,
+            //                         },
+            //                         end: Position {
+            //                             line: 50,
+            //                             character: 0,
+            //                         },
+            //                     }),
+            //                     text: String::from("\nClass: InsertedClass\n"),
+            //                     range_length: None,
+            //                 }],
+            //             })
+            //             .await;
+            //     });
+            //     black_box((rt, service, dir))
+            // });
         });
     }
     group.finish();
