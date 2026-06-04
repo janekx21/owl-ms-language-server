@@ -22,6 +22,8 @@ use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use pretty::RcDoc;
+use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+use rayon::slice::ParallelSliceMut;
 use ropey::Rope;
 use sophia::api::graph::{Graph, MutableGraph};
 use sophia::api::ns::Namespace;
@@ -620,130 +622,110 @@ impl Stage2Document {
     ) {
         debug!("document.edit / analysis post change ranges {post_change_ranges:#?}");
 
-        timeit("document.edit / analysis / def edit", || {
-            for rb in &mut self.definitions {
-                rb.edit(changes.iter());
-            }
+        timeit("document.edit / analysis / edit", || {
+            self.edit_range_boxes(changes);
         });
-        timeit("document.edit / analysis / def retain", || {
-            // Retain
-            self.definitions.retain(|range_box| {
-                for sc in post_change_ranges {
-                    if range_box.range().overlaps(sc) {
-                        return false;
-                    }
-                }
-                true
-            });
+
+        // Retain
+        timeit("document.edit / analysis / retain", || {
+            rayon::join(
+                || retain_vec_rb(post_change_ranges, &mut self.definitions),
+                || {
+                    rayon::join(
+                        || retain_vec_rb(post_change_ranges, &mut self.annotations),
+                        || {
+                            retain_vec_rb_on_remove(
+                                post_change_ranges,
+                                &mut self.references,
+                                |range_box| {
+                                    if let Some(values) =
+                                        self.iri_locations.get_mut(range_box.value())
+                                    {
+                                        // Remove all indexed iri locations
+                                        values.retain(|rb| rb.range() != range_box.range());
+                                    }
+                                },
+                            );
+                        },
+                    )
+                },
+            );
         });
 
         // Add
 
-        timeit("document.edit / analysis / def add", || {
-            for di in post_change_ranges {
-                let document_definitions_in_range =
-                    queried_document.document_definitions_in_range(parsed_document, *di);
+        timeit("document.edit / analysis / extend", || {
+            rayon::join(
+                || {
+                    extend_vec_rb(post_change_ranges, &mut self.definitions, |range| {
+                        queried_document.document_definitions_in_range(parsed_document, range)
+                    });
+                },
+                || {
+                    rayon::join(
+                        || {
+                            extend_vec_rb(post_change_ranges, &mut self.references, |range| {
+                                let add = queried_document
+                                    .document_references_in_range(parsed_document, range);
 
-                self.definitions.extend(document_definitions_in_range);
-            }
+                                // Readd the index values
+                                for rb in &add {
+                                    let ranges =
+                                        self.iri_locations.entry(rb.value().into()).or_default();
+                                    ranges.push(RangeBox::new((), *rb.range()));
+                                    // TODO maybe remove all sorts :) (I dont think we need them actualy)
+                                    // Lets keep them for now
+                                    ranges.par_sort();
+                                    ranges.dedup();
+                                }
+
+                                add
+                            });
+                        },
+                        || {
+                            // Annotations
+                            // The problem was the following insert not removing a falty info:
+                            //
+                            //  Ontology: <http://example.org/fuzz-test>
+                            //      Class: Foo
+                            //  Class: OTHER Annotations: rdfs:label "OTHER"
+                            //          Annotations: rdfs:label "Foo Label"
+                            //
+                            // After removing the OTHER class the annotations still contain
+                            // - OTHER label "Foo Label"
+                            // So the syntax change ranges did not include the annotation that followed :(
+                            //
+                            // Now the range, of each annotation, covers the whole frame.
+
+                            extend_vec_rb(post_change_ranges, &mut self.annotations, |range| {
+                                queried_document
+                                    .document_annotations_in_range(parsed_document, range)
+                            });
+                        },
+                    )
+                },
+            );
         });
-        timeit("document.edit / analysis / def cleanup", || {
-            // Cleanup
-            self.definitions.sort();
-            self.definitions.dedup_by_key(|rb| *rb.range());
-        });
 
-        // References
-
-        for rb in &mut self.references {
-            rb.edit(changes.iter());
-        }
-        // Edit iri location index first
-        for rbs in self.iri_locations.values_mut() {
-            for rb in rbs {
-                rb.edit(changes.iter());
-            }
-        }
-
-        // Retain
-        self.references.retain(|range_box| {
-            for sc in post_change_ranges {
-                if range_box.range().overlaps(sc) {
-                    if let Some(values) = self.iri_locations.get_mut(range_box.value()) {
-                        // Remove all indexed iri locations
-                        values.retain(|rb| rb.range() != range_box.range());
-                    }
-                    return false;
-                }
-            }
-            true
-        });
-        for di in post_change_ranges {
-            let additional_values =
-                queried_document.document_references_in_range(parsed_document, *di);
-
-            // Readd the index values
-            for rb in &additional_values {
-                let ranges = self.iri_locations.entry(rb.value().into()).or_default();
-                ranges.push(RangeBox::new((), *rb.range()));
-                // TODO maybe remove all sorts :) (I dont think we need them actualy)
-                // Lets keep them for now
-                ranges.sort();
-                ranges.dedup();
-            }
-
-            self.references.extend(additional_values);
-        }
-        // Cleanup
-        self.references.sort();
-        self.references.dedup_by_key(|rb| *rb.range());
-
-        // Annotations
-        // The problem was the following insert not removing a falty info:
-        //
-        //  Ontology: <http://example.org/fuzz-test>
-        //      Class: Foo
-        //  Class: OTHER Annotations: rdfs:label "OTHER"
-        //          Annotations: rdfs:label "Foo Label"
-        //
-        // After removing the OTHER class the annotations still contain
-        // - OTHER label "Foo Label"
-        // So the syntax change ranges did not include the annotation that followed :(
-        //
-        // Now the range, of each annotation, covers the whole frame.
-
-        // This is pritty slow?
-        timeit("document.edit / analyse / annotations incremental", || {
-            timeit("document.edit / analyse / annotations edit", || {
-                for rb in &mut self.annotations {
-                    rb.edit(changes.iter());
-                }
-            });
-
-            timeit("document.edit / analyse / annotations retain", || {
-                self.annotations.retain(|range_box| {
-                    for sc in post_change_ranges {
-                        if range_box.range().overlaps(sc) {
-                            // debug!("Removing Annotation {range_box:#?}");
-                            return false;
-                        }
-                    }
-                    true
-                });
-            });
-
-            timeit("document.edit / analyse / annotations extend", || {
-                for range in post_change_ranges {
-                    let annotations =
-                        queried_document.document_annotations_in_range(parsed_document, *range);
-                    // debug!("Adding Annotations {annotations:#?}");
-                    self.annotations.extend(annotations);
-                }
-            });
-            timeit("document.edit / analyse / annotations cleanup", || {
-                self.annotations.sort();
-                self.annotations.dedup();
-            });
+        timeit("document.edit / analyse / cleanup", || {
+            rayon::join(
+                || {
+                    self.definitions.par_sort();
+                    self.definitions.dedup_by_key(|rb| *rb.range());
+                },
+                || {
+                    rayon::join(
+                        || {
+                            self.references.par_sort();
+                            self.references.dedup_by_key(|rb| *rb.range());
+                        },
+                        || {
+                            self.annotations.par_sort();
+                            self.annotations.dedup();
+                        },
+                    )
+                },
+            );
         });
 
         // Not incremental part --------------------------
@@ -752,8 +734,8 @@ impl Stage2Document {
         timeit("document.edit / analysis (not incremental part)", || {
             let all_frame_infos = timeit("all frame infos", || {
                 QueriedDocument::document_all_frame_infos(
-                    self.definitions.iter(),
-                    self.annotations.iter(),
+                    &self.definitions,
+                    &self.annotations,
                     &id.path,
                 )
             });
@@ -762,6 +744,65 @@ impl Stage2Document {
             self.local_diagnostics = parsed_document.syntax_errors();
             self.all_frame_infos = all_frame_infos;
         });
+    }
+
+    fn edit_range_boxes(&mut self, changes: &[Change]) {
+        rayon::join(
+            || {
+                rayon::join(
+                    || edit_vec_rb(changes, &mut self.definitions),
+                    || edit_vec_rb(changes, &mut self.references),
+                )
+            },
+            || {
+                rayon::join(
+                    || edit_vec_rb(changes, &mut self.annotations),
+                    || {
+                        self.iri_locations.par_iter_mut().for_each(|(_, rbs)| {
+                            for rb in rbs {
+                                rb.edit(changes.iter());
+                            }
+                        });
+                    },
+                )
+            },
+        );
+    }
+}
+
+fn edit_vec_rb<T: Send>(changes: &[Change], items: &mut Vec<RangeBox<T>>) {
+    items.par_iter_mut().for_each(|x| x.edit(changes.iter()));
+}
+
+fn retain_vec_rb<T>(post_change_ranges: &[Range], items: &mut Vec<RangeBox<T>>) {
+    retain_vec_rb_on_remove(post_change_ranges, items, |_| {});
+}
+
+fn retain_vec_rb_on_remove<T, F: FnMut(&RangeBox<T>)>(
+    post_change_ranges: &[Range],
+    items: &mut Vec<RangeBox<T>>,
+    mut on_remove: F,
+) {
+    items.retain(|range_box| {
+        for sc in post_change_ranges {
+            if range_box.range().overlaps(sc) {
+                on_remove(range_box);
+                return false;
+            }
+        }
+        true
+    });
+}
+
+fn extend_vec_rb<T, F: FnMut(Range) -> Vec<RangeBox<T>>>(
+    post_change_ranges: &[Range],
+    items: &mut Vec<RangeBox<T>>,
+    mut gen: F,
+) {
+    for di in post_change_ranges {
+        let additional_items = gen(*di);
+
+        items.extend(additional_items);
     }
 }
 
@@ -1943,15 +1984,15 @@ impl QueriedDocument {
         }
     }
 
-    fn document_all_frame_infos<'a>(
-        definitions: impl Iterator<Item = &'a RangeBox<IriDefinition>>,
-        annotations: impl Iterator<Item = &'a RangeBox<Annotation>>,
+    fn document_all_frame_infos(
+        definitions: &[RangeBox<IriDefinition>],
+        annotations: &[RangeBox<Annotation>],
         path: &Path,
     ) -> HashMap<Iri, FrameInfo> {
         let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
 
         // First we collect the annotations
-        for frame_info in annotations.map(|rb| {
+        for frame_info in annotations.iter().map(|rb| {
             let (frame_iri, annotation_iri, literal) = rb.value();
             FrameInfo {
                 iri: frame_iri.clone(),
@@ -1969,7 +2010,7 @@ impl QueriedDocument {
         }
 
         // Second we collect the location and frame type (definitions)
-        for frame_info in definitions.map(|definiton| FrameInfo {
+        for frame_info in definitions.iter().map(|definiton| FrameInfo {
             iri: definiton.value().iri.clone(),
             annotations: HashMap::new(),
             frame_type: definiton.value().kind,
@@ -2148,11 +2189,7 @@ impl QueriedDocument {
 
         // Find iri locations
         let all_frame_infos = timeit("all frame infos", || {
-            QueriedDocument::document_all_frame_infos(
-                definitions.iter(),
-                annotations.iter(),
-                &id.path,
-            )
+            QueriedDocument::document_all_frame_infos(&definitions, &annotations, &id.path)
         });
 
         let (directly_reachable_import_urls, directly_reachable_other_urls) =
