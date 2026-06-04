@@ -48,9 +48,9 @@ use std::{
 };
 use tokio::task::JoinHandle;
 use tower_lsp::lsp_types::{
-    self, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
-    PositionEncodingKind, SemanticToken, SymbolKind, TextDocumentContentChangeEvent, Url,
-    WorkspaceFolder,
+    self, CompletionItem, CompletionItemKind, DiagnosticSeverity, DidChangeTextDocumentParams,
+    InlayHint, InlayHintLabel, PositionEncodingKind, SemanticToken, SymbolKind,
+    TextDocumentContentChangeEvent, Url, WorkspaceFolder,
 };
 use tree_sitter_c2rust::{InputEdit, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
@@ -1225,92 +1225,75 @@ impl InternalDocument {
         self.stage2.all_frame_infos.values()
     }
 
-    pub fn try_keywords_at_position(&self, cursor: Position) -> Vec<String> {
-        let mut parser = lock_global_parser();
-        let rope = self.rope().clone();
-        let tree = self.tree().clone();
+    pub fn get_keyword_competions_at(&self, pos: Position) -> Vec<String> {
+        let pos_one_left = pos.moved_left(1, self.rope());
+        let node = self
+            .tree()
+            .root_node()
+            .named_descendant_for_point_range(pos_one_left.into(), pos_one_left.into())
+            .expect("The pos to be in at least one node");
 
-        let line = rope
-            .get_line(cursor.line() as usize)
+        let line = self
+            .rope()
+            .get_line(pos.line() as usize)
             .map(|s| s.to_string())
             .unwrap_or_default();
-        let partial = word_before_character(cursor.character_byte() as usize, &line);
+        let partial = word_before_character(pos.character_byte() as usize, &line);
 
-        debug!("Cursor node text is {partial:?}");
+        let mut lei = LANGUAGE
+            .lookahead_iterator(node.parse_state())
+            .expect("Valid state");
 
-        let keywords = &*queries::KEYWORDS;
-
-        let kws = keywords
-            .iter()
-            .filter(|k| k.starts_with(&partial))
-            .collect_vec();
-
-        debug!("Checking {} keywords", kws.len());
-
-        kws.iter()
-            .map(|kw| {
-                let mut rope_version = rope.clone();
-                let change = kw[partial.len()..].to_string() + " a";
-
-                let mut tree = tree.clone(); // This is fast
-
-                // Must come before the rope is changed!
-                let cursor_byte_index = cursor.byte_index(&rope_version);
-
-                rope_version.insert(cursor.char_index(&rope_version), &change);
-
-                // Must come after rope changed!
-                let new_end_byte = cursor_byte_index + change.len();
-                let new_end_position = Position::new_from_byte_index(&rope_version, new_end_byte);
-
-                let edit = InputEdit {
-                    // Old range is just a zero size range
-                    start_byte: cursor_byte_index,
-                    start_position: cursor.into(),
-                    old_end_byte: cursor_byte_index,
-                    old_end_position: cursor.into(),
-
-                    new_end_byte,
-                    new_end_position: new_end_position.into(),
-                };
-                tree.edit(&edit);
-
-                let rope_provider = RopeProvider::new(&rope_version);
-                let new_tree = parser
-                    .parse_with_options(
-                        &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
-                        Some(&tree),
-                        None,
-                    )
-                    .expect("language to be set, no timeout to be used, no cancellation flag");
-
-                let cursor_one_left = cursor.moved_left(1, &rope);
-                let cursor_node_version = new_tree
-                    .root_node()
-                    .named_descendant_for_point_range(
-                        cursor_one_left.into(),
-                        cursor_one_left.into(),
-                    )
-                    .ok_or(Error::PositionOutOfBounds(cursor_one_left))?;
-
-                debug!("{cursor_node_version:#?} is {}", cursor_node_version.kind());
-
-                if cursor_node_version.kind().starts_with("keyword_")
-                    && !cursor_node_version
-                        .parent()
-                        .expect("keyword to have parent")
-                        .is_error()
-                {
-                    debug!("Found possible keyword {kw}!");
-                    Ok(Some((*kw).to_string()))
-                } else {
-                    debug!("{kw} is not possible");
-                    Ok(None)
-                }
-            })
-            .filter_map_ok(|x| x)
-            .filter_and_log()
+        lei.iter_names()
+            .filter_map(|kind| (*queries::KEYWORDS_MAP).get(kind).cloned())
+            .filter(|kw| kw.starts_with(&partial))
             .collect_vec()
+    }
+
+    pub fn get_iri_completions_at(
+        &self,
+        pos: Position,
+        workspace: &Workspace,
+    ) -> Vec<(String, String, String)> {
+        let pos_one_left = pos.moved_left(1, self.rope());
+
+        let node = self
+            .tree()
+            .root_node()
+            .named_descendant_for_point_range(pos_one_left.into(), pos_one_left.into())
+            .expect("The pos to be in at least one node");
+
+        // Generate the list of iris that can be inserted.
+        let partial_text = node_text(&node, self.rope()).to_string();
+
+        if node.kind() == "simple_iri" {
+            debug!("Try iris...");
+
+            workspace
+                .search_frame(&partial_text)
+                .into_iter()
+                .unique_by(|(_, iri, _)| iri.clone())
+                .sorted_unstable_by_key(|(v, _, _)| v.clone())
+                .filter_map(|(full, maybe_full_iri, frame)| {
+                    // TODO this will not be correct for all workspace frames (I think)
+                    let iri = self.full_iri_to_shorter_iri(&maybe_full_iri);
+
+                    if iri == partial_text {
+                        None
+                    } else {
+                        Some((
+                            frame.label().unwrap_or(full),
+                            frame.info_display(workspace),
+                            iri,
+                        ))
+                    }
+                })
+                // TODO #29 add items for simple iri, abbriviated iri and full iri
+                // Take the shortest one maybe
+                .collect_vec()
+        } else {
+            Vec::new()
+        }
     }
 
     pub fn sematic_tokens(

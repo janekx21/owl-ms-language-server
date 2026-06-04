@@ -50,6 +50,21 @@ pub static KEYWORDS: LazyLock<Vec<String>> = LazyLock::new(|| {
         .collect()
 });
 
+/// Maps keyword rule names to keyword texts
+/// Example: "keyword_functional" => "Functional:"
+pub static KEYWORDS_MAP: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+    GRAMMAR
+        .rules
+        .iter()
+        .filter_map(|item| match item {
+            (rule_name, Rule::String { value }) if rule_name.starts_with("keyword_") => {
+                Some((rule_name.clone(), value.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+});
+
 pub struct AllQueries {
     pub import_query: Query,
     pub iri_query_all: Query,
