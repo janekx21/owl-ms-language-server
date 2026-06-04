@@ -31,7 +31,7 @@
         tree-sitter-watch = pkgs.writeShellScriptBin "tree-sitter-watch" ''${pkgs.watchexec}/bin/watchexec --clear -e js -e scm -e txt "${pkgs.tree-sitter}/bin/tree-sitter generate && ${pkgs.tree-sitter}/bin/tree-sitter test"'';
 
         owl-ms-language-server = pkgs.writeShellScriptBin "owl-ms-language-server" ''
-          /home/janek/Git/owl-ms-language-server/target/debug/owl-ms-language-server --stdio --offline
+          $__OWL_MS_LSP_SERVER_DEBUG --stdio --offline
         '';
 
         # Add this to test offline
@@ -80,6 +80,7 @@
               nspr
             ]
           );
+          __OWL_MS_LSP_SERVER_DEBUG = "/home/janek/Git/owl-ms-language-server/target/debug/owl-ms-language-server";
           nativeBuildInputs = with pkgs; [
             # cargo
             # clippy

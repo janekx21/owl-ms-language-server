@@ -101,7 +101,7 @@ impl Backend {
 
                     if depends_on_me {
                         mini_backend.update_diagnostics_for_url_and_dependent(
-                            Url::from_file_path(&other_internal_doc.path)
+                            Url::from_file_path(other_internal_doc.path())
                                 .expect("Document path should be convertable into file url"),
                         );
                     }
@@ -171,7 +171,7 @@ impl Backend {
                             for ele in internal_document.reachable_urls(true) {
                                 todo.push_back((ele.clone(), 1));
                             }
-                            let file_url = Url::from_file_path(&internal_document.path)
+                            let file_url = Url::from_file_path(internal_document.path())
                                 .expect("Path should also be a Url");
                             {
                                 let mut sync = mini_backend.sync.write().await;
@@ -436,7 +436,7 @@ impl LanguageServer for Backend {
             );
 
             let doc = workspace.insert_internal_document(internal_document);
-            let path = doc.path.clone();
+            let path = doc.path().to_path_buf();
 
             let handle = self.load_dependencies(&path);
 
@@ -481,7 +481,7 @@ impl LanguageServer for Backend {
             let mut sync = self.write_sync().await;
             let (document, workspace) = sync.take_internal_document(&url)?;
 
-            let new_document = document.edit(&params, self.encoding())?;
+            let new_document = timeit("document.edit", || document.edit(params, self.encoding()))?;
 
             workspace.insert_internal_document(new_document);
 
@@ -1017,7 +1017,7 @@ impl LanguageServer for Backend {
                                 .ok()
                         })
                         .map(|range| Location {
-                            uri: Url::from_file_path(&doc.path)
+                            uri: Url::from_file_path(doc.path())
                                 .expect("File path should be a valid URL"),
                             range,
                         })
@@ -1158,7 +1158,7 @@ impl LanguageServer for Backend {
                                 })
                         })
                         .collect_vec();
-                    (doc.uri.clone(), edits)
+                    (doc.uri().clone(), edits)
                 })
                 .collect();
 
@@ -1274,3 +1274,14 @@ impl Backend {
             .expect("position should be set")
     }
 }
+
+pub trait USizeextra
+where
+    Self: Sized + TryInto<u32>,
+{
+    fn to_u32(self) -> u32 {
+        TryInto::<u32>::try_into(self).unwrap_or(u32::MAX)
+    }
+}
+
+impl USizeextra for usize {}

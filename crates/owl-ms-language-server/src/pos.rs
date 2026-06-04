@@ -17,6 +17,10 @@ impl Position {
         line: 0,
         character: 0,
     };
+    pub const MAX: Self = Self {
+        line: u32::MAX,
+        character: u32::MAX,
+    };
 
     pub fn new(line: u32, character: u32) -> Self {
         Self { line, character }
@@ -121,7 +125,7 @@ impl Position {
     pub fn moved_right(self, char_offset: u32, rope: &Rope) -> Self {
         let char_idx = self.char_index(rope);
         let char_idx = char_idx.saturating_add(char_offset as usize);
-        let char_idx = char_idx.min(rope.len_chars() - 1); // clamp
+        let char_idx = char_idx.min(rope.len_chars().saturating_sub(1)); // clamp
         Self::new_from_byte_index(rope, rope.char_to_byte(char_idx))
     }
 
@@ -211,6 +215,19 @@ impl From<Position> for tree_sitter_c2rust::Point {
     }
 }
 
+impl PartialOrd for Position {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Position {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.line
+            .cmp(&other.line)
+            .then(self.character.cmp(&other.character))
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

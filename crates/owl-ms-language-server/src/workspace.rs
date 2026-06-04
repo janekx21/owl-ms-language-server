@@ -5,6 +5,7 @@ use crate::pos::Position;
 use crate::queries::{
     self, treesitter_highlight_capture_into_semantic_token_type_index, NODE_TYPES,
 };
+use crate::range::{Change, RangeBox};
 use crate::web::{url_to_filename, HttpClient};
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
@@ -21,6 +22,8 @@ use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use pretty::RcDoc;
+use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::slice::ParallelSliceMut;
 use ropey::Rope;
 use sophia::api::graph::{Graph, MutableGraph};
 use sophia::api::ns::Namespace;
@@ -46,7 +49,8 @@ use std::{
 use tokio::task::JoinHandle;
 use tower_lsp::lsp_types::{
     self, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
-    PositionEncodingKind, SemanticToken, SymbolKind, Url, WorkspaceFolder,
+    PositionEncodingKind, SemanticToken, SymbolKind, TextDocumentContentChangeEvent, Url,
+    WorkspaceFolder,
 };
 use tree_sitter_c2rust::{InputEdit, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
@@ -84,11 +88,6 @@ pub fn lock_global_build_arc() -> MutexGuard<'static, Build<ArcStr>> {
 /// This is useful for benchmarks to prevent memory accumulation across iterations.
 pub fn clear_caches() {
     {
-        let mut cache = QUERY_HELPER.write();
-        cache.cache_clear();
-    }
-
-    {
         let mut cache = GET_FRAME_INFO_HELPER_EX.write();
         cache.cache_clear();
     }
@@ -105,7 +104,6 @@ pub struct Workspace {
     external_documents: HashMap<Url, ExternalDocument>,
     folder: WorkspaceFolder,
     catalogs: Vec<Catalog>,
-    // TODO remove pub
     pub index_handles: Vec<JoinHandle<()>>,
 }
 
@@ -135,7 +133,7 @@ impl Workspace {
     /// This will replace the document with the same URL if there was one.
     pub fn insert_internal_document(&mut self, document: InternalDocument) -> &InternalDocument {
         debug!("Insert internal document {document}");
-        let path = document.path.clone();
+        let path = document.path().to_path_buf();
         self.internal_documents.insert(path.clone(), document);
         self.internal_documents
             .get(&path)
@@ -229,20 +227,24 @@ impl Workspace {
             .values()
             .flat_map(|doc| {
                 doc.all_frame_infos()
-                    .filter_map(|item| {
-                        if item.iri.to_lowercase().contains(&partial_lower) {
-                            Some((item.iri.clone(), item.iri.clone(), item.clone()))
-                        } else {
-                            item.annotations
-                                .values()
-                                .find_map(|values| {
-                                    values.iter().find(|value| {
-                                        value.to_lowercase().starts_with(&partial_lower)
-                                    })
-                                })
-                                .map(|full| (full.clone(), item.iri.clone(), item.clone()))
-                        }
-                    })
+                    .flat_map(
+                        |item| -> Box<dyn Iterator<Item = (String, Iri, FrameInfo)>> {
+                            if item.iri.to_lowercase().contains(&partial_lower) {
+                                Box::new(once((item.iri.clone(), item.iri.clone(), item.clone())))
+                            } else {
+                                Box::new(
+                                    item.annotations
+                                        .iter()
+                                        .filter(|(_, value)| {
+                                            value.to_lowercase().starts_with(&partial_lower)
+                                        })
+                                        .map(|(full, _)| {
+                                            (full.clone(), item.iri.clone(), item.clone())
+                                        }),
+                                )
+                            }
+                        },
+                    )
                     .collect_vec()
             })
             .collect_vec()
@@ -316,7 +318,7 @@ impl Workspace {
             }
             "simple_iri" | "abbreviated_iri" => {
                 let iri = node_text(node, doc.rope());
-                debug!("Getting node info for {iri} at doc {}", doc.uri);
+                debug!("Getting node info for {iri} at doc {}", doc.uri());
                 let iri = doc
                     .abbreviated_iri_to_full_iri(&iri)
                     .unwrap_or(iri.to_string());
@@ -351,7 +353,11 @@ impl Workspace {
 
         // TODO maybe change this
         // Lets try to find the doc in internal docs
-        if let Some(doc) = self.internal_documents.values().find(|doc| &doc.uri == url) {
+        if let Some(doc) = self
+            .internal_documents
+            .values()
+            .find(|doc| doc.uri() == url)
+        {
             return Some(DocumentReference::Internal(doc));
         }
 
@@ -578,26 +584,27 @@ pub enum Document {
 /// Text -> Parsed -> Queried -> Analyzed -> ``InternalDocument``
 #[derive(Debug)]
 pub struct InternalDocument {
+    id: DocumentId,
+    parsed_document: ParsedDocument,
+    pub queried_document: QueriedDocument,
+    pub stage2: Stage2Document,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct DocumentId {
     /// File location
     pub path: PathBuf,
     /// URL and location where this document was loaded from
     pub uri: Url,
     pub version: i32,
-    queried_document: QueriedDocument,
-    stage2: Stage2Document,
 }
 
 /// An internal document that has analysis results.
 #[derive(Debug)]
-struct Stage2Document {
-    // TODO maybe move everything into Internal document or here
-    // /// File location
-    // path: PathBuf,
-    // /// URL and location where this document was loaded from
-    // uri: Url,
-    // version: i32,
-    definitions: HashSet<Iri>,
-    references: HashSet<Iri>,
+pub struct Stage2Document {
+    pub definitions: Vec<RangeBox<IriDefinition>>,
+    pub references: Vec<RangeBox<Iri>>,
+    pub annotations: Vec<RangeBox<Annotation>>,
 
     all_frame_infos: HashMap<Iri, FrameInfo>,
     local_diagnostics: Vec<Diagnostic>,
@@ -605,13 +612,215 @@ struct Stage2Document {
     directly_reachable_import_urls: Vec<Url>,
     /// These include all other URL's that can be found in this document
     directly_reachable_other_urls: Vec<Url>,
-    iri_locations: HashMap<Iri, Vec<Range>>,
+    iri_locations: HashMap<Iri, Vec<RangeBox<()>>>,
+}
+
+impl Stage2Document {
+    fn update(
+        &mut self,
+        changes: &[Change],
+        post_change_ranges: &[Range],
+        parsed_document: &ParsedDocument,
+        queried_document: &QueriedDocument,
+        id: &DocumentId,
+    ) {
+        debug!("document.edit / analysis post change ranges {post_change_ranges:#?}");
+
+        timeit("document.edit / analysis / edit", || {
+            self.edit_range_boxes(changes);
+        });
+
+        // Retain
+        timeit("document.edit / analysis / retain", || {
+            rayon::join(
+                || retain_vec_rb(post_change_ranges, &mut self.definitions),
+                || {
+                    rayon::join(
+                        || retain_vec_rb(post_change_ranges, &mut self.annotations),
+                        || {
+                            retain_vec_rb_on_remove(
+                                post_change_ranges,
+                                &mut self.references,
+                                |range_box| {
+                                    if let Some(values) =
+                                        self.iri_locations.get_mut(range_box.value())
+                                    {
+                                        // Remove all indexed iri locations
+                                        values.retain(|rb| rb.range() != range_box.range());
+                                    }
+                                },
+                            );
+                        },
+                    )
+                },
+            );
+        });
+
+        // Add
+
+        timeit("document.edit / analysis / extend", || {
+            rayon::join(
+                || {
+                    extend_vec_rb(post_change_ranges, &mut self.definitions, |range| {
+                        queried_document.document_definitions_in_range(parsed_document, range)
+                    });
+                },
+                || {
+                    rayon::join(
+                        || {
+                            extend_vec_rb(post_change_ranges, &mut self.references, |range| {
+                                let add = queried_document
+                                    .document_references_in_range(parsed_document, range);
+
+                                // Readd the index values
+                                for rb in &add {
+                                    let ranges =
+                                        self.iri_locations.entry(rb.value().into()).or_default();
+                                    ranges.push(RangeBox::new((), *rb.range()));
+                                }
+
+                                add
+                            });
+                        },
+                        || {
+                            // Annotations
+                            // The problem was the following insert not removing a faulty info:
+                            //
+                            //  Ontology: <http://example.org/fuzz-test>
+                            //      Class: Foo
+                            //  Class: OTHER Annotations: rdfs:label "OTHER"
+                            //          Annotations: rdfs:label "Foo Label"
+                            //
+                            // After removing the OTHER class the annotations still contain
+                            // - OTHER label "Foo Label"
+                            // So the syntax change ranges did not include the annotation that followed :(
+                            //
+                            // Now the range, of each annotation, covers the whole frame.
+
+                            extend_vec_rb(post_change_ranges, &mut self.annotations, |range| {
+                                queried_document
+                                    .document_annotations_in_range(parsed_document, range)
+                            });
+                        },
+                    )
+                },
+            );
+        });
+
+        timeit("document.edit / analyse / cleanup", || {
+            rayon::join(
+                || {
+                    rayon::join(
+                        || {
+                            self.definitions.par_sort_unstable();
+                            self.definitions.dedup_by_key(|rb| *rb.range());
+                        },
+                        || {
+                            self.iri_locations.par_iter_mut().for_each(|(_, ranges)| {
+                                // TODO maybe remove all sorts :) (I dont think we need them actualy)
+                                // Lets keep them for now
+                                ranges.par_sort();
+                                ranges.dedup();
+                            });
+                        },
+                    )
+                },
+                || {
+                    rayon::join(
+                        || {
+                            self.references.par_sort_unstable();
+                            self.references.dedup_by_key(|rb| *rb.range());
+                        },
+                        || {
+                            self.annotations.par_sort_unstable();
+                            self.annotations.dedup();
+                        },
+                    )
+                },
+            );
+        });
+
+        // Not incremental part --------------------------
+        // This is pretty fast now.
+        // 10ms/16k
+        timeit("document.edit / analysis (not incremental part)", || {
+            let all_frame_infos = timeit("all frame infos", || {
+                QueriedDocument::document_all_frame_infos(
+                    &self.definitions,
+                    &self.annotations,
+                    &id.path,
+                )
+            });
+
+            // self.references = queried_document.document_references(parsed_document);
+            self.local_diagnostics = parsed_document.syntax_errors();
+            self.all_frame_infos = all_frame_infos;
+        });
+    }
+
+    fn edit_range_boxes(&mut self, changes: &[Change]) {
+        rayon::join(
+            || {
+                rayon::join(
+                    || edit_vec_rb(changes, &mut self.definitions),
+                    || edit_vec_rb(changes, &mut self.references),
+                )
+            },
+            || {
+                rayon::join(
+                    || edit_vec_rb(changes, &mut self.annotations),
+                    || {
+                        self.iri_locations.par_iter_mut().for_each(|(_, rbs)| {
+                            for rb in rbs {
+                                rb.edit(changes.iter());
+                            }
+                        });
+                    },
+                )
+            },
+        );
+    }
+}
+
+fn edit_vec_rb<T: Send>(changes: &[Change], items: &mut Vec<RangeBox<T>>) {
+    items.par_iter_mut().for_each(|x| x.edit(changes.iter()));
+}
+
+fn retain_vec_rb<T>(post_change_ranges: &[Range], items: &mut Vec<RangeBox<T>>) {
+    retain_vec_rb_on_remove(post_change_ranges, items, |_| {});
+}
+
+fn retain_vec_rb_on_remove<T, F: FnMut(&RangeBox<T>)>(
+    post_change_ranges: &[Range],
+    items: &mut Vec<RangeBox<T>>,
+    mut on_remove: F,
+) {
+    items.retain(|range_box| {
+        for sc in post_change_ranges {
+            if range_box.range().overlaps(sc) {
+                on_remove(range_box);
+                return false;
+            }
+        }
+        true
+    });
+}
+
+fn extend_vec_rb<T, F: FnMut(Range) -> Vec<RangeBox<T>>>(
+    post_change_ranges: &[Range],
+    items: &mut Vec<RangeBox<T>>,
+    mut gen: F,
+) {
+    for di in post_change_ranges {
+        let additional_items = gen(*di);
+
+        items.extend(additional_items);
+    }
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct IriDefinition {
     pub iri: Iri,
-    pub location: Location,
     pub kind: FrameType,
 }
 
@@ -651,25 +860,6 @@ impl Diagnostic {
             data: None,
         })
     }
-
-    // TODO parse from diagnostic back
-    // pub fn from_lsp_diagnostic(
-    //     value: lsp_types::Diagnostic,
-    //     rope: &Rope,
-    //     encoding: &PositionEncodingKind,
-    // ) -> Self {
-    //     // Ok(lsp_types::Diagnostic {
-    //     //     range: self.range.into_lsp(rope, encoding)?,
-    //     //     severity: Some(DiagnosticSeverity::ERROR),
-    //     //     code: None,
-    //     //     code_description: None,
-    //     //     source: Some("owl language server".to_string()),
-    //     //     message: self.label(),
-    //     //     related_information: None,
-    //     //     tags: None,
-    //     //     data: None,
-    //     // })
-    // }
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -686,9 +876,9 @@ impl Display for InternalDocument {
         write!(
             f,
             "InternalDocument {{ path = \"{}\", url = \"{}\" version = {}, rope.len_bytes = {}}}",
-            self.path.display(),
-            self.uri,
-            self.version,
+            self.path().display(),
+            self.uri(),
+            self.version(),
             self.rope().len_bytes()
         )
     }
@@ -696,8 +886,8 @@ impl Display for InternalDocument {
 
 impl core::hash::Hash for InternalDocument {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.path.hash(state);
-        Hash::hash(&self.version, state);
+        self.path().hash(state);
+        Hash::hash(&self.version(), state);
     }
 }
 impl Eq for InternalDocument {}
@@ -713,7 +903,21 @@ impl InternalDocument {
         Self::new_with_path(uri, version, text, path)
     }
 
+    pub fn path(&self) -> &Path {
+        &self.id.path
+    }
+
+    pub fn uri(&self) -> &Url {
+        &self.id.uri
+    }
+
+    pub fn version(&self) -> i32 {
+        self.id.version
+    }
+
     pub fn new_with_path(uri: Url, version: i32, text: String, path: PathBuf) -> InternalDocument {
+        let id = DocumentId { path, uri, version };
+
         let tree = timeit("create_document / parse", || {
             lock_global_parser()
                 .parse(&text, None)
@@ -721,39 +925,36 @@ impl InternalDocument {
         });
 
         let rope = Rope::from(text);
-        let parsed_document = ParsedDocument {
-            path: path.clone(),
-            uri: uri.clone(),
-            version,
-            tree,
-            rope,
-        };
+        let parsed_document = ParsedDocument { tree, rope };
 
         let queried_document: QueriedDocument = parsed_document.into_queried();
 
-        let stage2: Stage2Document = queried_document.analyze();
+        let stage2: Stage2Document = queried_document.analyze(&parsed_document, &id);
 
         debug!("Stage2Document -> InternalDocument");
 
         InternalDocument {
-            path,
-            uri,
-            version,
+            id,
+            parsed_document,
             queried_document,
             stage2,
         }
     }
 
     pub fn rope(&self) -> &Rope {
-        &self.queried_document.parsed_document.rope
+        &self.parsed_document.rope
     }
 
     pub fn tree(&self) -> &Tree {
-        &self.queried_document.parsed_document.tree
+        &self.parsed_document.tree
     }
 
-    pub fn prefixes(&self) -> &HashMap<String, String> {
-        &self.queried_document.prefixes
+    pub fn prefixes(&self) -> HashMap<String, String> {
+        self.queried_document
+            .prefixes
+            .iter()
+            .map(|(k, v)| (k.clone(), v.value().clone()))
+            .collect()
     }
 
     pub fn diagnostics(&self, workspace: &Workspace) -> Vec<Diagnostic> {
@@ -774,7 +975,7 @@ impl InternalDocument {
     }
 
     pub fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
-        node_by_id(&self.queried_document.parsed_document, id)
+        node_by_id(&self.parsed_document, id)
     }
 
     /// Returns all document URL's that can be reached (imports, prefixes, ...) from this internal document.
@@ -793,12 +994,12 @@ impl InternalDocument {
         workspace: &Workspace,
         include_prefix: bool,
     ) -> Result<()> {
-        if result.contains(&self.uri) {
+        if result.contains(self.uri()) {
             // Do nothing
             return Ok(());
         }
 
-        result.insert(self.uri.clone());
+        result.insert(self.uri().clone());
 
         let urls = self.reachable_urls(include_prefix);
 
@@ -855,10 +1056,11 @@ impl InternalDocument {
 
     pub fn edit(
         self, // TODO #30 do a mut instead so the analytics do not get dropped
-        params: &DidChangeTextDocumentParams,
+        params: DidChangeTextDocumentParams,
         encoding: &PositionEncodingKind,
     ) -> Result<InternalDocument> {
-        if self.version >= params.text_document.version {
+        let new_version = params.text_document.version;
+        if self.version() >= new_version {
             return Ok(self); // no change needed
         }
 
@@ -875,85 +1077,65 @@ impl InternalDocument {
 
         debug!("content changes {:#?}", params.content_changes);
 
-        let mut new_tree = self.tree().clone();
-        let mut new_rope = self.rope().clone();
-        let uri = self.uri;
-        let path = self.path;
+        let InternalDocument {
+            id,
+            parsed_document,
+            mut queried_document,
+            mut stage2,
+        } = self;
 
-        // This range is relative to the *old* document not the new one
-        for change in &params.content_changes {
-            let range = change.range.expect("range to be defined");
-            // LSP ranges are in bytes when encoding is utf-8!!!
-            let old_range: Range = Range::from_lsp(&range, &new_rope, encoding)?;
-            let start_byte = old_range.start.byte_index(&new_rope);
-            let old_end_byte = old_range.end.byte_index(&new_rope);
+        let changes = changes_from_lsp(params, encoding, &parsed_document.rope);
 
-            // must come before the rope is changed!
-            let start_char = new_rope.try_byte_to_char(start_byte)?;
-            let old_end_char = new_rope.try_byte_to_char(old_end_byte)?;
-
-            debug!(
-                "change range in chars {start_byte}..{old_end_byte} og range {range:?} and text {}",
-                change.text
-            );
-
-            // rope replace
-            new_rope.try_remove(start_char..old_end_char)?;
-            new_rope.try_insert(start_char, &change.text)?;
-
-            // this must come after the rope was changed!
-            let new_end_byte = start_byte + change.text.len();
-            let new_end_position = Position::new_from_byte_index(&new_rope, new_end_byte);
-
-            let edit = InputEdit {
-                start_byte,
-                old_end_byte,
-                new_end_byte,
-                start_position: old_range.start.into(),
-                old_end_position: old_range.end.into(),
-                new_end_position: new_end_position.into(),
-            };
-            timeit("tree edit", || new_tree.edit(&edit));
+        // Note that these ranges are in the pre edit form
+        for change in &changes {
+            debug!("Updating changed range (pre edit) {change:?}");
         }
-        let new_version = params.text_document.version;
 
-        let rope_provider = RopeProvider::new(&new_rope);
+        let (parsed_document, old_tree) = parsed_document.edit_parsed_document(changes.iter())?;
 
-        let new_tree = {
-            let mut parser_guard = lock_global_parser();
-            timeit("parsing", || {
-                parser_guard
-                    .parse_with_options(
-                        &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
-                        Some(&new_tree),
-                        None,
-                    )
-                    .expect("language to be set, no timeout to be used, no cancellation flag")
-            })
-        };
-
-        // TODO #30 prune diagnostics with
-        // Remove all old diagnostics with an overlapping range. They will need to be recreated
-        // Move all other diagnostics
-        // Use change ranges to detect syntactically changed parts
-
-        let parsed_document = ParsedDocument {
-            uri: uri.clone(),
-            path: path.clone(),
+        // Increment ID
+        let id = DocumentId {
             version: new_version,
-            tree: new_tree,
-            rope: new_rope,
+            ..id
         };
 
-        let queried_document: QueriedDocument =
-            timeit("document.edit / querie", || parsed_document.into_queried());
+        // This is a combination of syntax and text changes
+        let mut post_change_ranges: &[Range] =
+            &post_change_ranges(&changes, &parsed_document, &old_tree);
 
-        let stage2 = timeit("document.edit / analyze", || queried_document.analyze());
+        debug!("Post change ranges: {post_change_ranges:#?}");
+
+        let dirty_prefix = timeit("document.edit / queries", || {
+            queried_document.update(&changes, post_change_ranges, &parsed_document)
+        });
+
+        // The problem is that the references and definitions (and other stuff) depends on
+        // prefixes. So the change in a prefix can change a lot of references that are not
+        // located at the prefix.
+        // Solution 1: Remove the dependency and move the resolution of abbriv iri -> full iri
+        // into a later step.
+        // Solution 2: Mark all references dirty when ever a prefix changes, which is not often.
+        // ==========
+        // I Chose Solution 2
+        // Do a whole new analysis when the prefixes change!
+        if dirty_prefix {
+            info!("document.edit Dirty prefix. New post change range is the max range.");
+            post_change_ranges = &[Range::FULL_RANGE];
+        }
+
+        timeit("document.edit / analyze", || {
+            stage2.update(
+                &changes,
+                post_change_ranges,
+                &parsed_document,
+                &queried_document,
+                &id,
+            );
+        });
 
         let doc = InternalDocument {
-            path,
-            uri,
-            version: new_version,
+            id,
+            parsed_document,
             queried_document,
             stage2,
         };
@@ -990,9 +1172,9 @@ impl InternalDocument {
         workspace: &Workspace,
     ) -> Vec<tower_lsp::lsp_types::InlayHint> {
         let reachable_docs = self.reachable_docs_recursive(workspace, true);
-        debug!("Reachable docs for {} are {reachable_docs:#?}", self.uri);
+        debug!("Reachable docs for {} are {reachable_docs:#?}", self.uri());
         // TODO cache this in stage2
-        self.queried_document
+        self
             .parsed_document
             .query_range(&ALL_QUERIES.iri_query_all, range)
             .into_iter()
@@ -1225,14 +1407,13 @@ impl InternalDocument {
         iri_kind: &String,
         original: &str,
     ) -> Vec<(Range, String)> {
-        self.queried_document
-            .parsed_document
+        self.parsed_document
             .query(&ALL_QUERIES.iri_query_all)
             .into_iter()
             .map(|m| {
                 let (iri, range, parent_kind) = match &m.captures[..] {
                     [iri_capture] => (
-                        match iri_capture.node.kind.as_str() {
+                        match iri_capture.node.kind {
                             "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
                             "simple_iri" | "abbreviated_iri" => self
                                 .abbreviated_iri_to_full_iri(&iri_capture.node.text)
@@ -1267,14 +1448,13 @@ impl InternalDocument {
 
     pub fn references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range> {
         // TODO change this into using queried_document directly
-        self.queried_document
-            .parsed_document
+        self.parsed_document
             .query(&ALL_QUERIES.iri_query_references)
             .into_iter()
             .map(|m| {
                 let (iri, range, node_id) = match &m.captures[..] {
                     [iri_capture] => (
-                        match iri_capture.node.kind.as_str() {
+                        match iri_capture.node.kind {
                             "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
                             "simple_iri" | "abbreviated_iri" => self
                                 .abbreviated_iri_to_full_iri(&iri_capture.node.text)
@@ -1335,14 +1515,195 @@ impl InternalDocument {
         // TODO create diagnostics for files that depend on this file
         debug!(
             "Publish diagnostics for {} {:#?}",
-            self.path.display(),
+            self.path().display(),
             diagnostics
         );
 
         client
-            .publish_diagnostics(self.uri.clone(), diagnostics, Some(self.version))
+            .publish_diagnostics(self.uri().clone(), diagnostics, Some(self.version()))
             .await;
     }
+}
+
+const RANGE_GROW: u32 = 1;
+
+/// This is a combination of syntax and text changes
+fn post_change_ranges(
+    changes: &[Change],
+    parsed_document: &ParsedDocument,
+    old_tree: &Tree,
+) -> Vec<Range> {
+    old_tree
+        .changed_ranges(&parsed_document.tree)
+        .map(Range::from)
+        .chain(changes.iter().map(Change::range_after_change))
+        // Increase the range of a change by one char so that adjacent nodes are checked
+        .map(|r| Range {
+            start: r.start.moved_left(RANGE_GROW, &parsed_document.rope),
+            end: r.end.moved_right(RANGE_GROW, &parsed_document.rope),
+        })
+        .collect_vec()
+}
+
+fn changes_from_lsp(
+    params: DidChangeTextDocumentParams,
+    encoding: &PositionEncodingKind,
+    rope: &Rope,
+) -> Vec<Change> {
+    params
+        .content_changes
+        .into_iter()
+        .map(|TextDocumentContentChangeEvent { range, text, .. }| {
+            Range::from_lsp(&range.expect("range to be defined"), rope, encoding)
+                .map(|range| Change { range, text })
+        })
+        .filter_and_log()
+        .collect_vec()
+}
+
+impl ParsedDocument {
+    fn edit_parsed_document<'a>(
+        self,
+        changes: impl Iterator<Item = &'a Change>,
+    ) -> Result<(Self, Tree)> {
+        let ParsedDocument { tree, rope, .. } = self;
+        let mut old_tree = tree;
+        let mut new_rope = rope;
+
+        for change in changes {
+            apply_change_to_rope_and_tree(&mut old_tree, &mut new_rope, change)?;
+        }
+
+        let rope_provider = RopeProvider::new(&new_rope);
+        let new_tree = {
+            let mut parser_guard = lock_global_parser();
+            // This takes a long time 190ms/16k
+            timeit("document.edit / parsing", || {
+                parser_guard
+                    .parse_with_options(
+                        &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
+                        Some(&old_tree),
+                        None,
+                    )
+                    .expect("language to be set, no timeout to be used, no cancellation flag")
+            })
+        };
+        let parsed_document = ParsedDocument {
+            tree: new_tree,
+            rope: new_rope,
+        };
+        Ok((parsed_document, old_tree))
+    }
+
+    /// Generate the diagnostics for a single node, walking recursively down to every child and every syntax error within
+    fn syntax_errors(self: &ParsedDocument) -> Vec<Diagnostic> {
+        let mut cursor = self.tree.root_node().walk();
+        let mut diagnostics = Vec::<Diagnostic>::new();
+
+        loop {
+            let node = cursor.node();
+
+            if node.is_error() {
+                // log
+                let range: Range = cursor.node().range().into();
+
+                // root has no parents so use itself
+                let parent_kind = node.parent().unwrap_or(node).kind();
+
+                if let Some(static_node) = NODE_TYPES.get(parent_kind) {
+                    let valid_children: String = Itertools::intersperse(
+                        static_node
+                            .children
+                            .types
+                            .iter()
+                            .map(|sn| node_type_to_string(&sn.type_)),
+                        ", ".to_string(),
+                    )
+                    .collect();
+
+                    let parent = node_type_to_string(parent_kind);
+
+                    diagnostics.push(Diagnostic {
+                        range,
+                        kind: DiagnosticKind::SyntaxError {
+                            valid_children,
+                            parent,
+                        },
+                    });
+                }
+                // move along
+                while !cursor.goto_next_sibling() {
+                    // move out
+                    if !cursor.goto_parent() {
+                        // this node has no parent, it's the root
+                        return diagnostics;
+                    }
+                }
+            } else if node.has_error() {
+                // move in
+                let has_child = cursor.goto_first_child(); // should always work
+
+                if !has_child {
+                    while !cursor.goto_next_sibling() {
+                        // move out
+                        if !cursor.goto_parent() {
+                            // this node has no parent, it's the root
+                            return diagnostics;
+                        }
+                    }
+                }
+            } else {
+                // move along
+                while !cursor.goto_next_sibling() {
+                    // move out
+                    if !cursor.goto_parent() {
+                        // this node has no parent, it's the root
+                        return diagnostics;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// .
+///
+/// # Panics
+///
+/// Panics if change has no range.
+///
+/// # Errors
+///
+/// This function will return an error if the change is out of range.
+pub fn apply_change_to_rope_and_tree(
+    new_tree: &mut Tree,
+    new_rope: &mut Rope, // This rope is always in UTF-8
+    Change {
+        range: old_range,
+        text,
+    }: &Change,
+) -> Result<()> {
+    // let range = range.expect("range to be defined");
+    // let old_range = range: Range = Range::from_lsp(&range, &*new_rope, encoding)?;
+    let start_byte = old_range.start.byte_index(&*new_rope);
+    let old_end_byte = old_range.end.byte_index(&*new_rope);
+    let start_char = new_rope.try_byte_to_char(start_byte)?;
+    let old_end_char = new_rope.try_byte_to_char(old_end_byte)?;
+    debug!("change range in bytes {start_byte}..{old_end_byte} and text {text}");
+    new_rope.try_remove(start_char..old_end_char)?;
+    new_rope.try_insert(start_char, text)?;
+    let new_end_byte = start_byte + text.len();
+    let new_end_position = Position::new_from_byte_index(&*new_rope, new_end_byte);
+    let edit = InputEdit {
+        start_byte,
+        old_end_byte,
+        new_end_byte,
+        start_position: old_range.start.into(),
+        old_end_position: old_range.end.into(),
+        new_end_position: new_end_position.into(),
+    };
+    timeit("tree edit", || new_tree.edit(&edit));
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -1355,21 +1716,8 @@ pub struct FormattingSettings {
 /// An internal document that has no semantic analysis. Just text and syntax tree.
 #[derive(Debug, Clone)]
 struct ParsedDocument {
-    /// File location
-    path: PathBuf,
-    /// URL and location where this document was loaded from
-    uri: Url,
-    version: i32,
     tree: Tree,
     rope: Rope,
-}
-
-impl Hash for ParsedDocument {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.path.hash(state);
-        self.uri.hash(state);
-        Hash::hash(&self.version, state);
-    }
 }
 
 impl From<ParsedDocument> for QueriedDocument {
@@ -1381,10 +1729,6 @@ impl From<ParsedDocument> for QueriedDocument {
         let imports = val.imports();
 
         QueriedDocument {
-            path: val.path.clone(),
-            uri: val.uri.clone(),
-            _version: val.version,
-            parsed_document: val,
             ontology_id,
             prefixes,
             imports,
@@ -1393,7 +1737,7 @@ impl From<ParsedDocument> for QueriedDocument {
 }
 
 impl ParsedDocument {
-    fn into_queried(self: ParsedDocument) -> QueriedDocument {
+    fn into_queried(self: &ParsedDocument) -> QueriedDocument {
         debug!("ParsedDocument -> QueriedDocument");
 
         let ((ontology_id, prefixes), imports) = rayon::join(
@@ -1402,34 +1746,11 @@ impl ParsedDocument {
         );
 
         QueriedDocument {
-            path: self.path.clone(),
-            uri: self.uri.clone(),
-            _version: self.version,
-            parsed_document: self,
             ontology_id,
             prefixes,
             imports,
         }
     }
-}
-
-/// This acts the same way as ``node_by_id`` but for all nodes
-pub fn node_by_id_map(tree: &Tree) -> HashMap<usize, Node<'_>> {
-    let mut res = HashMap::new();
-    let mut w = tree.walk();
-    'outer: loop {
-        res.insert(w.node().id(), w.node());
-
-        // In order traversal
-        if !w.goto_first_child() {
-            while !w.goto_next_sibling() {
-                if !w.goto_parent() {
-                    break 'outer;
-                }
-            }
-        }
-    }
-    res
 }
 
 fn node_by_id(parsed_document: &ParsedDocument, id: usize) -> Option<Node<'_>> {
@@ -1460,16 +1781,25 @@ impl ParsedDocument {
     }
 
     /// Returns the ontology IRI if possible and the version IRI if possible.
-    pub fn ontology_id(&self) -> Option<(String, Option<String>)> {
+    pub fn ontology_id(&self) -> Option<RangeBox<OntologyId>> {
         match &self.query(&ALL_QUERIES.ontology)[..] {
             [] => None,
             [ontology] => match &ontology.captures[..] {
                 [] => None,
                 // This should be a full IRI so lets trim it
-                [iri] => Some((trim_full_iri(iri.node.text.clone()), None)),
-                [iri, version_iri] => Some((
-                    trim_full_iri(iri.node.text.clone()),
-                    Some(trim_full_iri(version_iri.node.text.clone())),
+                [iri_capture] => Some(RangeBox::new(
+                    (trim_full_iri(iri_capture.node.text.clone()), None),
+                    iri_capture.node.range,
+                )),
+                [iri_capture, version_iri_capture] => Some(RangeBox::new(
+                    (
+                        trim_full_iri(iri_capture.node.text.clone()),
+                        Some(trim_full_iri(version_iri_capture.node.text.clone())),
+                    ),
+                    Range::new(
+                        iri_capture.node.range.start,
+                        version_iri_capture.node.range.end,
+                    ),
                 )),
                 _ => unreachable!("The query has only one capture"),
             },
@@ -1487,13 +1817,16 @@ impl ParsedDocument {
     /// Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
     /// Prefix: owl: <http://www.w3.org/2002/07/owl#>
     /// ```
-    pub fn prefixes(&self) -> HashMap<String, String> {
+    pub fn prefixes(&self) -> HashMap<String, RangeBox<String>> {
         self.query(&ALL_QUERIES.prefix)
             .into_iter()
             .map(|m| match &m.captures[..] {
-                [name, iri] => (
-                    name.node.text.trim_end_matches(':').to_string(),
-                    trim_full_iri(iri.node.text.clone()),
+                [name_capture, iri_capture] => (
+                    name_capture.node.text.trim_end_matches(':').to_string(),
+                    RangeBox::new(
+                        trim_full_iri(iri_capture.node.text.clone()),
+                        Range::new(name_capture.node.range.start, iri_capture.node.range.end),
+                    ),
                 ),
                 _ => unreachable!(),
             })
@@ -1503,35 +1836,52 @@ impl ParsedDocument {
             //         .iter()
             //         .map(|(a, b)| (a.to_string(), b.to_string())),
             // )
-            .unique()
+            .unique_by(|(k, v)| (k.clone(), v.value().clone()))
             .collect()
     }
 
-    pub fn imports(&self) -> Vec<Iri> {
+    pub fn prefixes_in_range(&self, range: Range) -> HashMap<String, RangeBox<String>> {
+        self.query_range(&ALL_QUERIES.prefix, range)
+            .into_iter()
+            .map(|m| match &m.captures[..] {
+                [name_capture, iri_capture] => (
+                    name_capture.node.text.trim_end_matches(':').to_string(),
+                    RangeBox::new(
+                        trim_full_iri(iri_capture.node.text.clone()),
+                        Range::new(name_capture.node.range.start, iri_capture.node.range.end),
+                    ),
+                ),
+                _ => unreachable!(),
+            })
+            .unique_by(|(k, v)| (k.clone(), v.value().clone()))
+            .collect()
+    }
+
+    pub fn imports(&self) -> Vec<RangeBox<Iri>> {
         self.query(&ALL_QUERIES.import_query)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri] => Oxiri::parse(trim_full_iri(iri.node.text.clone())).ok(),
+                [iri_capture] => Oxiri::parse(trim_full_iri(iri_capture.node.text.clone()))
+                    .ok()
+                    .map(|iri_| RangeBox::new(iri_.as_str().to_string(), iri_capture.node.range)),
                 _ => unimplemented!(),
             })
-            .map(|iri| iri.as_str().to_string())
+            .collect_vec()
+    }
+
+    pub fn imports_in_range(&self, range: Range) -> Vec<RangeBox<Iri>> {
+        self.query_range(&ALL_QUERIES.import_query, range)
+            .iter()
+            .filter_map(|m| match &m.captures[..] {
+                [iri_capture] => Oxiri::parse(trim_full_iri(iri_capture.node.text.clone()))
+                    .ok()
+                    .map(|iri_| RangeBox::new(iri_.as_str().to_string(), iri_capture.node.range)),
+                _ => unimplemented!(),
+            })
             .collect_vec()
     }
 }
 
-#[cached(
-    key = "u64",
-    convert = r#"{
-        let mut hasher = DefaultHasher::new();
-        stage1.hash(&mut hasher);
-        range.hash(&mut hasher);
-        query.capture_names().hash(&mut hasher);
-        Hash::hash(&query.start_byte_for_pattern(0), &mut hasher);
-        Hash::hash(&query.end_byte_for_pattern(0), &mut hasher);
-        hasher.finish()
-     } "#,
-    size = 100
-)]
 fn query_helper(
     stage1: &ParsedDocument,
     query: &Query,
@@ -1539,7 +1889,9 @@ fn query_helper(
 ) -> Vec<UnwrappedQueryMatch> {
     let mut query_cursor = QueryCursor::new();
     if let Some(range) = range {
-        query_cursor.set_point_range(range.into());
+        if range != Range::FULL_RANGE {
+            query_cursor.set_point_range(range.into());
+        }
     }
     let rope_provider = RopeProvider::new(&stage1.rope);
 
@@ -1557,7 +1909,8 @@ fn query_helper(
                         id: c.node.id(),
                         text: node_text(&c.node, &stage1.rope).to_string(),
                         range: c.node.range().into(),
-                        kind: c.node.kind().into(),
+                        kind: c.node.kind(),
+                        parent_kind: c.node.parent().map(|p| p.kind()),
                     },
                     index: c.index,
                 })
@@ -1566,27 +1919,29 @@ fn query_helper(
         .collect_vec()
 }
 
-#[derive(Debug)]
-struct QueriedDocument {
-    /// File location
-    path: PathBuf,
-    /// URL and location where this document was loaded from
-    uri: Url,
-    _version: i32,
-    parsed_document: ParsedDocument,
+type OntologyId = (Iri, Option<Iri>);
 
-    ontology_id: Option<(Iri, Option<Iri>)>,
-    prefixes: HashMap<String, Iri>,
-    imports: Vec<Iri>,
+#[derive(Debug)]
+pub struct QueriedDocument {
+    pub ontology_id: Option<RangeBox<OntologyId>>,
+    pub prefixes: HashMap<String, RangeBox<Iri>>,
+    pub imports: Vec<RangeBox<Iri>>,
 }
+
+/// Frame IRI, Annotation IRI, Literal
+type Annotation = (String, String, String);
 
 impl QueriedDocument {
     /// Finds flat references to other document URL's in this document
-    pub fn reachable_urls(&self, document_references: &[(Iri, Range)]) -> (Vec<Url>, Vec<Url>) {
+    pub fn reachable_urls(
+        &self,
+        document_references: &[RangeBox<Iri>],
+        own_uri: &Url,
+    ) -> (Vec<Url>, Vec<Url>) {
         let imports = self
             .imports
             .iter()
-            .filter_map(|iri| Url::parse(iri).ok())
+            .filter_map(|rb| Url::parse(rb.value()).ok())
             .collect_vec();
 
         // Other urls include prefixes
@@ -1594,10 +1949,16 @@ impl QueriedDocument {
             .prefixes
             .iter()
             // Filter out the empty prefix ":"
-            .filter_map(|(prefix, url)| if prefix.is_empty() { None } else { Some(url) })
+            .filter_map(|(prefix, url)| {
+                if prefix.is_empty() {
+                    None
+                } else {
+                    Some(url.value())
+                }
+            })
             .filter_map(|url| Url::parse(url).ok())
             // Filter out the current document as a prefix (most likely the empty prefix ":")
-            .filter(|url| url != &self.uri)
+            .filter(|url| url != own_uri)
             .map(|url| {
                 // Remove fragments from prefixes
                 if url.fragment().is_some() {
@@ -1612,11 +1973,15 @@ impl QueriedDocument {
 
         let referenced_urls = document_references
             .iter()
-            .filter_map(|(iri, _)| iri_to_parent_url(iri))
+            .filter_map(|rb| iri_to_parent_url(rb.value()))
             .unique()
             .collect_vec();
 
-        debug!("Extending {} with {referenced_urls:#?}", self.uri);
+        debug!(
+            "Extending {} with {}",
+            own_uri,
+            referenced_urls.iter().join(", ")
+        );
 
         other_urls.extend(referenced_urls);
 
@@ -1628,161 +1993,298 @@ impl QueriedDocument {
         if let Some((prefix, simple_iri)) = abbreviated_iri.split_once(':') {
             prefixes
                 .get(prefix)
-                .map(|resolved_prefix| resolved_prefix.clone() + simple_iri)
+                .map(|resolved_prefix| resolved_prefix.value().clone() + simple_iri)
         } else {
             // Simple IRIs get a free colon prepended
             // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
             prefixes
                 .get("")
-                .map(|resolved_prefix| resolved_prefix.clone() + abbreviated_iri)
+                .map(|resolved_prefix| resolved_prefix.value().clone() + abbreviated_iri)
         }
     }
 
-    fn document_all_frame_infos<'a>(
-        definitions: impl Iterator<Item = &'a IriDefinition>,
-        annotations: impl Iterator<Item = (String, String, String)>,
+    fn document_all_frame_infos(
+        definitions: &[RangeBox<IriDefinition>],
+        annotations: &[RangeBox<Annotation>],
+        path: &Path,
     ) -> HashMap<Iri, FrameInfo> {
-        let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
-
-        // First we collect the annotations
-        for frame_info in annotations.map(|(frame_iri, annotation_iri, literal)| FrameInfo {
-            iri: frame_iri.clone(),
-            annotations: HashMap::from([(annotation_iri, vec![literal])]),
-            frame_type: FrameType::Unknown,
-            definitions: Vec::new(),
-        }) {
-            if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
-                // Merge the frame info for the same IRI
-                frame_info_mut.extend(frame_info);
-            } else {
-                frame_infos.insert(frame_info.iri.clone(), frame_info);
-            }
-        }
-
-        // Second we collect the location and frame type (definitions)
-        for frame_info in definitions.map(|definiton| FrameInfo {
-            iri: definiton.iri.clone(),
-            annotations: HashMap::new(),
-            frame_type: definiton.kind,
-            definitions: vec![definiton.location.clone()],
-        }) {
-            if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
-                // Merge the frame info for the same IRI
-                frame_info_mut.extend(frame_info);
-            } else {
-                frame_infos.insert(frame_info.iri.clone(), frame_info);
-            }
-        }
-
-        frame_infos
+        annotations
+            .par_iter()
+            .map(|rb| {
+                let (frame_iri, annotation_iri, literal) = rb.value();
+                FrameInfo {
+                    iri: frame_iri.clone(),
+                    annotations: vec![(annotation_iri.clone(), literal.clone())],
+                    frame_type: FrameType::Unknown,
+                    definitions: Vec::new(),
+                }
+            })
+            .chain(definitions.par_iter().map(|definiton| FrameInfo {
+                iri: definiton.value().iri.clone(),
+                annotations: Vec::new(),
+                frame_type: definiton.value().kind,
+                definitions: vec![Location {
+                    uri: Url::from_file_path(path).expect("valid path"),
+                    range: *definiton.range(),
+                }],
+            }))
+            .fold(
+                HashMap::new, // each thread starts with an empty map
+                |mut acc, frame_info| {
+                    acc.entry(frame_info.iri.clone())
+                        .and_modify(|existing: &mut FrameInfo| existing.extend(frame_info.clone()))
+                        .or_insert(frame_info);
+                    acc
+                },
+            )
+            .reduce(
+                HashMap::new, // merge the per-thread maps together
+                |mut a, b| {
+                    for (iri, frame_info) in b {
+                        a.entry(iri)
+                            .and_modify(|existing| existing.extend(frame_info.clone()))
+                            .or_insert(frame_info);
+                    }
+                    a
+                },
+            )
     }
 
-    fn document_annotations(&self) -> Vec<(String, String, String)> {
-        self.parsed_document
-            .query(&ALL_QUERIES.annotation_query)
+    fn document_annotations(
+        &self,
+        parsed_document: &ParsedDocument,
+    ) -> Vec<RangeBox<(String, String, String)>> {
+        self.document_annotations_in_range(parsed_document, Range::FULL_RANGE)
+    }
+
+    fn document_annotations_in_range(
+        &self,
+        parsed_document: &ParsedDocument,
+        range: Range,
+    ) -> Vec<RangeBox<Annotation>> {
+        parsed_document
+            .query_range(&ALL_QUERIES.annotation_query, range)
             .iter()
             .map(|m| match &m.captures[..] {
-                [frame_iri, annotation_iri, literal] => {
-                    let iri = trim_full_iri(frame_iri.node.text.clone());
-                    let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-                    let iri = trim_full_iri(annotation_iri.node.text.clone());
-                    let annotation_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-                    let literal = trim_string_value(&literal.node.text);
+                [frame_iri_capture, annotation_iri_capture, literal_capture, frame_capture] => {
+                    let frame_iri = trim_full_iri(frame_iri_capture.node.text.clone());
+                    let frame_iri = self
+                        .abbreviated_iri_to_full_iri(&frame_iri)
+                        .unwrap_or(frame_iri);
 
-                    (frame_iri, annotation_iri, literal)
+                    let annotation_iri = trim_full_iri(annotation_iri_capture.node.text.clone());
+                    let annotation_iri = self
+                        .abbreviated_iri_to_full_iri(&annotation_iri)
+                        .unwrap_or(annotation_iri);
+
+                    let literal = trim_string_value(&literal_capture.node.text);
+
+                    RangeBox::new(
+                        (frame_iri, annotation_iri, literal),
+                        frame_capture.node.range,
+                    )
                 }
                 _ => unreachable!(),
             })
             .collect_vec()
     }
 
-    fn document_definitions(&self) -> Vec<IriDefinition> {
-        let node_by_id = node_by_id_map(&self.parsed_document.tree);
-        self.parsed_document
-            .query(&ALL_QUERIES.frame_query)
+    fn document_definitions(
+        &self,
+        parsed_document: &ParsedDocument,
+    ) -> Vec<RangeBox<IriDefinition>> {
+        self.document_definitions_in_range(parsed_document, Range::FULL_RANGE)
+    }
+
+    fn document_definitions_in_range(
+        &self,
+        parsed_document: &ParsedDocument,
+        range: Range,
+    ) -> Vec<RangeBox<IriDefinition>> {
+        parsed_document
+            .query_range(&ALL_QUERIES.frame_query, range)
             .iter()
             .map(|m| match &m.captures[..] {
-                [frame_iri, frame] => {
-                    let iri = trim_full_iri(frame_iri.node.text.clone());
-                    let frame_node_id = frame_iri.node.id;
-                    let iri_parent_kind = node_by_id
-                        .get(&frame_node_id)
-                        .expect("Node id must be valid after query")
-                        .parent()
-                        .expect("All frame IRIs should have paretns")
-                        .kind();
-                    let frame_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                [frame_iri_capture, frame_capture] => {
+                    let frame_iri_parent_kind = frame_iri_capture
+                        .node
+                        .parent_kind
+                        .as_ref()
+                        .expect("All frame IRIs should have parents");
 
-                    IriDefinition {
-                        iri: frame_iri,
-                        location: Location {
-                            uri: Url::from_file_path(&self.path)
-                                .expect("Path should be valid file URL"),
-                            range: frame.node.range,
+                    let frame_iri = trim_full_iri(frame_iri_capture.node.text.clone());
+                    let frame_iri = self
+                        .abbreviated_iri_to_full_iri(&frame_iri)
+                        .unwrap_or(frame_iri);
+
+                    RangeBox::new(
+                        IriDefinition {
+                            iri: frame_iri,
+                            kind: FrameType::parse(frame_iri_parent_kind),
                         },
-                        kind: FrameType::parse(iri_parent_kind),
-                    }
+                        frame_capture.node.range,
+                    )
                 }
                 _ => unreachable!(),
             })
             .collect()
     }
 
-    fn document_references(&self) -> Vec<(String, Range)> {
-        self.parsed_document
-            .query(&ALL_QUERIES.iri_query_references)
+    fn document_references(&self, parsed_document: &ParsedDocument) -> Vec<RangeBox<String>> {
+        self.document_references_in_range(parsed_document, Range::FULL_RANGE)
+    }
+
+    fn document_references_in_range(
+        &self,
+        parsed_document: &ParsedDocument,
+        range: Range,
+    ) -> Vec<RangeBox<String>> {
+        parsed_document
+            .query_range(&ALL_QUERIES.iri_query_references, range)
             .iter()
             .map(|m| match &m.captures[..] {
                 [iri_capture] => {
                     let iri = trim_full_iri(iri_capture.node.text.clone());
                     let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
-                    (iri, iri_capture.node.range)
+                    RangeBox::new(iri, iri_capture.node.range)
                 }
                 _ => unreachable!(),
             })
             .collect()
     }
 
-    fn analyze(&self) -> Stage2Document {
+    fn analyze(&self, parsed_document: &ParsedDocument, id: &DocumentId) -> Stage2Document {
         debug!("QueriedDocument -> Stage2Document");
 
         let ((references, definitions), annotations) = rayon::join(
             || {
                 rayon::join(
-                    || self.document_references(),
-                    || self.document_definitions(),
+                    || self.document_references(parsed_document),
+                    || self.document_definitions(parsed_document),
                 )
             },
-            || self.document_annotations(),
+            || self.document_annotations(parsed_document),
         );
 
         // Find iri locations
-        let mut iri_locations: HashMap<String, Vec<Range>> = HashMap::new();
-        for (iri, range) in &references {
-            iri_locations.entry(iri.clone()).or_default().push(*range);
-        }
-
         let all_frame_infos = timeit("all frame infos", || {
-            QueriedDocument::document_all_frame_infos(definitions.iter(), annotations.into_iter())
+            QueriedDocument::document_all_frame_infos(&definitions, &annotations, &id.path)
         });
 
         let (directly_reachable_import_urls, directly_reachable_other_urls) =
-            timeit("reachable urls", || self.reachable_urls(&references));
+            timeit("reachable urls", || {
+                self.reachable_urls(&references, &id.uri)
+            });
 
+        let iri_locations = build_iri_locations(&references);
         Stage2Document {
+            references,
+            definitions,
+            annotations,
             all_frame_infos,
-            local_diagnostics: timeit("syntax errors", || syntax_errors(&self.parsed_document)),
+            local_diagnostics: timeit("syntax errors", || parsed_document.syntax_errors()),
             directly_reachable_import_urls,
             directly_reachable_other_urls,
             iri_locations,
-            references: references.into_iter().map(|(iri, _)| iri).collect(),
-            definitions: definitions
-                .into_iter()
-                .map(|IriDefinition { iri, .. }| iri)
-                .collect(),
         }
     }
+
+    fn update(
+        &mut self,
+        changes: &[Change],
+        post_change_ranges: &[Range],
+        parsed_document: &ParsedDocument,
+    ) -> bool {
+        // Update ontology id
+        let mut dirty = false;
+        if let Some(o_id) = &mut self.ontology_id {
+            o_id.edit(changes.iter());
+
+            for sc in post_change_ranges {
+                if o_id.range().overlaps(sc) {
+                    dirty = true;
+                }
+            }
+        } else {
+            dirty = true;
+        }
+
+        if dirty {
+            self.ontology_id = parsed_document.ontology_id();
+        }
+
+        // Edit
+
+        for import in &mut self.imports {
+            import.edit(changes.iter());
+        }
+
+        for prefix_value in self.prefixes.values_mut() {
+            prefix_value.edit(changes.iter());
+        }
+
+        // I think I dont need the removed items, they overlap with the
+        // post_change_ranges, so I can just use the ranges.
+        self.imports.retain(|import| {
+            for sc in post_change_ranges {
+                if import.range().overlaps(sc) {
+                    return false;
+                }
+            }
+            true
+        });
+
+        // Retain
+
+        let mut dirty_prefix = false;
+        self.prefixes.retain(|_, prefix_value| {
+            for sc in post_change_ranges {
+                if prefix_value.range().overlaps(sc) || prefix_value.range().is_zero() {
+                    dirty_prefix = true;
+                    debug!("Removing prefix {prefix_value:?}");
+                    return false;
+                }
+            }
+            true
+        });
+
+        // Add
+
+        for di in post_change_ranges {
+            let additional_imports = parsed_document.imports_in_range(*di);
+
+            self.imports.extend(additional_imports);
+        }
+
+        for di in post_change_ranges {
+            let additional_prefixes = parsed_document.prefixes_in_range(*di);
+
+            if !additional_prefixes.is_empty() {
+                dirty_prefix = true;
+            }
+
+            self.prefixes.extend(additional_prefixes);
+        }
+
+        // Cleanup
+
+        self.imports.dedup_by_key(|r| *r.range());
+
+        dirty_prefix
+    }
+}
+
+fn build_iri_locations(references: &Vec<RangeBox<String>>) -> HashMap<String, Vec<RangeBox<()>>> {
+    let mut iri_locations: HashMap<String, Vec<RangeBox<()>>> =
+        HashMap::with_capacity(references.len());
+    for rb in references {
+        iri_locations
+            .entry(rb.value().clone())
+            .or_default()
+            .push(RangeBox::new((), *rb.range()));
+    }
+    iri_locations
 }
 
 /// Returns the word before the [`character`] position in the [`line`]
@@ -2186,7 +2688,7 @@ fn get_frame_info_helper_ex(doc: &ExternalDocument, iri: &Iri) -> Option<FrameIn
         .flatten()
         .map(|[_, p, o]| FrameInfo {
             iri: iri.clone(),
-            annotations: once((simple_term_to_string(p), vec![simple_term_to_string(o)])).collect(),
+            annotations: once((simple_term_to_string(p), simple_term_to_string(o))).collect(),
             frame_type: FrameType::Unknown,
             definitions: vec![Location {
                 uri: doc.uri.clone(),
@@ -2236,7 +2738,8 @@ pub struct UnwrappedNode {
     pub text: String,
     /// This information can be outdated
     pub range: Range,
-    pub kind: String,
+    pub kind: &'static str,
+    pub parent_kind: Option<&'static str>,
 }
 
 /// This represents information about a frame.
@@ -2249,12 +2752,12 @@ pub struct UnwrappedNode {
 #[derive(Clone, Debug)]
 pub struct FrameInfo {
     pub iri: Iri,
-    pub annotations: HashMap<Iri, Vec<String>>,
+    pub annotations: Vec<(Iri, String)>,
     pub frame_type: FrameType,
     pub definitions: Vec<Location>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Location {
     pub uri: Url,
     pub range: Range,
@@ -2281,20 +2784,17 @@ impl FrameInfo {
     }
 
     fn extend(&mut self, b: FrameInfo) {
-        for (key_a, values_a) in b.annotations {
-            if let Some(values_b) = self.annotations.get_mut(&key_a) {
-                values_b.extend(values_a);
-            } else {
-                self.annotations.insert(key_a, values_a);
-            }
-        }
+        self.annotations.extend(b.annotations);
+        self.annotations.sort_unstable();
+        self.annotations.dedup();
         self.definitions.extend(b.definitions);
+        self.definitions.sort_unstable();
         self.definitions.dedup();
         self.frame_type = match (self.frame_type, b.frame_type) {
             (a, b) if a == b => a,
             (FrameType::Unknown, b) => b,
             (a, FrameType::Unknown) => a,
-            _ => FrameType::Invalid, // a != b and not one of them is unknown => conflict
+            _ => FrameType::Invalid,
         };
     }
 
@@ -2305,16 +2805,19 @@ impl FrameInfo {
     }
 
     pub fn annotation_display(&self, iri: &str) -> Option<String> {
-        self.annotations
-            .get(iri)
+        let joined = self
+            .annotations
+            .iter()
+            .filter(|(x, _)| x == iri)
             // TODO #20 make this more usable by providing multiple lines with indentation
-            .map(|resolved| {
-                resolved
-                    .iter()
-                    .map(|s| trim_string_value(s))
-                    .unique()
-                    .join(", ")
-            })
+            .map(|(_, s)| trim_string_value(s))
+            .join(", ");
+
+        if joined.is_empty() {
+            None
+        } else {
+            Some(joined)
+        }
     }
 
     pub fn info_display(&self, workspace: &Workspace) -> String {
@@ -2327,8 +2830,8 @@ impl FrameInfo {
 
         let annotations = self
             .annotations
-            .keys()
-            .map(|iri| {
+            .iter()
+            .map(|(iri, _)| {
                 let iri_label = workspace
                     .get_frame_info(iri)
                     .map(|fi| {
@@ -2360,35 +2863,33 @@ impl FrameInfo {
         if self.iri.contains(query) {
             sum += 5000;
         }
-        for (annotation_iri, values) in &self.annotations {
-            for value in values {
-                if value.contains(query) {
-                    if annotation_iri == FrameInfo::LABEL_IRI {
-                        sum += 1000;
+        for (annotation_iri, value) in &self.annotations {
+            if value.contains(query) {
+                if annotation_iri == FrameInfo::LABEL_IRI {
+                    sum += 1000;
 
-                        if let Some((l, r)) = value.split_once(query) {
-                            // Starts with query
-                            if l.is_empty() {
-                                sum += 100;
-                            }
-                            // Ends with query
-                            if r.is_empty() {
-                                sum += 10;
-                            }
-
-                            // Query found at exact word boundary
-                            if r.starts_with(' ') && l.ends_with(' ') {
-                                sum += 10;
-                            }
-
-                            // Chars not matching query
-                            sum = sum.saturating_sub(l.len() * 10);
-                            sum = sum.saturating_sub(r.len() * 10);
-                            sum += 1;
+                    if let Some((l, r)) = value.split_once(query) {
+                        // Starts with query
+                        if l.is_empty() {
+                            sum += 100;
                         }
-                    } else {
+                        // Ends with query
+                        if r.is_empty() {
+                            sum += 10;
+                        }
+
+                        // Query found at exact word boundary
+                        if r.starts_with(' ') && l.ends_with(' ') {
+                            sum += 10;
+                        }
+
+                        // Chars not matching query
+                        sum = sum.saturating_sub(l.len() * 10);
+                        sum = sum.saturating_sub(r.len() * 10);
                         sum += 1;
                     }
+                } else {
+                    sum += 1;
                 }
             }
         }
@@ -2421,94 +2922,40 @@ pub fn node_text(node: &Node, rope: &Rope) -> String {
         .map_or(String::new(), |rs| rs.to_string())
 }
 
-/// Generate the diagnostics for a single node, walking recursively down to every child and every syntax error within
-fn syntax_errors(stage1: &ParsedDocument) -> Vec<Diagnostic> {
-    let mut cursor = stage1.tree.root_node().walk();
-    let mut diagnostics = Vec::<Diagnostic>::new();
-
-    loop {
-        let node = cursor.node();
-
-        if node.is_error() {
-            // log
-            let range: Range = cursor.node().range().into();
-
-            // root has no parents so use itself
-            let parent_kind = node.parent().unwrap_or(node).kind();
-
-            if let Some(static_node) = NODE_TYPES.get(parent_kind) {
-                let valid_children: String = Itertools::intersperse(
-                    static_node
-                        .children
-                        .types
-                        .iter()
-                        .map(|sn| node_type_to_string(&sn.type_)),
-                    ", ".to_string(),
-                )
-                .collect();
-
-                let parent = node_type_to_string(parent_kind);
-
-                diagnostics.push(Diagnostic {
-                    range,
-                    kind: DiagnosticKind::SyntaxError {
-                        valid_children,
-                        parent,
-                    },
-                });
-            }
-            // move along
-            while !cursor.goto_next_sibling() {
-                // move out
-                if !cursor.goto_parent() {
-                    // this node has no parent, it's the root
-                    return diagnostics;
-                }
-            }
-        } else if node.has_error() {
-            // move in
-            let has_child = cursor.goto_first_child(); // should always work
-
-            if !has_child {
-                while !cursor.goto_next_sibling() {
-                    // move out
-                    if !cursor.goto_parent() {
-                        // this node has no parent, it's the root
-                        return diagnostics;
-                    }
-                }
-            }
-        } else {
-            // move along
-            while !cursor.goto_next_sibling() {
-                // move out
-                if !cursor.goto_parent() {
-                    // this node has no parent, it's the root
-                    return diagnostics;
-                }
-            }
-        }
-    }
-}
-
 fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    let uses: &HashSet<Iri> = &doc.stage2.references;
+    let uses: &HashSet<Iri> = &doc
+        .stage2
+        .references
+        .iter()
+        .map(|rb| rb.value().clone())
+        .collect();
 
-    let mut defines: HashSet<String> = doc.stage2.definitions.clone();
+    let mut defines: HashSet<String> = doc
+        .stage2
+        .definitions
+        .iter()
+        .map(|rb| rb.value().iri.clone())
+        .collect();
 
     let imports_recursive = timeit("semantic errors  reachable", || {
         // This takes the longes :<
         doc.reachable_docs_recursive(workspace, false)
     });
-    debug!("Imports recursive {} {:#?}", doc.uri, imports_recursive);
+    debug!("Imports recursive {} {:#?}", doc.uri(), imports_recursive);
 
     for url in imports_recursive {
         if let Some(doc) = workspace.document_by_url(&url) {
             match doc {
                 DocumentReference::Internal(internal_document) => {
-                    defines.extend(internal_document.stage2.definitions.clone());
+                    defines.extend(
+                        internal_document
+                            .stage2
+                            .definitions
+                            .iter()
+                            .map(|rb| rb.value().iri.clone()),
+                    );
                 }
                 DocumentReference::External(external_document) => {
                     defines.extend(external_document.definitions().clone());
@@ -2518,7 +2965,12 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
     }
 
     // TODO this is a quick fix for now. The correct way will be not not include prefixes in the used Iris
-    let prefixes: HashSet<&Iri> = doc.queried_document.prefixes.values().collect();
+    let prefixes: HashSet<&Iri> = doc
+        .queried_document
+        .prefixes
+        .values()
+        .map(RangeBox::value)
+        .collect();
     let imports = &doc.queried_document.imports;
 
     let ontology_id = &doc.queried_document.ontology_id;
@@ -2526,10 +2978,10 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
     for diff in uses
         .difference(&defines)
         .filter(|iri| !prefixes.contains(*iri))
-        .filter(|iri| !imports.contains(*iri))
+        .filter(|iri| !imports.iter().map(RangeBox::value).contains(*iri))
     {
         // Skip ontology and version IRIs
-        if let Some((iri, version)) = &ontology_id {
+        if let Some((iri, version)) = ontology_id.as_ref().map(RangeBox::value) {
             if diff == iri {
                 continue;
             }
@@ -2543,7 +2995,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
         if let Some(vec) = doc.stage2.iri_locations.get(diff) {
             for ele in vec {
                 diagnostics.push(Diagnostic {
-                    range: *ele,
+                    range: *ele.range(),
                     kind: DiagnosticKind::MissingIri(diff.clone()),
                 });
             }

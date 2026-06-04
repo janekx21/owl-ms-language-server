@@ -90,7 +90,7 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
                         (string_literal_no_language)
                         (string_literal_with_language)
                         (typed_literal)
-                    ]@literal)))
+                    ]@literal)))@frame
         ",
     )
     .expect("valid query"),
