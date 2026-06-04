@@ -1,6 +1,11 @@
 module.exports = grammar({
   name: 'owl_ms',
   conflicts: $ => [[$.data_property_iri, $.object_property_iri]],
+
+  // > White space is allowed between any two terminals or non-terminals except inside
+  // > nonNegativeInteger, prefixName, IRI, and literal. White space is required between
+  // > two terminals or non-terminals if its removal could cause ambiguity.
+  // Well this means that the ontology identification does not require a whitespace.
   extras: $ => [/[ \t\n\r]/, $.comment],
   supertypes: $ => [$.iri],
   rules: {

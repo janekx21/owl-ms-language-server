@@ -7,7 +7,7 @@ pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
             iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
             annotations: vec![(
                 "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                vec!["label".to_string()],
+                "label".to_string(),
             )]
             .into_iter()
             .collect(),
@@ -18,7 +18,7 @@ pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
             iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
             annotations: vec![(
                 "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                vec!["comment".to_string()],
+                "comment".to_string(),
             )]
             .into_iter()
             .collect(),

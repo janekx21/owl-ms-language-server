@@ -1,4 +1,12 @@
-use crate::{catalog::Catalog, queries::ALL_QUERIES, test_helpers::*, *};
+use crate::{
+    catalog::Catalog,
+    queries::ALL_QUERIES,
+    range::{Change, Range},
+    rope_provider::RopeProvider,
+    test_helpers::*,
+    workspace::apply_change_to_rope_and_tree,
+    *,
+};
 use horned_owl::{
     io::{OWXParserConfiguration, ParserConfiguration, RDFParserConfiguration},
     model::{AnnotatedComponent, Build},
@@ -11,9 +19,10 @@ use sophia::api::term::SimpleTerm;
 use tempdir::TempDir;
 use test_log::test;
 use tower_lsp::LspService;
+use tree_sitter_c2rust::Tree;
 
-/// This module contains tests.
-/// Each test function name is in the form of `<function>_<thing>_<condition>_<expectation>`.
+/// This module contains all functional tests.
+/// Each test's function name is in the form of `<function>_<thing>_<condition>_<expectation>`.
 
 /////////////////////////
 // Tree sitter tests
@@ -41,12 +50,113 @@ fn deref_all_queries_should_be_valid() {
     let _ = *ALL_QUERIES;
 }
 
+#[test]
+#[ignore = "Just for experimentation"]
+fn reparse_ontology_node_ids() {
+    // Just for exploration purposes
+    setup();
+    // Arrange
+    let mut parser = arrange_parser();
+
+    let source_code = indoc! {"
+Ontology: Foobar
+    # The foo class
+    Class: Foo
+    Datatype: Bar
+    Class: FooBar
+    "};
+    let mut rope = Rope::from(source_code);
+    let mut tree = {
+        let rope_provider = RopeProvider::new(&rope);
+        parser
+            .parse_with_options(&mut |i, _| rope_provider.chunk_callback(i), None, None)
+            .unwrap()
+    };
+
+    info!("Text: \n{rope}\n");
+    print_tree(&tree);
+
+    info!("------ edit ------");
+    let edits = [
+        (
+            Range::new(Position::new(0, 10), Position::new(0, 16)),
+            "Foo Bar",
+        ),
+        (Range::new(Position::new(3, 0), Position::new(3, 0)), "#"),
+    ];
+
+    for (range, text) in edits {
+        apply_change_to_rope_and_tree(
+            &mut tree,
+            &mut rope,
+            &Change {
+                range,
+                text: text.to_string(),
+            },
+        )
+        .unwrap();
+    }
+
+    info!("Text: \n{rope}\n");
+    print_tree(&tree);
+
+    info!("------ reparsing ------");
+
+    // Act
+    let rope_provider = RopeProvider::new(&rope);
+    let tree_2 = parser
+        .parse_with_options(
+            &mut |i, _| rope_provider.chunk_callback(i),
+            Some(&tree),
+            None,
+        )
+        .unwrap();
+
+    // Assert
+
+    info!("Text: \n{rope}\n");
+    print_tree(&tree_2);
+
+    for change in tree.changed_ranges(&tree_2) {
+        info!("Changed syntax at {}", Range::from(change));
+    }
+
+    for change in tree_2.changed_ranges(&tree) {
+        info!("Changed syntax (rev) at {}", Range::from(change));
+    }
+
+    panic!();
+}
+
+fn print_tree(tree: &Tree) {
+    let mut w = tree.walk();
+    'outer: loop {
+        info!(
+            "{}+ {}, ID: {}, C?: {}, {:?}",
+            " ".repeat(w.depth() as usize),
+            w.node().kind(),
+            w.node().id(),
+            w.node().has_changes(),
+            w.node().byte_range(),
+        );
+
+        // In order traversal
+        if !w.goto_first_child() {
+            while !w.goto_next_sibling() {
+                if !w.goto_parent() {
+                    break 'outer;
+                }
+            }
+        }
+    }
+}
+
 ///////////////////////////////////////////
 // Backend Tests
 //////////////////////////////////////////
 
 #[test]
-#[ignore = "This was just a spice for messing around"]
+#[ignore = "This was just a spike for messing around"]
 fn horned_owl_should_parse_rdf_xml() {
     let x = r##"    
 <rdf:RDF xmlns="http://www.example.com/iri#"
@@ -82,7 +192,7 @@ fn horned_owl_should_parse_rdf_xml() {
 }
 
 #[test]
-#[ignore = "This was just a spice for messing around"]
+#[ignore = "This was just a spike for messing around"]
 fn sophia_should_parse_rdf_xml() {
     use sophia::api::prelude::*;
     use sophia::inmem::graph::LightGraph;
@@ -188,8 +298,8 @@ async fn backend_did_open_should_create_document() {
         .exactly_one()
         .unwrap_or_else(|_| panic!("Should be exactly one"));
 
-    assert_eq!(doc.uri, url);
-    assert_eq!(doc.version, 0);
+    assert_eq!(doc.uri(), &url);
+    assert_eq!(doc.version(), 0);
     assert_eq!(doc.rope().to_string(), "abc");
     assert!(doc.tree().root_node().is_error());
 }
@@ -3642,4 +3752,942 @@ async fn backend_code_action_on_missing_iri_should_create_frame() {
                     .is_some()
         }
     }));
+}
+
+#[test(tokio::test)]
+async fn backend_did_change_should_update_ontology_id() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            Class: SomeClass
+                Annotations: rdfs:label "Some Class annotation"
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: ontology_url.clone(),
+                version: 1,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                text: "othername".into(),
+                range: Some(lsp_types::Range {
+                    start: lsp_types::Position::new(0, 26),
+                    end: lsp_types::Position::new(0, 34),
+                }),
+                range_length: None,
+            }],
+        })
+        .await;
+
+    // Assert
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    assert_eq!(
+        document.rope().to_string(),
+        indoc! { r#"
+            Ontology: <http://invalid/othername> <http://invalid/ontology/123>
+                Class: SomeClass
+                    Annotations: rdfs:label "Some Class annotation"
+        "#}
+    );
+
+    let id = document
+        .queried_document
+        .ontology_id
+        .as_ref()
+        .unwrap()
+        .value();
+
+    assert_eq!(
+        id,
+        &(
+            "http://invalid/othername".to_string(),
+            Some("http://invalid/ontology/123".to_string())
+        )
+    );
+}
+
+#[test(tokio::test)]
+async fn backend_did_change_with_syntax_change_should_update_ontology_id() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            Class: SomeClass
+                Annotations: rdfs:label "Some Class annotation"
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: ontology_url.clone(),
+                version: 1,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                text: "Class: Foo".into(),
+                range: Some(lsp_types::Range {
+                    start: lsp_types::Position::new(0, 36),
+                    end: lsp_types::Position::new(0, 65),
+                }),
+                range_length: None,
+            }],
+        })
+        .await;
+
+    // Assert
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    assert_eq!(
+        document.rope().to_string(),
+        indoc! { r#"
+            Ontology: <http://invalid/ontology> Class: Foo
+                Class: SomeClass
+                    Annotations: rdfs:label "Some Class annotation"
+        "#}
+    );
+
+    let id = document
+        .queried_document
+        .ontology_id
+        .as_ref()
+        .unwrap()
+        .value();
+
+    assert_eq!(id, &("http://invalid/ontology".to_string(), None));
+}
+
+#[test(tokio::test)]
+async fn backend_did_change_with_large_syntax_change_should_update_ontology_id() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Prefix: foo: <http://invalid/foo>
+        Prefix: bar: <http://invalid/bar>
+        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            Class: SomeClass
+                Annotations: rdfs:label "Some Class annotation"
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: ontology_url.clone(),
+                version: 1,
+            },
+            content_changes: vec![
+                TextDocumentContentChangeEvent {
+                    text: "Ontology: <http://invalid/othername> <http://invalid/ontology/321>\n"
+                        .into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(1, 0),
+                        end: lsp_types::Position::new(1, 0),
+                    }),
+                    range_length: None,
+                },
+                TextDocumentContentChangeEvent {
+                    text: "#".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(2, 0),
+                        end: lsp_types::Position::new(2, 0),
+                    }),
+                    range_length: None,
+                },
+                TextDocumentContentChangeEvent {
+                    text: "#".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(3, 0),
+                        end: lsp_types::Position::new(3, 0),
+                    }),
+                    range_length: None,
+                },
+            ],
+        })
+        .await;
+
+    // Assert
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    assert_eq!(
+        document.rope().to_string(),
+        indoc! { r#"
+            Prefix: foo: <http://invalid/foo>
+            Ontology: <http://invalid/othername> <http://invalid/ontology/321>
+            #Prefix: bar: <http://invalid/bar>
+            #Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+                Class: SomeClass
+                    Annotations: rdfs:label "Some Class annotation"
+        "#}
+    );
+
+    let id = document
+        .queried_document
+        .ontology_id
+        .as_ref()
+        .unwrap()
+        .value();
+
+    assert_eq!(
+        id,
+        &(
+            "http://invalid/othername".to_string(),
+            Some("http://invalid/ontology/321".to_string())
+        )
+    );
+}
+
+#[test(tokio::test)]
+async fn backend_did_change_with_large_syntax_change_should_update_imports() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            Import: <http://invalid/some-other-ontology>
+            Class: SomeClass
+                Annotations: rdfs:label "Some Class annotation"
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: ontology_url.clone(),
+                version: 1,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                text: "#".into(),
+                range: Some(lsp_types::Range {
+                    start: lsp_types::Position::new(1, 0),
+                    end: lsp_types::Position::new(1, 0),
+                }),
+                range_length: None,
+            }],
+        })
+        .await;
+
+    // Assert
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    assert_eq!(
+        document.rope().to_string(),
+        indoc! { r#"
+            Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            #    Import: <http://invalid/some-other-ontology>
+                Class: SomeClass
+                    Annotations: rdfs:label "Some Class annotation"
+        "#}
+    );
+
+    let imports = document
+        .queried_document
+        .imports
+        .iter()
+        .map(|i| i.value().clone())
+        .collect_vec();
+
+    assert_eq!(imports, Vec::<String>::new());
+}
+
+#[test(tokio::test)]
+async fn backend_did_change_with_large_syntax_change_should_update_imports_2() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+        #    Import: <http://invalid/some-other-ontology>
+
+        #    Import: <http://invalid/some-other-ontology>
+            Import: <http://invalid/A>
+        #    Import: <http://invalid/B>
+        #    Import: <http://invalid/some-other-ontology>
+
+            Class: SomeClass
+                Annotations: rdfs:label "Some Class annotation"
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: ontology_url.clone(),
+                version: 1,
+            },
+            content_changes: vec![
+                TextDocumentContentChangeEvent {
+                    text: "".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(1, 0),
+                        end: lsp_types::Position::new(1, 1),
+                    }),
+                    range_length: None,
+                },
+                TextDocumentContentChangeEvent {
+                    text: "#".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(4, 0),
+                        end: lsp_types::Position::new(4, 0),
+                    }),
+                    range_length: None,
+                },
+                TextDocumentContentChangeEvent {
+                    text: "".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(5, 0),
+                        end: lsp_types::Position::new(5, 1),
+                    }),
+                    range_length: None,
+                },
+            ],
+        })
+        .await;
+
+    // Assert
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    assert_eq!(
+        document.rope().to_string(),
+        indoc! { r#"
+            Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+                Import: <http://invalid/some-other-ontology>
+
+            #    Import: <http://invalid/some-other-ontology>
+            #    Import: <http://invalid/A>
+                Import: <http://invalid/B>
+            #    Import: <http://invalid/some-other-ontology>
+
+                Class: SomeClass
+                    Annotations: rdfs:label "Some Class annotation"
+        "#}
+    );
+
+    let imports = document
+        .queried_document
+        .imports
+        .iter()
+        .map(|i| i.value().clone())
+        .collect_vec();
+
+    assert_eq!(
+        imports,
+        vec!["http://invalid/some-other-ontology", "http://invalid/B"]
+    );
+}
+
+#[test(tokio::test)]
+async fn backend_did_change_with_large_syntax_change_should_update_prefixes() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        # -----------
+        #    Prefix: c: <http://invalid/some-other-ontology>
+
+        #    Prefix: d: <http://invalid/some-other-ontology>
+            Prefix: a: <http://invalid/A>
+        #    Prefix: b: <http://invalid/B>
+        #    Prefix: e: <http://invalid/some-other-ontology>
+
+        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            Class: SomeClass
+                Annotations: rdfs:label "Some Class annotation"
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: ontology_url.clone(),
+                version: 1,
+            },
+            content_changes: vec![
+                TextDocumentContentChangeEvent {
+                    text: "".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(1, 0),
+                        end: lsp_types::Position::new(1, 1),
+                    }),
+                    range_length: None,
+                },
+                TextDocumentContentChangeEvent {
+                    text: "#".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(4, 0),
+                        end: lsp_types::Position::new(4, 0),
+                    }),
+                    range_length: None,
+                },
+                TextDocumentContentChangeEvent {
+                    text: "".into(),
+                    range: Some(lsp_types::Range {
+                        start: lsp_types::Position::new(5, 0),
+                        end: lsp_types::Position::new(5, 1),
+                    }),
+                    range_length: None,
+                },
+            ],
+        })
+        .await;
+
+    // Assert
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    assert_eq!(
+        document.rope().to_string(),
+        indoc! { r#"
+            # -----------
+                Prefix: c: <http://invalid/some-other-ontology>
+
+            #    Prefix: d: <http://invalid/some-other-ontology>
+            #    Prefix: a: <http://invalid/A>
+                Prefix: b: <http://invalid/B>
+            #    Prefix: e: <http://invalid/some-other-ontology>
+
+            Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+                Class: SomeClass
+                    Annotations: rdfs:label "Some Class annotation"
+        "#}
+    );
+
+    let prefixes = document
+        .queried_document
+        .prefixes
+        .iter()
+        .map(|(k, v)| (k.clone(), v.value().clone()))
+        .sorted() // Hash map entry orders are random. Lets sort them.
+        .collect_vec();
+
+    assert_eq!(
+        prefixes,
+        vec![
+            ("b".to_string(), "http://invalid/B".to_string()),
+            (
+                "c".to_string(),
+                "http://invalid/some-other-ontology".to_string()
+            ),
+        ]
+    );
+}
+
+/////////////////////////
+// Fuzz / property-based tests
+/////////////////////////
+
+mod fuzz {
+    use crate::{
+        workspace::{FrameInfo, QueriedDocument},
+        Backend,
+    };
+
+    use super::{
+        arrange_backend, lsp_types, setup, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
+        LanguageServer, TempDir, TextDocumentContentChangeEvent, TextDocumentItem, Url,
+        VersionedTextDocumentIdentifier,
+    };
+    use indoc::indoc;
+    use itertools::Itertools;
+    use proptest::prelude::*;
+    use tower_lsp::LspService;
+
+    /// A simple single-file ontology used as the base for all fuzz cases.
+    const ONTOLOGY: &str = indoc!(
+        r#"
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Prefix: oth: <http://invalis/other/>
+        Ontology: <http://example.org/fuzz-test>
+            Import: <http://invalid/ontology>
+        
+            Class: Foo
+                Annotations: rdfs:label "Foo Label"
+        
+            Class: Bar
+                Annotations: rdfs:label "Bar Label"
+
+            Class: other:Bar
+                Annotations: rdfs:label "Other Bar Label"
+
+            Class: <http://example.org/full/bar>
+                Annotations: rdfs:label "Full Bar Label"
+
+            Datatype: D
+                Annotations: rdfs:label "D"
+
+            SomeSyntaxError
+        "#
+    );
+
+    /// Returns the (end_line, end_col) position that a `text` insertion at
+    /// (start_line, start_col) occupies in the post-edit document.
+    fn compute_end_after_insert(start_line: u32, start_col: u32, text: &str) -> (u32, u32) {
+        let parts: Vec<&str> = text.split('\n').collect();
+        if parts.len() == 1 {
+            (start_line, start_col + text.len() as u32)
+        } else {
+            let end_line = start_line + (parts.len() - 1) as u32;
+            let end_col = parts.last().unwrap().len() as u32;
+            (end_line, end_col)
+        }
+    }
+
+    /// Generates either random printable text or a complete frame, or comment.
+    fn insert_text_strategy() -> impl Strategy<Value = String> {
+        prop_oneof![
+            3 => "[a-zA-Z0-9 \t\n]{0,60}",
+            1 => "[p{L}]{0,60}",
+            1 => Just("\nClass: FuzzClass\n    Annotations: rdfs:label \"fuzz label\"\n"
+                .to_string()),
+            1 => Just("\nClass: AnotherFuzzClass\n".to_string()),
+            1 => Just("\nDatatype: SomeDatatype\n".to_string()),
+            1 => Just("\nAnnotations: rdfs:label \"Fuzzing annotation label\"\n".to_string()),
+            1 => Just("\nPrefix: x: <http://invalis/x/>\"\n".to_string()),
+            1 => Just("#".to_string()), // Just a comment
+        ]
+    }
+
+    type DocumentState = String;
+
+    /// We use this "state" to compare if two documents are congruent when the text is eq
+    async fn capture_document_state(
+        service: &LspService<Backend>,
+        ontology_url: &Url,
+    ) -> DocumentState {
+        let sync = service.inner().read_sync().await;
+        let (doc, ws) = sync.get_internal_document(ontology_url).unwrap();
+        let initial_rope = doc.rope().to_string();
+        let initial_frame_infos = doc
+            .all_frame_infos()
+            .map(
+                |FrameInfo {
+                     iri,
+                     annotations,
+                     frame_type,
+                     definitions,
+                 }| {
+                    format!(
+                        "- Frame Info for `{iri}` of kind `{frame_type}`\n  - Annotations\n{annotations:#?}\n  - Definitions \n{:#?}",
+                        definitions.iter().map(|d| d.range).collect_vec()
+                    )
+                },
+            )
+            .sorted()
+            .join("\n");
+
+        let diagnostics = doc.diagnostics(ws);
+        let prefixes_ = doc.prefixes().into_iter().sorted().collect_vec();
+        let QueriedDocument {
+            ontology_id,
+            prefixes,
+            imports,
+        } = &doc.queried_document;
+        let prefixes = prefixes.iter().sorted().collect_vec();
+
+        let definitions = &doc
+            .stage2
+            .definitions
+            .iter()
+            .sorted_by_key(|rb| rb.value().iri.clone());
+        let references = &doc.stage2.references.iter().sorted_by_key(|rb| rb.value());
+        let annotations = &doc.stage2.annotations.iter().sorted_by_key(|rb| rb.value());
+
+        format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes_:#?}\n\n# Queried Document\n{ontology_id:#?}{prefixes:#?}{imports:#?}\n\n# Definitions\n{definitions:#?}\n\n# References\n{references:#?}\n\n# Annotations\n{annotations:#?}")
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(200))]
+
+        /// Insert arbitrary text at a random position, then undo the insertion.
+        /// The document state (rope content and extracted frame IRIs) must be
+        /// identical to the state before the insertion.
+        #[test]
+        // #[ignore = "active later! to much clutter"]
+        fn fuzz_insert_and_undo_preserves_document(
+            line in 0u32..8u32,
+            col  in 0u32..53u32,
+            insert_text in insert_text_strategy(),
+        ) {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+
+            let (initial_state, final_state) =
+                rt.block_on(async {
+                    setup();
+                    let service = arrange_backend(None, vec![]).await;
+                    let dir = TempDir::new("owl-ms-fuzz").unwrap();
+                    let ontology_url =
+                        Url::from_file_path(dir.path().join("fuzz.omn")).unwrap();
+
+                    // Open the document
+                    service
+                        .inner()
+                        .did_open(DidOpenTextDocumentParams {
+                            text_document: TextDocumentItem {
+                                uri: ontology_url.clone(),
+                                language_id: "owl2md".to_string(),
+                                version: 0,
+                                text: ONTOLOGY.to_string(),
+                            },
+                        })
+                        .await;
+
+                    // Capture initial state
+                    let initial_state = capture_document_state(&service, &ontology_url).await;
+
+                    // Clamp (line, col) to the actual document boundaries
+                    let lines: Vec<&str> = ONTOLOGY.lines().collect();
+                    let line = line.min(lines.len() as u32 - 1);
+                    let line_len = lines[line as usize].chars().count() as u32;
+                    let col = col.min(line_len);
+
+                    // Apply insert change
+                    service
+                        .inner()
+                        .did_change(DidChangeTextDocumentParams {
+                            text_document: VersionedTextDocumentIdentifier {
+                                uri: ontology_url.clone(),
+                                version: 1,
+                            },
+                            content_changes: vec![TextDocumentContentChangeEvent {
+                                range: Some(lsp_types::Range {
+                                    start: lsp_types::Position::new(line, col),
+                                    end: lsp_types::Position::new(line, col),
+                                }),
+                                range_length: None,
+                                text: insert_text.clone(),
+                            }],
+                        })
+                        .await;
+
+                    // Compute the range occupied by the inserted text in the
+                    // post-edit document, then delete it to undo the change
+                    let (end_line, end_col) =
+                        compute_end_after_insert(line, col, &insert_text);
+
+                    service
+                        .inner()
+                        .did_change(DidChangeTextDocumentParams {
+                            text_document: VersionedTextDocumentIdentifier {
+                                uri: ontology_url.clone(),
+                                version: 2,
+                            },
+                            content_changes: vec![TextDocumentContentChangeEvent {
+                                range: Some(lsp_types::Range {
+                                    start: lsp_types::Position::new(line, col),
+                                    end: lsp_types::Position::new(end_line, end_col),
+                                }),
+                                range_length: None,
+                                text: String::new(),
+                            }],
+                        })
+                        .await;
+
+                    // Capture final state
+                    let final_state = capture_document_state(&service, &ontology_url).await;
+
+                    (initial_state, final_state)
+                });
+
+
+            print!("{}", pretty_assertions::StrComparison::new(&initial_state, &final_state));
+            print!("{}", initial_state == final_state);
+            prop_assert!(
+                initial_state == final_state,
+                "state mismatch after insert+undo of {:?} at ({}, {})",
+                insert_text,
+                line,
+                col
+            );
+        }
+
+        /// Insert arbitrary text at a random position, then undo the insertion.
+        /// The document state (rope content and extracted frame IRIs) must be
+        /// identical to the state before the insertion.
+        #[test]
+        // #[ignore = "active later! to much clutter"]
+        fn fuzz_undo_after_reopen_document(
+            line in 0u32..8u32,
+            col  in 0u32..53u32,
+            insert_text in insert_text_strategy(),
+        ) {
+            // Clamp (line, col) to the actual document boundaries
+            let lines: Vec<&str> = ONTOLOGY.lines().collect();
+            let line = line.min(lines.len() as u32 - 1);
+            let line_len = lines[line as usize].chars().count() as u32;
+            let col = col.min(line_len);
+
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+
+            let (initial_state, final_state) =
+                rt.block_on(async {
+                    setup();
+                    let (initial_state, ontology_after_edit, (end_line, end_col)) = {
+                        let service = arrange_backend(None, vec![]).await;
+                        let dir = TempDir::new("owl-ms-fuzz").unwrap();
+                        let ontology_url =
+                            Url::from_file_path(dir.path().join("fuzz.omn")).unwrap();
+
+                        // Open the document
+                        service
+                            .inner()
+                            .did_open(DidOpenTextDocumentParams {
+                                text_document: TextDocumentItem {
+                                    uri: ontology_url.clone(),
+                                    language_id: "owl2md".to_string(),
+                                    version: 0,
+                                    text: ONTOLOGY.to_string(),
+                                },
+                            })
+                            .await;
+
+                        // Capture initial state
+                        let initial_state = capture_document_state(&service, &ontology_url).await;
+
+
+                        // Apply insert change
+                        service
+                            .inner()
+                            .did_change(DidChangeTextDocumentParams {
+                                text_document: VersionedTextDocumentIdentifier {
+                                    uri: ontology_url.clone(),
+                                    version: 1,
+                                },
+                                content_changes: vec![TextDocumentContentChangeEvent {
+                                    range: Some(lsp_types::Range {
+                                        start: lsp_types::Position::new(line, col),
+                                        end: lsp_types::Position::new(line, col),
+                                    }),
+                                    range_length: None,
+                                    text: insert_text.clone(),
+                                }],
+                            })
+                            .await;
+
+                        // Compute the range occupied by the inserted text in the
+                        // post-edit document, then delete it to undo the change
+                        let (end_line, end_col) =
+                            compute_end_after_insert(line, col, &insert_text);
+
+                        let ontology_after_edit = {
+
+                            let sync = service.inner().read_sync().await;
+                            let (doc, _) = sync.get_internal_document(&ontology_url).unwrap();
+                            doc.rope().to_string()
+                        };
+
+                        (initial_state, ontology_after_edit, (end_line, end_col))
+                    };
+
+
+                    let service = arrange_backend(None, vec![]).await;
+                    let dir = TempDir::new("owl-ms-fuzz").unwrap();
+                    let ontology_url =
+                        Url::from_file_path(dir.path().join("fuzz.omn")).unwrap();
+
+                    // Reopen the changed as if it where new document
+                    service
+                        .inner()
+                        .did_open(DidOpenTextDocumentParams {
+                            text_document: TextDocumentItem {
+                                uri: ontology_url.clone(),
+                                language_id: "owl2md".to_string(),
+                                version: 0,
+                                text: ontology_after_edit,
+                            },
+                        })
+                        .await;
+
+                    // Undo after reopen
+
+                    service
+                        .inner()
+                        .did_change(DidChangeTextDocumentParams {
+                            text_document: VersionedTextDocumentIdentifier {
+                                uri: ontology_url.clone(),
+                                version: 2,
+                            },
+                            content_changes: vec![TextDocumentContentChangeEvent {
+                                range: Some(lsp_types::Range {
+                                    start: lsp_types::Position::new(line, col),
+                                    end: lsp_types::Position::new(end_line, end_col),
+                                }),
+                                range_length: None,
+                                text: String::new(),
+                            }],
+                        })
+                        .await;
+
+                    // Capture final state
+                    let final_state = capture_document_state(&service, &ontology_url).await;
+
+                    (initial_state, final_state)
+                });
+
+
+            print!("{}", pretty_assertions::StrComparison::new(&initial_state, &final_state));
+
+            print!("{}", initial_state == final_state);
+            prop_assert!(
+                initial_state== final_state,
+                "state mismatch after insert+reopen+undo of {:?} at ({}, {})",
+                insert_text,
+                line,
+                col
+            );
+        }
+    }
 }
