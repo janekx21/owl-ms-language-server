@@ -22,7 +22,7 @@ use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use pretty::RcDoc;
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
 use ropey::Rope;
 use sophia::api::graph::{Graph, MutableGraph};
@@ -232,8 +232,8 @@ impl Workspace {
                             Some((item.iri.clone(), item.iri.clone(), item.clone()))
                         } else {
                             item.annotations
-                                .values()
-                                .find_map(|values| {
+                                .iter()
+                                .find_map(|(_, values)| {
                                     values.iter().find(|value| {
                                         value.to_lowercase().starts_with(&partial_lower)
                                     })
@@ -710,17 +710,17 @@ impl Stage2Document {
         timeit("document.edit / analyse / cleanup", || {
             rayon::join(
                 || {
-                    self.definitions.par_sort();
+                    self.definitions.par_sort_unstable();
                     self.definitions.dedup_by_key(|rb| *rb.range());
                 },
                 || {
                     rayon::join(
                         || {
-                            self.references.par_sort();
+                            self.references.par_sort_unstable();
                             self.references.dedup_by_key(|rb| *rb.range());
                         },
                         || {
-                            self.annotations.par_sort();
+                            self.annotations.par_sort_unstable();
                             self.annotations.dedup();
                         },
                     )
@@ -1989,43 +1989,111 @@ impl QueriedDocument {
         annotations: &[RangeBox<Annotation>],
         path: &Path,
     ) -> HashMap<Iri, FrameInfo> {
-        let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
+        // let mut frame_infos: HashMap<String, FrameInfo> = HashMap::new();
 
-        // First we collect the annotations
-        for frame_info in annotations.iter().map(|rb| {
-            let (frame_iri, annotation_iri, literal) = rb.value();
-            FrameInfo {
-                iri: frame_iri.clone(),
-                annotations: HashMap::from([(annotation_iri.clone(), vec![literal.clone()])]),
-                frame_type: FrameType::Unknown,
-                definitions: Vec::new(),
-            }
-        }) {
-            if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
-                // Merge the frame info for the same IRI
-                frame_info_mut.extend(frame_info);
-            } else {
-                frame_infos.insert(frame_info.iri.clone(), frame_info);
-            }
-        }
+        // // First we collect the annotations
+        // for frame_info in annotations.iter().map(|rb| {
+        //     let (frame_iri, annotation_iri, literal) = rb.value();
+        //     FrameInfo {
+        //         iri: frame_iri.clone(),
+        //         annotations: HashMap::from([(annotation_iri.clone(), vec![literal.clone()])]),
+        //         frame_type: FrameType::Unknown,
+        //         definitions: Vec::new(),
+        //     }
+        // }) {
+        //     if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
+        //         // Merge the frame info for the same IRI
+        //         frame_info_mut.extend(frame_info);
+        //     } else {
+        //         frame_infos.insert(frame_info.iri.clone(), frame_info);
+        //     }
+        // }
 
-        // Second we collect the location and frame type (definitions)
-        for frame_info in definitions.iter().map(|definiton| FrameInfo {
-            iri: definiton.value().iri.clone(),
-            annotations: HashMap::new(),
-            frame_type: definiton.value().kind,
-            definitions: vec![Location {
-                uri: Url::from_file_path(path).expect("valid path"),
-                range: *definiton.range(),
-            }],
-        }) {
-            if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
-                // Merge the frame info for the same IRI
-                frame_info_mut.extend(frame_info);
-            } else {
-                frame_infos.insert(frame_info.iri.clone(), frame_info);
-            }
-        }
+        // // Second we collect the location and frame type (definitions)
+        // for frame_info in definitions.iter().map(|definiton| FrameInfo {
+        //     iri: definiton.value().iri.clone(),
+        //     annotations: HashMap::new(),
+        //     frame_type: definiton.value().kind,
+        //     definitions: vec![Location {
+        //         uri: Url::from_file_path(path).expect("valid path"),
+        //         range: *definiton.range(),
+        //     }],
+        // }) {
+        //     if let Some(frame_info_mut) = frame_infos.get_mut(&frame_info.iri) {
+        //         // Merge the frame info for the same IRI
+        //         frame_info_mut.extend(frame_info);
+        //     } else {
+        //         frame_infos.insert(frame_info.iri.clone(), frame_info);
+        //     }
+        // }
+        //
+        let frame_infos: HashMap<Iri, FrameInfo> = annotations
+            .par_iter()
+            .map(|rb| {
+                let (frame_iri, annotation_iri, literal) = rb.value();
+                FrameInfo {
+                    iri: frame_iri.clone(),
+                    annotations: vec![(annotation_iri.clone(), vec![literal.clone()])],
+                    frame_type: FrameType::Unknown,
+                    definitions: Vec::new(),
+                }
+            })
+            .chain(definitions.par_iter().map(|definiton| FrameInfo {
+                iri: definiton.value().iri.clone(),
+                annotations: Vec::new(),
+                frame_type: definiton.value().kind,
+                definitions: vec![Location {
+                    uri: Url::from_file_path(path).expect("valid path"),
+                    range: *definiton.range(),
+                }],
+            }))
+            .fold(
+                HashMap::new, // each thread starts with an empty map
+                |mut acc, frame_info| {
+                    acc.entry(frame_info.iri.clone())
+                        .and_modify(|existing: &mut FrameInfo| existing.extend(frame_info.clone()))
+                        .or_insert(frame_info);
+                    acc
+                },
+            )
+            .reduce(
+                HashMap::new, // merge the per-thread maps together
+                |mut a, b| {
+                    for (iri, frame_info) in b {
+                        a.entry(iri)
+                            .and_modify(|existing| existing.extend(frame_info.clone()))
+                            .or_insert(frame_info);
+                    }
+                    a
+                },
+            );
+        // ...
+
+        // TODO collect that into one HashMap<Iri, FrameInfo> with
+        // `frame_info.extend(other_frame_info)` on collisions
+
+        // .reduce(
+        //     || HashMap::<Iri, FrameInfo>::new(),
+        //     |mut a, b| {
+        //         for (iri, frame_info) in b {
+        //             a.entry(iri)
+        //                 .and_modify(|x| x.extend(frame_info.clone()))
+        //                 .or_insert(frame_info);
+        //         }
+        //         a
+        //     },
+        // );
+        // .fold(
+        //     || HashMap::<Iri, FrameInfo>::new(),
+        //     |mut acc, frame_info| {
+        //         acc.entry(frame_info.iri.clone())
+        //             .and_modify(|x| x.extend(frame_info.clone()))
+        //             .or_insert(frame_info);
+        //         acc
+        //     },
+        // )
+        // .reduce(identity, op)
+        // .collect();
 
         frame_infos
     }
@@ -2772,7 +2840,7 @@ pub struct UnwrappedNode {
 #[derive(Clone, Debug)]
 pub struct FrameInfo {
     pub iri: Iri,
-    pub annotations: HashMap<Iri, Vec<String>>,
+    pub annotations: Vec<(Iri, Vec<String>)>,
     pub frame_type: FrameType,
     pub definitions: Vec<Location>,
 }
@@ -2804,11 +2872,10 @@ impl FrameInfo {
     }
 
     fn extend(&mut self, b: FrameInfo) {
-        for (key_a, values_a) in b.annotations {
-            if let Some(values_b) = self.annotations.get_mut(&key_a) {
-                values_b.extend(values_a);
-            } else {
-                self.annotations.insert(key_a, values_a);
+        for (key, values) in b.annotations {
+            match self.annotations.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, existing)) => existing.extend(values),
+                None => self.annotations.push((key, values)),
             }
         }
         self.definitions.extend(b.definitions);
@@ -2817,10 +2884,9 @@ impl FrameInfo {
             (a, b) if a == b => a,
             (FrameType::Unknown, b) => b,
             (a, FrameType::Unknown) => a,
-            _ => FrameType::Invalid, // a != b and not one of them is unknown => conflict
+            _ => FrameType::Invalid,
         };
     }
-
     const LABEL_IRI: &'static str = "http://www.w3.org/2000/01/rdf-schema#label";
 
     pub fn label(&self) -> Option<String> {
@@ -2829,9 +2895,10 @@ impl FrameInfo {
 
     pub fn annotation_display(&self, iri: &str) -> Option<String> {
         self.annotations
-            .get(iri)
+            .iter()
+            .find(|(x, _)| x == iri)
             // TODO #20 make this more usable by providing multiple lines with indentation
-            .map(|resolved| {
+            .map(|(_, resolved)| {
                 resolved
                     .iter()
                     .map(|s| trim_string_value(s))
@@ -2850,8 +2917,8 @@ impl FrameInfo {
 
         let annotations = self
             .annotations
-            .keys()
-            .map(|iri| {
+            .iter()
+            .map(|(iri, _)| {
                 let iri_label = workspace
                     .get_frame_info(iri)
                     .map(|fi| {
