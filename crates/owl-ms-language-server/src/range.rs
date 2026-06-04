@@ -118,6 +118,18 @@ impl From<Range> for std::ops::Range<tree_sitter_c2rust::Point> {
     }
 }
 
+impl PartialOrd for Range {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Range {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.start.cmp(&other.start).then(self.end.cmp(&other.end))
+    }
+}
+
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct RangeBox<T>(T, Range);
 
@@ -129,10 +141,7 @@ impl<T: PartialEq + Eq> PartialOrd for RangeBox<T> {
 
 impl<T: Eq> Ord for RangeBox<T> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.1
-            .start
-            .cmp(&other.1.start)
-            .then(self.1.end.cmp(&other.1.end))
+        self.1.cmp(&other.1)
     }
 }
 
