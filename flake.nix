@@ -45,6 +45,17 @@
           ${pkgs.cargo-tarpaulin}/bin/cargo-tarpaulin --engine llvm --out html && \
           xdg-open tarpaulin-report.html
         '';
+
+        e2e-test = pkgs.writeShellScriptBin "e2e-test" ''
+          export __OWL_MS_LSP_SERVER_DEBUG = "$(pwd)/target/debug/owl-ms-language-server";
+          cargo build
+
+          pushd editors/code
+          npm run compile
+
+          # This is needed for loading the correct libs for vscode
+          ${pkgs.steam-run-free}/bin/steam-run npm test
+        '';
       in
       with pkgs;
       {
@@ -82,10 +93,6 @@
           );
           __OWL_MS_LSP_SERVER_DEBUG = "/home/janek/Git/owl-ms-language-server/target/debug/owl-ms-language-server";
           nativeBuildInputs = with pkgs; [
-            # cargo
-            # clippy
-            # rust-analyzer
-            # rustc
             nodejs_22
             tree-sitter
 
@@ -94,6 +101,10 @@
             samply
             owl-ms-language-server
             tarpaulin-report
+            e2e-test
+
+            # for e2e and client
+            typescript-language-server
           ];
         };
       }
