@@ -37,21 +37,8 @@ pub static GRAMMAR: LazyLock<Grammar> = LazyLock::new(|| {
     serde_json::from_str(tree_sitter_owl_ms::GRAMMAR).expect("valid grammar json")
 });
 
-pub static KEYWORDS: LazyLock<Vec<String>> = LazyLock::new(|| {
-    GRAMMAR
-        .rules
-        .iter()
-        .filter_map(|item| match item {
-            (rule_name, Rule::String { value }) if rule_name.starts_with("keyword_") => {
-                Some(value.clone())
-            }
-            _ => None,
-        })
-        .collect()
-});
-
 /// Maps keyword rule names to keyword texts
-/// Example: "keyword_functional" => "Functional:"
+/// Example: "keyword functional" => "Functional:"
 pub static KEYWORDS_MAP: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
     GRAMMAR
         .rules
@@ -407,7 +394,7 @@ mod tests {
 
     #[test]
     fn keywords_clone_should_return_all_keywords() {
-        let kws = KEYWORDS.clone();
+        let kws = KEYWORDS_MAP.clone();
 
         assert!(!kws.is_empty());
     }

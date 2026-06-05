@@ -48,9 +48,9 @@ use std::{
 };
 use tokio::task::JoinHandle;
 use tower_lsp::lsp_types::{
-    self, CompletionItem, CompletionItemKind, DiagnosticSeverity, DidChangeTextDocumentParams,
-    InlayHint, InlayHintLabel, PositionEncodingKind, SemanticToken, SymbolKind,
-    TextDocumentContentChangeEvent, Url, WorkspaceFolder,
+    self, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
+    PositionEncodingKind, SemanticToken, SymbolKind, TextDocumentContentChangeEvent, Url,
+    WorkspaceFolder,
 };
 use tree_sitter_c2rust::{InputEdit, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
@@ -1236,11 +1236,25 @@ impl InternalDocument {
 
     pub fn get_keyword_competions_at(&self, pos: Position) -> Vec<String> {
         let pos_one_left = pos.moved_left(1, self.rope());
-        let node = self
+        let mut node = self
             .tree()
             .root_node()
             .named_descendant_for_point_range(pos_one_left.into(), pos_one_left.into())
             .expect("The pos to be in at least one node");
+
+        let mut lei = if node.parent().is_none() {
+            LANGUAGE
+                .lookahead_iterator(1)
+                .expect("state 1 should be valid")
+        } else {
+            let mut lei = LANGUAGE.lookahead_iterator(node.parse_state());
+            while lei.is_none() {
+                let parent = node.parent().unwrap(); // TODO
+                node = parent;
+                lei = LANGUAGE.lookahead_iterator(node.parse_state());
+            }
+            lei.expect("while none loop should have set it to some")
+        };
 
         let line = self
             .rope()
@@ -1249,11 +1263,8 @@ impl InternalDocument {
             .unwrap_or_default();
         let partial = word_before_character(pos.character_byte() as usize, &line);
 
-        let mut lei = LANGUAGE
-            .lookahead_iterator(node.parse_state())
-            .expect("Valid state");
-
         lei.iter_names()
+            .inspect(|n| debug!("- LEI name: {n}"))
             .filter_map(|kind| (*queries::KEYWORDS_MAP).get(kind).cloned())
             .filter(|kw| kw.starts_with(&partial))
             .collect_vec()

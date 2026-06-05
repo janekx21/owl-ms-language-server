@@ -2118,6 +2118,69 @@ async fn backend_completion_should_not_panic() {
     // Assert
     // Does not panic!
 }
+
+#[test(tokio::test)]
+async fn backend_completion_on_empty_doc_should_suggest_ontology() {
+    setup();
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test-doc".into(),
+        }),
+        vec![],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("test-doc.omn")).unwrap();
+
+    let ontology = ""; // EMPTY
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    let completions = service
+        .inner()
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url },
+                position: lsp_types::Position::new(0, 0),
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            context: None,
+        })
+        .await;
+
+    // Assert
+
+    let completions = completions.unwrap().unwrap();
+    let items = match completions {
+        CompletionResponse::Array(completion_items) => completion_items,
+        CompletionResponse::List(_) => todo!(),
+    };
+    let labels = items.iter().map(|i| &i.label).collect_vec();
+    assert!(labels.contains(&&"Ontology:".to_string()));
+    assert!(labels.contains(&&"Prefix:".to_string()));
+}
+
 #[test(tokio::test)]
 async fn backend_completion_with_iri_should_complete_to_iri() {
     setup();

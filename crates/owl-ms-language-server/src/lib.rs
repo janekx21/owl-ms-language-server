@@ -32,14 +32,13 @@ use tower_lsp::jsonrpc::Result;
 #[allow(clippy::wildcard_imports)]
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
-use tree_sitter_c2rust::{Language, LookaheadIterator};
+use tree_sitter_c2rust::Language;
 use workspace::{node_text, trim_full_iri, Workspace};
 
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{
-    word_before_character, Document, DocumentReference, FormattingSettings, FrameType,
-    InternalDocument,
+    Document, DocumentReference, FormattingSettings, FrameType, InternalDocument,
 };
 
 // Re-export for benchmarks
