@@ -1159,10 +1159,19 @@ impl InternalDocument {
             .next()
     }
 
-    /// Converts a full IRI maybe into an abbreviated IRI or just adds < >
+    /// Converts a full IRI maybe into an abbreviated IRI or just adds < > braces
     pub fn full_iri_to_shorter_iri(&self, full_iri: &str) -> String {
         self.full_iri_to_abbreviated_iri(full_iri)
-            .unwrap_or(format!("<{full_iri}>"))
+            .unwrap_or_else(|| {
+                // Sometimes the IRI can not be converted but it is also not a full IRI or kind of URI.
+                // In these cases it is best to just skip adding the < > braces.
+                // This is probibly caused by not having a default/empty prefix.
+                if full_iri.contains("://") {
+                    format!("<{full_iri}>")
+                } else {
+                    full_iri.to_string()
+                }
+            })
     }
 
     pub fn inlay_hint(
@@ -1250,6 +1259,7 @@ impl InternalDocument {
             .collect_vec()
     }
 
+    // (Label, Details, Insert Text)
     pub fn get_iri_completions_at(
         &self,
         pos: Position,

@@ -804,8 +804,8 @@ impl LanguageServer for Backend {
                     }
                 });
 
-        let items: Vec<CompletionItem> = keywords_completion_items
-            .chain(iri_completion_items)
+        let items: Vec<CompletionItem> = iri_completion_items
+            .chain(keywords_completion_items)
             .collect();
 
         debug!("completion item count {}", items.len());
