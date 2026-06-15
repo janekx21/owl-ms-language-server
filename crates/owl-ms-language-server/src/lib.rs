@@ -773,13 +773,15 @@ impl LanguageServer for Backend {
             self.encoding(),
         )?;
 
-        let kws = timeit("try_keywords_at_position", || {
-            doc.try_keywords_at_position(pos)
+        let kws = timeit("lookahead iterator keywords", || {
+            doc.get_keyword_competions_at(pos)
         });
 
         debug!("The resultingn kws are {kws:#?}");
 
-        let pos_one_left = pos.moved_left(1, doc.rope());
+        let iri_completions = doc.get_iri_completions_at(pos, workspace);
+
+        debug!("The resulting iris are {iri_completions:#?}");
 
         let keywords_completion_items = kws.into_iter().map(|keyword| CompletionItem {
             label: keyword,
@@ -787,48 +789,23 @@ impl LanguageServer for Backend {
             ..Default::default()
         });
 
-        let mut items = vec![];
-
-        let node = doc
-            .tree()
-            .root_node()
-            .named_descendant_for_point_range(pos_one_left.into(), pos_one_left.into())
-            .expect("The pos to be in at least one node");
-
-        // Generate the list of iris that can be inserted.
-        let partial_text = node_text(&node, doc.rope()).to_string();
-
-        if node.kind() == "simple_iri" {
-            debug!("Try iris...");
-
-            let iris: Vec<CompletionItem> = workspace
-                .search_frame(&partial_text)
+        let iri_completion_items =
+            iri_completions
                 .into_iter()
-                .unique_by(|(_, iri, _)| iri.clone())
-                .sorted_unstable_by_key(|(v, _, _)| v.clone())
-                .filter_map(|(full, maybe_full_iri, frame)| {
-                    let iri = doc.full_iri_to_shorter_iri(&maybe_full_iri);
-
-                    if iri == partial_text {
-                        None
-                    } else {
-                        Some(CompletionItem {
-                            label: frame.label().unwrap_or(full),
-                            kind: Some(CompletionItemKind::REFERENCE),
-                            detail: Some(frame.info_display(workspace)),
-                            insert_text: Some(iri),
-                            // TODO #29 add details from the frame
-                            ..Default::default()
-                        })
+                .map(|(label, details, insert_text)| {
+                    CompletionItem {
+                        label,
+                        kind: Some(CompletionItemKind::REFERENCE),
+                        detail: Some(details),
+                        insert_text: Some(insert_text),
+                        // TODO #29 add details from the frame
+                        ..Default::default()
                     }
-                })
-                // TODO #29 add items for simple iri, abbriviated iri and full iri
-                // Take the shortest one maybe
-                .collect();
-            items.extend(iris);
-        }
+                });
 
-        items.extend(keywords_completion_items);
+        let items: Vec<CompletionItem> = iri_completion_items
+            .chain(keywords_completion_items)
+            .collect();
 
         debug!("completion item count {}", items.len());
 

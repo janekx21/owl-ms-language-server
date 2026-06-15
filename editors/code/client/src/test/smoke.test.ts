@@ -65,8 +65,9 @@ suite('Should do smoke', () => {
   });
 
   test('Completion at class reference position', async () => {
+    await setTestContent(originalContent + '\nClass: SomeOtherClass\nSubClassOf: S');
     const completions = await vscode.commands.executeCommand<vscode.CompletionList>(
-      'vscode.executeCompletionItemProvider', docUri, new vscode.Position(PERSON_REF_LINE, PERSON_REF_COL)
+      'vscode.executeCompletionItemProvider', docUri, doc.positionAt(doc.getText().length)
     );
     assert.ok(completions.items.length > 0);
     const labels = completions.items.map(i =>
@@ -76,11 +77,11 @@ suite('Should do smoke', () => {
   });
 
   test('Edited class appears in completions', async () => {
-    await setTestContent(originalContent + '\n\nClass: SmokeTestClass\n');
+    await setTestContent(originalContent + '\n\nClass: SmokeTestClass\nClass: SomeOtherClass\nSubClassOf: S');
     await sleep(1500);
 
     const completions = await vscode.commands.executeCommand<vscode.CompletionList>(
-      'vscode.executeCompletionItemProvider', docUri, new vscode.Position(PERSON_REF_LINE, PERSON_REF_COL)
+      'vscode.executeCompletionItemProvider', docUri, doc.positionAt(doc.getText().length)
     );
     const labels = completions.items.map(i =>
       typeof i.label === 'string' ? i.label : i.label.label

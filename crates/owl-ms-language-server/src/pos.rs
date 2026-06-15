@@ -119,7 +119,7 @@ impl Position {
         rope.try_byte_to_char(self.byte_index(rope))
             .map_err(std::convert::Into::into)
             .inspect_log()
-            .unwrap_or(rope.len_chars() - 1)
+            .unwrap_or(rope.len_chars())
     }
 
     pub fn moved_right(self, char_offset: u32, rope: &Rope) -> Self {
