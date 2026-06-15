@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.13.2](https://github.com/janekx21/owl-ms-language-server/compare/v0.13.1...v0.13.2) (2026-06-15)
+
+
+### Bug Fixes
+
+* [#168](https://github.com/janekx21/owl-ms-language-server/issues/168) stale diagnostics ([#169](https://github.com/janekx21/owl-ms-language-server/issues/169)) ([4859a07](https://github.com/janekx21/owl-ms-language-server/commit/4859a079867d731c4057df21d04ddea9c45e2773))
+
+
+### Performance Improvements
+
+* [#129](https://github.com/janekx21/owl-ms-language-server/issues/129) incremental edit ([#164](https://github.com/janekx21/owl-ms-language-server/issues/164)) ([cb174e6](https://github.com/janekx21/owl-ms-language-server/commit/cb174e6e40624c6c2166df15e5f6355aff1af31a))
+* [#150](https://github.com/janekx21/owl-ms-language-server/issues/150) use lookahead iterator for keyword completions ([#166](https://github.com/janekx21/owl-ms-language-server/issues/166)) ([56fe95d](https://github.com/janekx21/owl-ms-language-server/commit/56fe95d9c2ce03b00028053dae9e3546567b442c))
+
 ## [0.13.1](https://github.com/janekx21/owl-ms-language-server/compare/v0.13.0...v0.13.1) (2026-06-01)
 
 
