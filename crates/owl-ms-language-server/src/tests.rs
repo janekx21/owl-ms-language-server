@@ -4322,6 +4322,90 @@ async fn backend_did_change_with_large_syntax_change_should_update_prefixes() {
     );
 }
 
+/// bug #168 wront diagnostics
+#[test(tokio::test)]
+async fn backend_did_change_with_some_should_prune_diagnostics() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Ontology: Dev
+        
+            Class: Janek
+                SubClassOf: Person, Developer
+
+            Class: Person
+
+            Class: Developer
+                SubClassOf: Person some X
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: ontology_url.clone(),
+                version: 1,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                text: "".into(),
+                range: Some(lsp_types::Range {
+                    // Deletes the X
+                    start: lsp_types::Position::new(8, 32),
+                    end: lsp_types::Position::new(8, 33),
+                }),
+                range_length: None,
+            }],
+        })
+        .await;
+
+    // Assert
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    assert_eq!(
+        document.rope().to_string(),
+        indoc! { r#"
+        Ontology: Dev
+        
+            Class: Janek
+                SubClassOf: Person, Developer
+
+            Class: Person
+
+            Class: Developer
+                SubClassOf: Person some 
+        "#}
+    );
+
+    let diagnostics = document.diagnostics(workspace);
+
+    assert!(!diagnostics.iter().any(|d| d.label().contains('X')));
+}
+
 /////////////////////////
 // Fuzz / property-based tests
 /////////////////////////
