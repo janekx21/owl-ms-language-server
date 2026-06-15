@@ -797,7 +797,7 @@ fn retain_vec_rb_on_remove<T, F: FnMut(&RangeBox<T>)>(
 ) {
     items.retain(|range_box| {
         for sc in post_change_ranges {
-            if range_box.range().overlaps(sc) {
+            if range_box.range().overlaps(sc) || range_box.range().is_zero() {
                 on_remove(range_box);
                 return false;
             }
@@ -2228,7 +2228,7 @@ impl QueriedDocument {
         // post_change_ranges, so I can just use the ranges.
         self.imports.retain(|import| {
             for sc in post_change_ranges {
-                if import.range().overlaps(sc) {
+                if import.range().overlaps(sc) || import.range().is_zero() {
                     return false;
                 }
             }
@@ -2938,6 +2938,11 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
         .iter()
         .map(|rb| rb.value().iri.clone())
         .collect();
+
+    debug!(
+        "semantic_errors / doc {:?} uses {uses:#?} defines {defines:#?}",
+        doc.id
+    );
 
     let imports_recursive = timeit("semantic errors  reachable", || {
         // This takes the longes :<
