@@ -1242,16 +1242,24 @@ impl InternalDocument {
             .named_descendant_for_point_range(pos_one_left.into(), pos_one_left.into())
             .expect("The pos to be in at least one node");
 
+        // The first case is needed, becaus it catches the empty doc case
         let mut lei = if node.parent().is_none() {
+            // Has no parent -> Is root
             LANGUAGE
                 .lookahead_iterator(1)
                 .expect("state 1 should be valid")
         } else {
             let mut lei = LANGUAGE.lookahead_iterator(node.parse_state());
+
             while lei.is_none() {
-                let parent = node.parent().unwrap(); // TODO
-                node = parent;
-                lei = LANGUAGE.lookahead_iterator(node.parse_state());
+                let parent = node.parent();
+                if let Some(parent) = parent {
+                    node = parent;
+                    lei = LANGUAGE.lookahead_iterator(node.parse_state());
+                } else {
+                    // Has no parent -> Is root
+                    lei = LANGUAGE.lookahead_iterator(1);
+                }
             }
             lei.expect("while none loop should have set it to some")
         };
