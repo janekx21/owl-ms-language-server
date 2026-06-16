@@ -353,7 +353,7 @@ pub fn keyword_hover_info(kind: &str) -> String {
                 Datatype: PositiveInteger
                     EquivalentTo: integer[>= 0]
                 ObjectProperty: hasParent
-                    EquivalentTo: isParentOf inverseOf isChildOf
+                    EquivalentTo: isParentOf inverse isChildOf
                 DataProperty: hasAge
                     EquivalentTo: isAgeOf
                 ```
