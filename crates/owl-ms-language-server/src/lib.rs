@@ -35,6 +35,7 @@ use tower_lsp::{Client, LanguageServer};
 use tree_sitter_c2rust::Language;
 use workspace::{node_text, trim_full_iri, Workspace};
 
+use crate::consts::child_keywords_for_kind;
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{
@@ -683,7 +684,7 @@ impl LanguageServer for Backend {
         let mut actions = vec![];
 
         actions.extend(missin_iri_actions(pos, doc, ws, self.encoding())?);
-        actions.extend(keyword_actions(pos, doc, ws, self.encoding())?);
+        actions.extend(keyword_actions(pos, doc, self.encoding())?);
 
         Ok(Some(actions))
     }
@@ -1229,7 +1230,6 @@ fn missin_iri_actions(
 fn keyword_actions(
     pos: Position,
     doc: &InternalDocument,
-    ws: &Workspace,
     encoding: &PositionEncodingKind,
 ) -> Result<Vec<CodeActionOrCommand>> {
     let mut actions = vec![];
@@ -1240,75 +1240,15 @@ fn keyword_actions(
         .named_descendant_for_point_range(pos.into(), pos.into())
         .ok_or(Error::PositionOutOfBounds(pos))?;
 
-    // This can start with parent, because the frames do need children to exsist
-    while let Some(par) = node.parent() {
-        let kwds: &[(&'static str, &'static str)] = match par.kind() {
-            "class_frame" => &[
-                ("Class Frame", "    Annotations:"),
-                ("Class Frame", "    SubClassOf:"),
-                ("Class Frame", "    EquivalentTo:"),
-                ("Class Frame", "    DisjointWith:"),
-                ("Class Frame", "    DisjointUnionOf:"),
-                ("Class Frame", "    HasKey:"),
-            ],
-            "datatype_frame" => &[
-                ("Datatype Frame", "    Annotations:"),
-                ("Datatype Frame", "    EquivalentTo:"),
-            ],
-            "object_property_frame" => &[
-                ("Object Property Frame", "    Annotations:"),
-                ("Object Property Frame", "    Domain:"),
-                ("Object Property Frame", "    Range:"),
-                ("Object Property Frame", "    SubPropertyOf:"),
-                ("Object Property Frame", "    EquivalentTo:"),
-                ("Object Property Frame", "    DisjointWith:"),
-                ("Object Property Frame", "    InverseOf:"),
-                ("Object Property Frame", "    Characteristics:"),
-                ("Object Property Frame", "    SubPropertyChain:"),
-            ],
-            "data_property_frame" => &[
-                ("Data Property Frame", "    Annotations:"),
-                ("Data Property Frame", "    Domain:"),
-                ("Data Property Frame", "    Range:"),
-                ("Data Property Frame", "    Characteristics:"),
-                ("Data Property Frame", "    SubPropertyOf:"),
-                ("Data Property Frame", "    EquivalentTo:"),
-                ("Data Property Frame", "    DisjointWith:"),
-            ],
-            "annotation_property_frame" => &[
-                ("Annotation Property Frame", "    Annotations:"),
-                ("Annotation Property Frame", "    Domain:"),
-                ("Annotation Property Frame", "    Range:"),
-                ("Annotation Property Frame", "    SubPropertyOf:"),
-            ],
-            "individual_frame" => &[
-                ("Individual Frame", "    Annotations:"),
-                ("Individual Frame", "    Types:"),
-                ("Individual Frame", "    Facts:"),
-                ("Individual Frame", "    SameAs:"),
-                ("Individual Frame", "    DifferentFrom:"),
-            ],
-            "ontology" => &[
-                ("Ontology", "Annotations:"),
-                ("Ontology", "Import:"),
-                ("Ontology", "Class:"),
-                ("Ontology", "Datatype:"),
-                ("Ontology", "ObjectProperty:"),
-                ("Ontology", "DataProperty:"),
-                ("Ontology", "AnnotationProperty:"),
-                ("Ontology", "Individual:"),
-            ],
-            _ => {
-                &[]
-                // cant do action here
-            }
-        };
+    while let Some(parent) = node.parent() {
+        let kind = node.kind();
+        let kwds = child_keywords_for_kind(kind);
 
         for (parent_name, new_text) in kwds {
-            let range: Range = par.range().into();
+            let range: Range = node.range().into();
             let lsp_range = range.into_lsp(doc.rope(), encoding)?;
             actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: format!("For {parent_name} Add {}", new_text.trim()),
+                title: format!("In {parent_name} add {}", new_text.trim()),
                 edit: Some(WorkspaceEdit {
                     changes: Some(HashMap::from([(
                         doc.uri().clone(),
@@ -1322,12 +1262,11 @@ fn keyword_actions(
                     )])),
                     ..Default::default()
                 }),
-                // TODO from above diagnostics: Some(vec![d]),
                 ..Default::default()
             }));
         }
 
-        node = par;
+        node = parent;
     }
 
     Ok(actions)
