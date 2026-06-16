@@ -407,6 +407,7 @@ impl LanguageServer for Backend {
                 version: None,
             }),
             capabilities: Backend::server_capabilities(position_encoding_kind),
+            offset_encoding: None,
         })
     }
 
@@ -679,80 +680,10 @@ impl LanguageServer for Backend {
         // pos is just the range start. Ignore range end for now.
         let pos: Position = Position::from_lsp(params.range.start, doc.rope(), self.encoding())?;
 
-        let node = doc
-            .tree()
-            .root_node()
-            .named_descendant_for_point_range(pos.into(), pos.into())
-            .ok_or(Error::PositionOutOfBounds(pos))?;
+        let mut actions = vec![];
 
-        // TODO This could be from the parameter, but then the parsing from lsp diagnostics
-        // to internal one should take place somehow. Not needed now I think.
-        // Also I dont know how they are matched
-        let diagnostics = doc.diagnostics(ws);
-        let diagnostics_under_cursor = diagnostics
-            .into_iter()
-            .filter(|diagnostic| diagnostic.range.contains(pos));
-
-        let end: Position = doc.tree().root_node().range().end_point.into();
-        let end_lsp = end.into_lsp(doc.rope(), self.encoding())?;
-        let create_missing_iri_actions = diagnostics_under_cursor.filter_map(|d| match &d.kind {
-            workspace::DiagnosticKind::MissingIri(full_iri) => {
-                let iri = doc.full_iri_to_shorter_iri(full_iri);
-                let iri_kind = node
-                    .parent()
-                    .expect("Missing IRI node should have parent")
-                    .kind();
-
-                let frame_type = FrameType::parse(iri_kind);
-                let definition_str = frame_type.to_definition()?;
-
-                Some(CodeActionOrCommand::CodeAction(CodeAction {
-                    title: format!("Create {frame_type} for {iri}",),
-                    edit: Some(WorkspaceEdit {
-                        changes: Some(HashMap::from([(
-                            url.clone(),
-                            vec![TextEdit {
-                                range: lsp_types::Range {
-                                    start: end_lsp,
-                                    end: end_lsp,
-                                },
-                                new_text: format!("\n{definition_str} {iri}\n"),
-                            }],
-                        )])),
-                        ..Default::default()
-                    }),
-                    // TODO from above diagnostics: Some(vec![d]),
-                    ..Default::default()
-                }))
-            }
-            workspace::DiagnosticKind::SyntaxError { .. } => None,
-        });
-
-        let mut actions = vec![
-            // TODO maybe this would be a great workspace action?
-            // CodeActionOrCommand::CodeAction(CodeAction {
-            // title: "add class".to_string(),
-            // edit: Some(WorkspaceEdit {
-            //     changes: Some(HashMap::from([(
-            //         url.clone(),
-            //         vec![TextEdit {
-            //             range: lsp_types::Range {
-            //                 start: end.into_lsp(doc.rope(), self.encoding())?,
-            //                 end: end.into_lsp(doc.rope(), self.encoding())?,
-            //             },
-            //             new_text:
-            //                 "\nClass: new_class\n    Annotations:\n        rdfs:label \"new class\""
-            //                     .to_string(),
-            //         }],
-            //     )])),
-            //     document_changes: None,
-            //     change_annotations: None,
-            // }),
-            // ..Default::default()
-            // })
-        ];
-
-        actions.extend(create_missing_iri_actions);
+        actions.extend(missin_iri_actions(pos, doc, ws, self.encoding())?);
+        actions.extend(keyword_actions(pos, doc, ws, self.encoding())?);
 
         Ok(Some(actions))
     }
@@ -1235,6 +1166,129 @@ fn rename_helper(
         }
         _ => Ok(None),
     }
+}
+
+fn missin_iri_actions(
+    pos: Position,
+    doc: &InternalDocument,
+    ws: &Workspace,
+    encoding: &PositionEncodingKind,
+) -> Result<Vec<CodeActionOrCommand>> {
+    // TODO This could be from the parameter, but then the parsing from lsp diagnostics
+    // to internal one should take place somehow. Not needed now I think.
+    // Also I dont know how they are matched
+
+    let node = doc
+        .tree()
+        .root_node()
+        .named_descendant_for_point_range(pos.into(), pos.into())
+        .ok_or(Error::PositionOutOfBounds(pos))?;
+
+    let diagnostics = doc.diagnostics(ws);
+    let diagnostics_under_cursor = diagnostics
+        .into_iter()
+        .filter(|diagnostic| diagnostic.range.contains(pos));
+
+    let end: Position = doc.tree().root_node().range().end_point.into();
+    let end_lsp = end.into_lsp(doc.rope(), encoding)?;
+    let create_missing_iri_actions = diagnostics_under_cursor.filter_map(|d| match &d.kind {
+        workspace::DiagnosticKind::MissingIri(full_iri) => {
+            let iri = doc.full_iri_to_shorter_iri(full_iri);
+            let iri_kind = node
+                .parent()
+                .expect("Missing IRI node should have parent")
+                .kind();
+
+            let frame_type = FrameType::parse(iri_kind);
+            let definition_str = frame_type.to_definition()?;
+
+            Some(CodeActionOrCommand::CodeAction(CodeAction {
+                title: format!("Create {frame_type} for {iri}",),
+                edit: Some(WorkspaceEdit {
+                    changes: Some(HashMap::from([(
+                        doc.uri().clone(),
+                        vec![TextEdit {
+                            range: lsp_types::Range {
+                                start: end_lsp,
+                                end: end_lsp,
+                            },
+                            new_text: format!("\n{definition_str} {iri}\n"),
+                        }],
+                    )])),
+                    ..Default::default()
+                }),
+                // TODO from above diagnostics: Some(vec![d]),
+                ..Default::default()
+            }))
+        }
+        workspace::DiagnosticKind::SyntaxError { .. } => None,
+    });
+    Ok(create_missing_iri_actions.collect())
+}
+
+fn keyword_actions(
+    pos: Position,
+    doc: &InternalDocument,
+    ws: &Workspace,
+    encoding: &PositionEncodingKind,
+) -> Result<Vec<CodeActionOrCommand>> {
+    let mut actions = vec![];
+
+    let mut node = doc
+        .tree()
+        .root_node()
+        .named_descendant_for_point_range(pos.into(), pos.into())
+        .ok_or(Error::PositionOutOfBounds(pos))?;
+
+    // This can start with parent, because the frames do need children to exsist
+    while let Some(par) = node.parent() {
+        let kwds: &[(&'static str, &'static str)] = match par.kind() {
+            "class_frame" => &[
+                ("Class Frame", "    Annotations:"),
+                ("Class Frame", "    SubClassOf:"),
+                ("Class Frame", "    EquivalentTo:"),
+                ("Class Frame", "    DisjointWith:"),
+                ("Class Frame", "    DisjointUnionOf:"),
+                ("Class Frame", "    HasKey:"),
+            ],
+            "ontology" => &[
+                ("Ontology", "Annotations:"),
+                ("Ontology", "Import:"),
+                ("Ontology", "Class:"),
+            ],
+            _ => {
+                &[]
+                // cant do action here
+            }
+        };
+
+        for (parent_name, new_text) in kwds {
+            let range: Range = par.range().into();
+            let lsp_range = range.into_lsp(doc.rope(), encoding)?;
+            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title: format!("For {parent_name} Add {}", new_text.trim()),
+                edit: Some(WorkspaceEdit {
+                    changes: Some(HashMap::from([(
+                        doc.uri().clone(),
+                        vec![TextEdit {
+                            range: lsp_types::Range {
+                                start: lsp_range.end,
+                                end: lsp_range.end,
+                            },
+                            new_text: format!("\n{new_text}"),
+                        }],
+                    )])),
+                    ..Default::default()
+                }),
+                // TODO from above diagnostics: Some(vec![d]),
+                ..Default::default()
+            }));
+        }
+
+        node = par;
+    }
+
+    Ok(actions)
 }
 
 impl Backend {
