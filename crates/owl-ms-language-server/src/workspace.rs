@@ -837,8 +837,11 @@ impl Diagnostic {
             DiagnosticKind::SyntaxError {
                 valid_children,
                 parent,
+                msg,
             } => {
-                format!("Syntax Error. expected {valid_children} inside {parent}")
+                format!(
+                    "Syntax Error {msg}. Expected\n  {valid_children}\ninside or after\n  {parent}"
+                )
             }
         }
     }
@@ -868,6 +871,7 @@ pub enum DiagnosticKind {
     SyntaxError {
         valid_children: String, // add some nicer info here if needed
         parent: String,
+        msg: String, // Eg. "UNEXPECTED '\n'"
     },
 }
 
@@ -1616,33 +1620,71 @@ impl ParsedDocument {
             let node = cursor.node();
 
             if node.is_error() {
-                // log
+                let leaf = first_leaf(node);
                 let range: Range = cursor.node().range().into();
 
-                // root has no parents so use itself
-                let parent_kind = node.parent().unwrap_or(node).kind();
+                let prev_node = node.prev_sibling().unwrap_or(node.parent().unwrap_or(node));
 
-                if let Some(static_node) = NODE_TYPES.get(parent_kind) {
-                    let valid_children: String = Itertools::intersperse(
-                        static_node
-                            .children
-                            .types
-                            .iter()
-                            .map(|sn| node_type_to_string(&sn.type_)),
-                        ", ".to_string(),
-                    )
-                    .collect();
+                let mut prev = if let Some(prev_sib) = node.prev_sibling() {
+                    let prev_sibs_last_leaf = get_last_leaf(prev_sib);
+                    prev_sibs_last_leaf
+                } else {
+                    prev_node
+                };
 
-                    let parent = node_type_to_string(parent_kind);
-
-                    diagnostics.push(Diagnostic {
-                        range,
-                        kind: DiagnosticKind::SyntaxError {
-                            valid_children,
-                            parent,
-                        },
-                    });
+                let mut parent_chain = vec![prev.kind()];
+                while let Some(par) = prev.parent() {
+                    parent_chain.push(par.kind());
+                    prev = par;
                 }
+
+                let possible_nodes = possible_nodes(node)
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect();
+                debug!("Possible nodes: {possible_nodes:#?}");
+                debug!("Parent chain: {parent_chain:#?}");
+
+                let parent_chain_children = parent_chain
+                    .iter()
+                    .flat_map(|kind| {
+                        NODE_TYPES
+                            .get(&(*kind).to_string())
+                            .iter()
+                            .flat_map(|t| {
+                                t.children
+                                    .types
+                                    .iter()
+                                    .map(|c| c.type_.clone())
+                                    .collect_vec()
+                            })
+                            .collect_vec()
+                    })
+                    .collect::<HashSet<_>>();
+
+                let valid_children = parent_chain_children.intersection(&possible_nodes);
+
+                let valid_children: String =
+                    valid_children.map(|nt| node_type_to_string(nt)).join(", ");
+
+                let parent = parent_chain
+                    .iter()
+                    .map(|parent_kind| node_type_to_string(parent_kind))
+                    .join(" < ");
+
+                diagnostics.push(Diagnostic {
+                    range,
+                    kind: DiagnosticKind::SyntaxError {
+                        valid_children,
+                        parent,
+                        msg: leaf
+                            .to_string()
+                            .trim_start_matches('(')
+                            .trim_end_matches(')')
+                            .to_string(),
+                    },
+                });
+
                 // move along
                 while !cursor.goto_next_sibling() {
                     // move out
@@ -1677,6 +1719,59 @@ impl ParsedDocument {
         }
     }
 }
+
+fn first_leaf(node: Node<'_>) -> Node<'_> {
+    let mut current = node;
+    while let Some(child) = current.child(0) {
+        current = child;
+    }
+    current
+}
+
+fn possible_nodes(node: Node<'_>) -> HashSet<&'static str> {
+    if !node.is_error() {
+        return HashSet::new();
+    }
+
+    let state = first_leaf(node).parse_state();
+
+    let names = LANGUAGE
+        .lookahead_iterator(state)
+        .map(|mut it| it.iter_names().collect())
+        .unwrap_or_default();
+
+    names
+}
+
+fn get_last_leaf(node: Node<'_>) -> Node<'_> {
+    debug!("Get last leaf of {node}");
+    if node.child_count() > 0 {
+        if let Some(c) = node.child(node.child_count() - 1) {
+            debug!("Goto child {c} with index {}", node.child_count() - 1);
+            get_last_leaf(c)
+        } else {
+            node
+        }
+    } else {
+        debug!("End on {node}");
+        node
+    }
+}
+
+// for debugging
+// fn print_node(node: Node<'_>, depth: usize) {
+//     debug!(
+//         "{}- {} ({}) {} {} {node:?}",
+//         " ".repeat(depth),
+//         node.kind(),
+//         node.grammar_name(),
+//         node.parse_state(),
+//         node.next_parse_state()
+//     );
+//     for i in 0..node.child_count() {
+//         print_node(node.child(i).unwrap(), depth + 1);
+//     }
+// }
 
 /// .
 ///
@@ -3023,11 +3118,11 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
 }
 
 fn node_type_to_string(node_type: &str) -> String {
-    Itertools::intersperse(
-        node_type.split_terminator('_').map(capitalize_string),
-        " ".to_string(),
-    )
-    .collect()
+    node_type
+        .trim_start_matches("keyword_")
+        .split_terminator('_')
+        .map(capitalize_string)
+        .join(" ")
 }
 
 fn capitalize_string(s: &str) -> String {

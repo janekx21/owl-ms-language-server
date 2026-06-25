@@ -4469,6 +4469,50 @@ async fn backend_did_change_with_some_should_prune_diagnostics() {
     assert!(!diagnostics.iter().any(|d| d.label().contains('X')));
 }
 
+#[test(tokio::test)]
+async fn backend_diagnostics_with_syntax_error_should_report_nice_message() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Ontology: Dev
+        
+            Class: Janek
+                SubClassOf: Person Developer
+        #           Syntax Error  ^
+            Class: Developer
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    // Assert
+    let diagnostics = document.diagnostics(workspace);
+    dbg!(diagnostics);
+    panic!();
+}
+
 /////////////////////////
 // Fuzz / property-based tests
 /////////////////////////
