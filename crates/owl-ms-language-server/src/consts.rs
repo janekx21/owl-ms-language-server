@@ -280,7 +280,7 @@ pub fn keyword_hover_info(kind: &str) -> String {
                 - [Universal Quantification over Data Properties](https://www.w3.org/TR/owl2-syntax/#Universal_Quantification_2)
             "}.to_string(),
             "keyword_self" => indoc! {"
-                `self`
+                `Self`
 
                 *Class expression* 
 
@@ -291,7 +291,7 @@ pub fn keyword_hover_info(kind: &str) -> String {
                 Example:
                 ```owl-ms
                 Class: Person
-                    SubClassOf: likes self
+                    SubClassOf: likes Self
                 ```
 
                 [Specification](https://www.w3.org/TR/owl2-syntax/#Self-Restriction)
