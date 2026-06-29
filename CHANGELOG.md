@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.0.0](https://github.com/janekx21/owl-ms-language-server/compare/v0.13.2...v1.0.0) (2026-06-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* just 1.0.0 release :>
+
+### Features
+
+* [#170](https://github.com/janekx21/owl-ms-language-server/issues/170) use look ahead iterator for syntax errors ([#174](https://github.com/janekx21/owl-ms-language-server/issues/174)) ([a87d0b5](https://github.com/janekx21/owl-ms-language-server/commit/a87d0b5a8670cfcef789abe6ebea785795cd4639))
+* [#62](https://github.com/janekx21/owl-ms-language-server/issues/62) code actions for keywords ([#172](https://github.com/janekx21/owl-ms-language-server/issues/172)) ([8d062a7](https://github.com/janekx21/owl-ms-language-server/commit/8d062a71f7c35a558400574417a8c3567d39a803))
+
+
+### Miscellaneous Chores
+
+* update readme ([#177](https://github.com/janekx21/owl-ms-language-server/issues/177)) ([cab5e94](https://github.com/janekx21/owl-ms-language-server/commit/cab5e9443ba2d420cb607605f92d358d957c1647))
+
 ## [0.13.2](https://github.com/janekx21/owl-ms-language-server/compare/v0.13.1...v0.13.2) (2026-06-15)
 
 
