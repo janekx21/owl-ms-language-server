@@ -12,6 +12,8 @@
 
 An incremental analysis assistant for writing ontologies with the [OWL 2 Web Ontology Language | Manchester Syntax](https://www.w3.org/TR/owl2-manchester-syntax/).
 
+The language server is stable and production ready.
+
 ## Structure of this repository
 
 - [crates/owl-ms-language-server/](crates/owl-ms-language-server/) The Language Server
