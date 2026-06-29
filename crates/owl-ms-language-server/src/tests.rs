@@ -1275,7 +1275,7 @@ async fn backend_import_resolve_should_load_documents() {
             ),
             WorkspaceMember::OmnFile {
                 name: "foobaronto.omn".into(),
-                content: "".into(),
+                content: "Ontology: X".into(),
             },
         ]
     });
@@ -4509,8 +4509,14 @@ async fn backend_diagnostics_with_syntax_error_should_report_nice_message() {
 
     // Assert
     let diagnostics = document.diagnostics(workspace);
-    dbg!(diagnostics);
-    panic!();
+    info!("{:#?}", diagnostics);
+    assert!(diagnostics
+        .iter()
+        .filter(|d| d.label().contains("Some")
+            && d.label().contains("Value")
+            && d.label().contains("Self"))
+        .exactly_one()
+        .is_ok());
 }
 
 /////////////////////////

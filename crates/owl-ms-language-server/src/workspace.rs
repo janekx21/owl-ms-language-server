@@ -1664,8 +1664,10 @@ impl ParsedDocument {
 
                 let valid_children = parent_chain_children.intersection(&possible_nodes);
 
-                let valid_children: String =
-                    valid_children.map(|nt| node_type_to_string(nt)).join(", ");
+                let valid_children: String = valid_children
+                    .map(|nt| node_type_to_string(nt))
+                    .sorted_unstable()
+                    .join(", ");
 
                 let parent = parent_chain
                     .iter()
