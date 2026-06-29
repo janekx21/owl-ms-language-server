@@ -3817,6 +3817,74 @@ async fn backend_code_action_on_missing_iri_should_create_frame() {
     }));
 }
 
+// TODO
+#[test(tokio::test)]
+async fn backend_code_action_for_keywords_should_work() {
+    setup();
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test workspace".into(),
+        }),
+        vec![],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    let ontology = indoc! {r#"
+        Prefix: : <http://example.org/main#>
+        Ontology: <http://example.org/main.omn>
+            Class: SomeClass
+                SubClassOf: OtherClass
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let result = service
+        .inner()
+        .code_action(CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: url.clone() },
+            range: lsp_types::Range {
+                start: lsp_types::Position::new(3, 26),
+                end: lsp_types::Position::new(3, 26),
+            },
+            context: CodeActionContext::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    let result = result.expect("Sould be some some");
+
+    let results = result.iter().counts_by(|action| match action {
+        CodeActionOrCommand::CodeAction(x) => x.title.clone(),
+        _ => todo!(),
+    });
+
+    assert!(results.iter().any(|(k, _)| k.contains("Class:")));
+    assert!(results.iter().any(|(k, _)| k.contains("SubClassOf:")));
+    assert!(results.iter().any(|(k, _)| k.contains("Annotations:")));
+    assert!(!results.iter().any(|(k, _)| k.contains("Inverse")));
+}
+
 #[test(tokio::test)]
 async fn backend_did_change_should_update_ontology_id() {
     setup();

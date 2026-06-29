@@ -353,7 +353,7 @@ pub fn keyword_hover_info(kind: &str) -> String {
                 Datatype: PositiveInteger
                     EquivalentTo: integer[>= 0]
                 ObjectProperty: hasParent
-                    EquivalentTo: isParentOf inverseOf isChildOf
+                    EquivalentTo: isParentOf inverse isChildOf
                 DataProperty: hasAge
                     EquivalentTo: isAgeOf
                 ```
@@ -935,4 +935,68 @@ pub fn keyword_hover_info(kind: &str) -> String {
             "}.to_string(),
             _ => String::new(),
         }
+}
+
+pub fn child_keywords_for_kind(kind: &str) -> &[(&'static str, &'static str)] {
+    match kind {
+        "class_frame" => &[
+            ("Class Frame", "    Annotations:"),
+            ("Class Frame", "    SubClassOf:"),
+            ("Class Frame", "    EquivalentTo:"),
+            ("Class Frame", "    DisjointWith:"),
+            ("Class Frame", "    DisjointUnionOf:"),
+            ("Class Frame", "    HasKey:"),
+        ],
+        "datatype_frame" => &[
+            ("Datatype Frame", "    Annotations:"),
+            ("Datatype Frame", "    EquivalentTo:"),
+        ],
+        "object_property_frame" => &[
+            ("Object Property Frame", "    Annotations:"),
+            ("Object Property Frame", "    Domain:"),
+            ("Object Property Frame", "    Range:"),
+            ("Object Property Frame", "    SubPropertyOf:"),
+            ("Object Property Frame", "    EquivalentTo:"),
+            ("Object Property Frame", "    DisjointWith:"),
+            ("Object Property Frame", "    InverseOf:"),
+            ("Object Property Frame", "    Characteristics:"),
+            ("Object Property Frame", "    SubPropertyChain:"),
+        ],
+        "data_property_frame" => &[
+            ("Data Property Frame", "    Annotations:"),
+            ("Data Property Frame", "    Domain:"),
+            ("Data Property Frame", "    Range:"),
+            ("Data Property Frame", "    Characteristics:"),
+            ("Data Property Frame", "    SubPropertyOf:"),
+            ("Data Property Frame", "    EquivalentTo:"),
+            ("Data Property Frame", "    DisjointWith:"),
+        ],
+        "annotation_property_frame" => &[
+            ("Annotation Property Frame", "    Annotations:"),
+            ("Annotation Property Frame", "    Domain:"),
+            ("Annotation Property Frame", "    Range:"),
+            ("Annotation Property Frame", "    SubPropertyOf:"),
+        ],
+        "individual_frame" => &[
+            ("Individual Frame", "    Annotations:"),
+            ("Individual Frame", "    Types:"),
+            ("Individual Frame", "    Facts:"),
+            ("Individual Frame", "    SameAs:"),
+            ("Individual Frame", "    DifferentFrom:"),
+        ],
+        "ontology" => &[
+            ("Ontology", "Annotations:"),
+            ("Ontology", "Import:"),
+            ("Ontology", "Class:"),
+            ("Ontology", "Datatype:"),
+            ("Ontology", "ObjectProperty:"),
+            ("Ontology", "DataProperty:"),
+            ("Ontology", "AnnotationProperty:"),
+            ("Ontology", "Individual:"),
+        ],
+        _ => {
+            &[]
+            // cant do action here
+        }
+    }
 }

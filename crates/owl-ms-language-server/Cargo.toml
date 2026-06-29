@@ -25,7 +25,7 @@ simple-logging = "2.0"
 tempdir = "0.3"
 test-log = "0.2"
 tokio = { version = "1.44", features = ["macros", "rt-multi-thread", "io-util", "io-std", "sync"] }
-tower-lsp = "0.20"
+tower-lsp = { version = "0.20", features = ["proposed"] }
 tree-sitter-c2rust = "0.25"
 tree-sitter-owl-ms.workspace = true
 ureq = "3.0"
