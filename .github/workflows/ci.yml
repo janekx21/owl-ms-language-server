@@ -144,6 +144,7 @@ jobs:
       run: cargo build --release
 
     - name: Place binary for extension
+      shell: bash
       run: |
         mkdir -p editors/code/server
         cp target/release/owl-ms-language-server editors/code/server/owl-ms-language-server
