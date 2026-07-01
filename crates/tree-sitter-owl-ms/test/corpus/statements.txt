@@ -81,7 +81,7 @@ Ontology:
 	          (keyword_annotations)
 	          (annotation
 	    				(annotation_property_iri (simple_iri))
-	    				(string_literal_no_language))))))
+	    				(string_literal_no_language (quoted_string)))))))
 
 ===================
 Datatype Frame integer

@@ -91,10 +91,16 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
                 (annotation
                     (annotation_property_iri)@iri
                     [
-                        (string_literal_no_language)
-                        (string_literal_with_language)
-                        (typed_literal)
-                    ]@literal)))@frame
+                        (string_literal_no_language
+                            value: (_) @literal)
+                        (string_literal_with_language
+                            value: (_) @literal
+                            language: (_) @language)
+                        (typed_literal
+                            value: (_) @literal
+                            datatype: (_) @datatype
+                            )
+                    ])))@frame
         ",
     )
     .expect("valid query"),
@@ -141,6 +147,16 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
     )
     .expect("valid query"),
 });
+// ;[
+// ;    (typed_literal
+// ;        value: (quoted_string) @value)
+// ;]
+
+// ;(_ ; literal
+// ;    value: (_) @value
+// ;    datatype: (_)? @datatype
+// ;    language: (_)? @language
+// ;)
 
 /// Tree-sitter grammar specification
 #[derive(Debug, Clone, Serialize, Deserialize)]

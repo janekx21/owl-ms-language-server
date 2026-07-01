@@ -235,11 +235,18 @@ impl Workspace {
                                 Box::new(
                                     item.annotations
                                         .iter()
-                                        .filter(|(_, value)| {
-                                            value.to_lowercase().starts_with(&partial_lower)
+                                        .filter(|annotation| {
+                                            annotation
+                                                .string_value
+                                                .to_lowercase()
+                                                .starts_with(&partial_lower)
                                         })
-                                        .map(|(full, _)| {
-                                            (full.clone(), item.iri.clone(), item.clone())
+                                        .map(|annotation| {
+                                            (
+                                                annotation.annotation_iri.clone(),
+                                                item.iri.clone(),
+                                                item.clone(),
+                                            )
                                         }),
                                 )
                             }
@@ -2038,7 +2045,7 @@ pub struct QueriedDocument {
 }
 
 /// Frame IRI, Annotation IRI, Literal
-type Annotation = (String, String, String);
+// type Annotation = (String, String, String);
 
 impl QueriedDocument {
     /// Finds flat references to other document URL's in this document
@@ -2120,10 +2127,10 @@ impl QueriedDocument {
         annotations
             .par_iter()
             .map(|rb| {
-                let (frame_iri, annotation_iri, literal) = rb.value();
+                let annotation = rb.value();
                 FrameInfo {
-                    iri: frame_iri.clone(),
-                    annotations: vec![(annotation_iri.clone(), literal.clone())],
+                    iri: annotation.frame_iri.clone(),
+                    annotations: vec![annotation.clone()],
                     frame_type: FrameType::Unknown,
                     definitions: Vec::new(),
                 }
@@ -2159,10 +2166,7 @@ impl QueriedDocument {
             )
     }
 
-    fn document_annotations(
-        &self,
-        parsed_document: &ParsedDocument,
-    ) -> Vec<RangeBox<(String, String, String)>> {
+    fn document_annotations(&self, parsed_document: &ParsedDocument) -> Vec<RangeBox<Annotation>> {
         self.document_annotations_in_range(parsed_document, Range::FULL_RANGE)
     }
 
@@ -2171,31 +2175,64 @@ impl QueriedDocument {
         parsed_document: &ParsedDocument,
         range: Range,
     ) -> Vec<RangeBox<Annotation>> {
-        parsed_document
-            .query_range(&ALL_QUERIES.annotation_query, range)
+        // debug!("Begin annotations in range");
+        let matches = parsed_document.query_range(&ALL_QUERIES.annotation_query, range);
+        // debug!("End");
+        // debug!("matches: {matches:?}");
+        // debug!("{}", matches.len());
+        // for m in matches {
+        //     debug!("- Match");
+        // }
+
+        matches
             .iter()
-            .map(|m| match &m.captures[..] {
-                [frame_iri_capture, annotation_iri_capture, literal_capture, frame_capture] => {
-                    let frame_iri = trim_full_iri(frame_iri_capture.node.text.clone());
-                    let frame_iri = self
-                        .abbreviated_iri_to_full_iri(&frame_iri)
-                        .unwrap_or(frame_iri);
+            .map(|m| {
+                let frame_iri_capture =
+                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "frame_iri")
+                        .expect("frame capture");
+                let annotation_iri_capture =
+                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "iri")
+                        .expect("iri capture");
+                let value_capture =
+                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "literal")
+                        .expect("value capture");
+                let frame_capture =
+                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "frame")
+                        .expect("frame_capture");
 
-                    let annotation_iri = trim_full_iri(annotation_iri_capture.node.text.clone());
-                    let annotation_iri = self
-                        .abbreviated_iri_to_full_iri(&annotation_iri)
-                        .unwrap_or(annotation_iri);
+                let datatype_capture =
+                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "datatype");
 
-                    let literal = trim_string_value(&literal_capture.node.text);
+                let language_capture =
+                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "language");
 
-                    RangeBox::new(
-                        (frame_iri, annotation_iri, literal),
-                        frame_capture.node.range,
-                    )
-                }
-                _ => unreachable!(),
+                let frame_iri = trim_full_iri(frame_iri_capture.node.text.clone());
+                let frame_iri = self
+                    .abbreviated_iri_to_full_iri(&frame_iri)
+                    .unwrap_or(frame_iri);
+
+                let annotation_iri = trim_full_iri(annotation_iri_capture.node.text.clone());
+                let annotation_iri = self
+                    .abbreviated_iri_to_full_iri(&annotation_iri)
+                    .unwrap_or(annotation_iri);
+
+                let literal = trim_string_value(&value_capture.node.text);
+
+                let language =
+                    language_capture.map(|c| c.node.text.trim_start_matches('@').to_string());
+
+                let annotation = Annotation {
+                    frame_iri,
+                    annotation_iri,
+                    string_value: literal,
+                    language,
+                    datatype: "http://www.w3.org/2001/XMLSchema#string".to_string(), // TODO query for the datatype here
+                };
+
+                RangeBox::new(annotation, frame_capture.node.range)
             })
             .collect_vec()
+        // Vec::new()
     }
 
     fn document_definitions(
@@ -2382,6 +2419,19 @@ impl QueriedDocument {
 
         dirty_prefix
     }
+}
+
+fn capture_by_name<'a>(
+    query: &'a Query,
+    captures: &'a [UnwrappedQueryCapture],
+    name: &'static str,
+) -> Option<&'a UnwrappedQueryCapture> {
+    captures.iter().find(|c| {
+        c.index
+            == query
+                .capture_index_for_name(name)
+                .expect("capture name should be valid")
+    })
 }
 
 fn build_iri_locations(references: &Vec<RangeBox<String>>) -> HashMap<String, Vec<RangeBox<()>>> {
@@ -2797,7 +2847,13 @@ fn get_frame_info_helper_ex(doc: &ExternalDocument, iri: &Iri) -> Option<FrameIn
         .flatten()
         .map(|[_, p, o]| FrameInfo {
             iri: iri.clone(),
-            annotations: once((simple_term_to_string(p), simple_term_to_string(o))).collect(),
+            annotations: vec![Annotation {
+                frame_iri: "??".to_string(),
+                annotation_iri: simple_term_to_string(p),
+                string_value: simple_term_to_string(o),
+                language: None,
+                datatype: "http://www.w3.org/2001/XMLSchema#string".to_string(), // TODO
+            }],
             frame_type: FrameType::Unknown,
             definitions: vec![Location {
                 uri: doc.uri.clone(),
@@ -2861,9 +2917,18 @@ pub struct UnwrappedNode {
 #[derive(Clone, Debug)]
 pub struct FrameInfo {
     pub iri: Iri,
-    pub annotations: Vec<(Iri, String)>,
+    pub annotations: Vec<Annotation>,
     pub frame_type: FrameType,
     pub definitions: Vec<Location>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Annotation {
+    pub frame_iri: Iri,
+    pub annotation_iri: Iri,
+    pub string_value: String,
+    pub language: Option<String>,
+    pub datatype: Iri,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -2917,9 +2982,15 @@ impl FrameInfo {
         let joined = self
             .annotations
             .iter()
-            .filter(|(x, _)| x == iri)
+            .filter(|annotation| annotation.annotation_iri == iri)
             // TODO #20 make this more usable by providing multiple lines with indentation
-            .map(|(_, s)| trim_string_value(s))
+            .map(|annotation| {
+                if let Some(language) = &annotation.language {
+                    format!("{} @ {}", &annotation.string_value, &language)
+                } else {
+                    annotation.string_value.clone()
+                }
+            })
             .join(", ");
 
         if joined.is_empty() {
@@ -2940,16 +3011,18 @@ impl FrameInfo {
         let annotations = self
             .annotations
             .iter()
-            .map(|(iri, _)| {
+            .map(|annotation| {
                 let iri_label = workspace
-                    .get_frame_info(iri)
+                    .get_frame_info(&annotation.annotation_iri)
                     .map(|fi| {
                         fi.label()
                             .unwrap_or_else(|| trim_url_before_last(&fi.iri).to_string())
                     })
-                    .unwrap_or(iri.clone());
+                    .unwrap_or(annotation.annotation_iri.clone());
                 // TODO #28 use values directly
-                let mut annotation_display = self.annotation_display(iri).unwrap_or(iri.clone());
+                let mut annotation_display = self
+                    .annotation_display(&annotation.annotation_iri)
+                    .unwrap_or(annotation.annotation_iri.clone());
 
                 // If this is a multiline string then give it some space to work with
                 if annotation_display.contains('\n') {
@@ -2972,12 +3045,12 @@ impl FrameInfo {
         if self.iri.contains(query) {
             sum += 5000;
         }
-        for (annotation_iri, value) in &self.annotations {
-            if value.contains(query) {
-                if annotation_iri == FrameInfo::LABEL_IRI {
+        for annotation in &self.annotations {
+            if annotation.string_value.contains(query) {
+                if annotation.annotation_iri == FrameInfo::LABEL_IRI {
                     sum += 1000;
 
-                    if let Some((l, r)) = value.split_once(query) {
+                    if let Some((l, r)) = annotation.string_value.split_once(query) {
                         // Starts with query
                         if l.is_empty() {
                             sum += 100;

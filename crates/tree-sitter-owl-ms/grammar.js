@@ -61,9 +61,15 @@ module.exports = grammar({
         $.decimal_literal,
         $.floating_point_literal,
       ),
-    typed_literal: $ => seq($._lexial_value, '^^', $._datatype),
-    string_literal_no_language: $ => $._quoted_string,
-    string_literal_with_language: $ => seq($._quoted_string, $._language_tag),
+    typed_literal: $ =>
+      seq(
+        field('value', $._lexial_value),
+        '^^',
+        field('datatype', $._datatype),
+      ),
+    string_literal_no_language: $ => field('value', $.quoted_string),
+    string_literal_with_language: $ =>
+      seq(field('value', $.quoted_string), field('language', $.language_tag)),
     integer_literal: $ => token(seq(optional(choice('+', '-')), _digits())),
     decimal_literal: $ =>
       token(seq(optional(choice('+', '-')), _digits(), '.', _digits())),
@@ -83,9 +89,9 @@ module.exports = grammar({
         ),
       ),
 
-    _quoted_string: $ => /"([^"\\]|\\\\|\\")*"/,
-    _language_tag: $ => /@[a-zA-Z\-]+/, // TODO make more strict https://www.rfc-editor.org/rfc/bcp/bcp47.txt
-    _lexial_value: $ => $._quoted_string,
+    quoted_string: $ => /"([^"\\]|\\\\|\\")*"/,
+    language_tag: $ => /@[a-zA-Z\-]+/, // TODO make more strict https://www.rfc-editor.org/rfc/bcp/bcp47.txt
+    _lexial_value: $ => $.quoted_string,
 
     // 2.2 Ontologies and Annotations
     _ontology_document: $ =>

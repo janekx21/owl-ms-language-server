@@ -330,33 +330,53 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "SYMBOL",
-          "name": "_lexial_value"
+          "type": "FIELD",
+          "name": "value",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_lexial_value"
+          }
         },
         {
           "type": "STRING",
           "value": "^^"
         },
         {
-          "type": "SYMBOL",
-          "name": "_datatype"
+          "type": "FIELD",
+          "name": "datatype",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_datatype"
+          }
         }
       ]
     },
     "string_literal_no_language": {
-      "type": "SYMBOL",
-      "name": "_quoted_string"
+      "type": "FIELD",
+      "name": "value",
+      "content": {
+        "type": "SYMBOL",
+        "name": "quoted_string"
+      }
     },
     "string_literal_with_language": {
       "type": "SEQ",
       "members": [
         {
-          "type": "SYMBOL",
-          "name": "_quoted_string"
+          "type": "FIELD",
+          "name": "value",
+          "content": {
+            "type": "SYMBOL",
+            "name": "quoted_string"
+          }
         },
         {
-          "type": "SYMBOL",
-          "name": "_language_tag"
+          "type": "FIELD",
+          "name": "language",
+          "content": {
+            "type": "SYMBOL",
+            "name": "language_tag"
+          }
         }
       ]
     },
@@ -722,17 +742,17 @@
         ]
       }
     },
-    "_quoted_string": {
+    "quoted_string": {
       "type": "PATTERN",
       "value": "\"([^\"\\\\]|\\\\\\\\|\\\\\")*\""
     },
-    "_language_tag": {
+    "language_tag": {
       "type": "PATTERN",
       "value": "@[a-zA-Z\\-]+"
     },
     "_lexial_value": {
       "type": "SYMBOL",
-      "name": "_quoted_string"
+      "name": "quoted_string"
     },
     "_ontology_document": {
       "type": "SEQ",

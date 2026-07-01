@@ -394,7 +394,8 @@ async fn backend_hover_on_class_should_show_class_info() {
         Ontology: HoverOnto
             Class: Janek
                 Annotations:
-                    rdfs:label "Janek der Coder"@de
+                    rdfs:label "Janek der Coder"@de,
+                    rdfs:label "Janek the coder"@en
         AnnotationProperty: rdfs:label
     "#;
     service
@@ -441,10 +442,13 @@ async fn backend_hover_on_class_should_show_class_info() {
         HoverContents::Scalar(MarkedString::String(str)) => str,
         _ => panic!("Did not think of that"),
     };
+    info!("Contents: {}", contents);
 
     assert!(contents.contains("Class"));
-    assert!(contents.contains("**Janek der Coder**"));
+    assert!(contents.contains("**Janek"));
     assert!(contents.contains("`label`: Janek der Coder"));
+    assert!(contents.contains("de"));
+    assert!(contents.contains("en"));
     assert!(contents.contains("IRI: Janek"));
 }
 

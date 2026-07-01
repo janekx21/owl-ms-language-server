@@ -1,14 +1,17 @@
-use crate::workspace::{FrameInfo, FrameType, Iri};
+use crate::workspace::{Annotation, FrameInfo, FrameType, Iri};
 use indoc::indoc;
 
 pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
     match &iri[..] {
         "http://www.w3.org/2000/01/rdf-schema#label" => vec![FrameInfo {
             iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-            annotations: vec![(
-                "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                "label".to_string(),
-            )]
+            annotations: vec![Annotation {
+                frame_iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+                annotation_iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+                string_value: "label".to_string(),
+                language: None,
+                datatype: "http://www.w3.org/2001/XMLSchema#string".to_string(),
+            }]
             .into_iter()
             .collect(),
             frame_type: FrameType::AnnotationProperty,
@@ -16,10 +19,19 @@ pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
         }],
         "http://www.w3.org/2000/01/rdf-schema#comment" => vec![FrameInfo {
             iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
-            annotations: vec![(
-                "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                "comment".to_string(),
-            )]
+            annotations: vec![
+                Annotation {
+                    frame_iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
+                    annotation_iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+                    string_value: "comment".to_string(),
+                    language: None,
+                    datatype: "http://www.w3.org/2001/XMLSchema#string".to_string(),
+                }, //     (
+
+                   //     "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+                   //     "comment".to_string(),
+                   // )
+            ]
             .into_iter()
             .collect(),
             frame_type: FrameType::AnnotationProperty,
