@@ -1,16 +1,19 @@
 use crate::workspace::{Annotation, FrameInfo, FrameType, Iri};
 use indoc::indoc;
 
+pub const STRING_IRI: &str = "http://www.w3.org/2001/XMLSchema#string";
+pub const LABEL_IRI: &str = "http://www.w3.org/2000/01/rdf-schema#label";
+
 pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
     match &iri[..] {
-        "http://www.w3.org/2000/01/rdf-schema#label" => vec![FrameInfo {
-            iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+        LABEL_IRI => vec![FrameInfo {
+            iri: LABEL_IRI.to_string(),
             annotations: vec![Annotation {
-                frame_iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                annotation_iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
+                frame_iri: LABEL_IRI.to_string(),
+                annotation_iri: LABEL_IRI.to_string(),
                 string_value: "label".to_string(),
                 language: None,
-                datatype: "http://www.w3.org/2001/XMLSchema#string".to_string(),
+                datatype: STRING_IRI.to_string(),
             }]
             .into_iter()
             .collect(),
@@ -19,19 +22,13 @@ pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
         }],
         "http://www.w3.org/2000/01/rdf-schema#comment" => vec![FrameInfo {
             iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
-            annotations: vec![
-                Annotation {
-                    frame_iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
-                    annotation_iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                    string_value: "comment".to_string(),
-                    language: None,
-                    datatype: "http://www.w3.org/2001/XMLSchema#string".to_string(),
-                }, //     (
-
-                   //     "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                   //     "comment".to_string(),
-                   // )
-            ]
+            annotations: vec![Annotation {
+                frame_iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
+                annotation_iri: LABEL_IRI.to_string(),
+                string_value: "comment".to_string(),
+                language: None,
+                datatype: STRING_IRI.to_string(),
+            }]
             .into_iter()
             .collect(),
             frame_type: FrameType::AnnotationProperty,

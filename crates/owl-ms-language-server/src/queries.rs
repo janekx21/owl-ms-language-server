@@ -100,6 +100,10 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
                             value: (_) @literal
                             datatype: (_) @datatype
                             )
+
+                        (integer_literal) @literal
+                        (decimal_literal) @literal
+                        (floating_point_literal) @literal
                     ])))@frame
         ",
     )

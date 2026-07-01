@@ -1,5 +1,5 @@
 use crate::catalog::CatalogUri;
-use crate::consts::{get_fixed_infos, keyword_hover_info};
+use crate::consts::{get_fixed_infos, keyword_hover_info, LABEL_IRI, STRING_IRI};
 use crate::error::{Error, Result, ResultExt, ResultIterator};
 use crate::pos::Position;
 use crate::queries::{
@@ -2044,9 +2044,6 @@ pub struct QueriedDocument {
     pub imports: Vec<RangeBox<Iri>>,
 }
 
-/// Frame IRI, Annotation IRI, Literal
-// type Annotation = (String, String, String);
-
 impl QueriedDocument {
     /// Finds flat references to other document URL's in this document
     pub fn reachable_urls(
@@ -2226,7 +2223,8 @@ impl QueriedDocument {
                     annotation_iri,
                     string_value: literal,
                     language,
-                    datatype: "http://www.w3.org/2001/XMLSchema#string".to_string(), // TODO query for the datatype here
+                    datatype: datatype_capture
+                        .map_or(STRING_IRI.to_string(), |c| c.node.text.clone()),
                 };
 
                 RangeBox::new(annotation, frame_capture.node.range)
@@ -2508,9 +2506,7 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
                             AnnotationValue::Literal(literal) => match literal {
                                 Literal::Simple { literal } => SimpleTerm::LiteralDatatype(
                                     literal.clone().into(),
-                                    IriRef::new_unchecked(MownStr::from_ref(
-                                        "http://www.w3.org/2001/XMLSchema#string",
-                                    )),
+                                    IriRef::new_unchecked(MownStr::from_ref(STRING_IRI)),
                                 ),
                                 Literal::Language { literal, lang } => SimpleTerm::LiteralLanguage(
                                     literal.clone().into(),
@@ -2845,14 +2841,14 @@ fn get_frame_info_helper_ex(doc: &ExternalDocument, iri: &Iri) -> Option<FrameIn
             Any,
         )
         .flatten()
-        .map(|[_, p, o]| FrameInfo {
+        .map(|[s, p, o]| FrameInfo {
             iri: iri.clone(),
             annotations: vec![Annotation {
-                frame_iri: "??".to_string(),
+                frame_iri: simple_term_to_string(s),
                 annotation_iri: simple_term_to_string(p),
                 string_value: simple_term_to_string(o),
                 language: None,
-                datatype: "http://www.w3.org/2001/XMLSchema#string".to_string(), // TODO
+                datatype: STRING_IRI.to_string(),
             }],
             frame_type: FrameType::Unknown,
             definitions: vec![Location {
@@ -2868,7 +2864,7 @@ fn simple_term_to_string(simple_term: &SimpleTerm) -> String {
         SimpleTerm::Iri(iri_ref) => iri_ref.to_string(),
         SimpleTerm::BlankNode(bnode_id) => bnode_id.to_string(),
         SimpleTerm::LiteralDatatype(mown_str, iri_ref) => match iri_ref.as_str() {
-            "http://www.w3.org/2001/XMLSchema#string" => mown_str.to_string(),
+            STRING_IRI => mown_str.to_string(),
             _ => format!("\"{mown_str}\"^^{iri_ref}"),
         },
         SimpleTerm::LiteralLanguage(mown_str, language_tag) => {
@@ -2972,10 +2968,8 @@ impl FrameInfo {
         };
     }
 
-    const LABEL_IRI: &'static str = "http://www.w3.org/2000/01/rdf-schema#label";
-
     pub fn label(&self) -> Option<String> {
-        self.annotation_display(FrameInfo::LABEL_IRI)
+        self.annotation_display(LABEL_IRI)
     }
 
     pub fn annotation_display(&self, iri: &str) -> Option<String> {
@@ -2987,6 +2981,8 @@ impl FrameInfo {
             .map(|annotation| {
                 if let Some(language) = &annotation.language {
                     format!("{} @ {}", &annotation.string_value, &language)
+                } else if annotation.datatype != STRING_IRI {
+                    format!("{} ^^ {}", &annotation.string_value, &annotation.datatype)
                 } else {
                     annotation.string_value.clone()
                 }
@@ -3047,7 +3043,7 @@ impl FrameInfo {
         }
         for annotation in &self.annotations {
             if annotation.string_value.contains(query) {
-                if annotation.annotation_iri == FrameInfo::LABEL_IRI {
+                if annotation.annotation_iri == LABEL_IRI {
                     sum += 1000;
 
                     if let Some((l, r)) = annotation.string_value.split_once(query) {
