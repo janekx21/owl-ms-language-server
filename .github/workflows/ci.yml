@@ -50,6 +50,11 @@ jobs:
         rustup default stable
         rustup target add ${{ matrix.target }}
 
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ matrix.target }}
+
     - if: ${{ matrix.target == 'x86_64-unknown-linux-musl' }}
       uses: awalsh128/cache-apt-pkgs-action@v1
       with:
@@ -111,7 +116,8 @@ jobs:
           code-target: darwin-arm64
 
     runs-on: ${{ matrix.os }}
-    name: E2E test VS-Code extension (${{ matrix.target }}) 
+    name: E2E test VS-Code extension (${{ matrix.target }})
+    needs: test_rust # dependencies should be cached now
 
     steps:
     - name: Checkout repository
@@ -122,6 +128,11 @@ jobs:
         rustup update --no-self-update stable
         rustup default stable
         rustup target add ${{ matrix.target }}
+
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ matrix.target }}
 
     - if: ${{ matrix.target == 'x86_64-unknown-linux-musl' }}
       uses: awalsh128/cache-apt-pkgs-action@v1
@@ -141,6 +152,8 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '22.x'
+        cache: 'npm'
+        cache-dependency-path: editors/code/package-lock.json
 
     - name: Install Node dependencies
       working-directory: editors/code
