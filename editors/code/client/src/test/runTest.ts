@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import * as os from 'os';
 import * as path from 'path';
 
 import { runTests } from '@vscode/test-electron';
@@ -16,8 +17,13 @@ async function main() {
 		// Passed to --extensionTestsPath
 		const extensionTestsPath = path.resolve(__dirname, './index');
 
+		// Short user-data-dir keeps the Unix socket path under the 103-char macOS limit
+		const userDataDir = process.platform === 'win32'
+			? path.join(os.tmpdir(), 'vsc-test-ud')
+			: '/tmp/vsc-test-ud';
+
 		// Download VS Code, unzip it and run the integration test
-		await runTests({ extensionDevelopmentPath, extensionTestsPath });
+		await runTests({ extensionDevelopmentPath, extensionTestsPath, launchArgs: ['--user-data-dir', userDataDir] });
 	} catch {
 		console.error('Failed to run tests');
 		process.exit(1);
