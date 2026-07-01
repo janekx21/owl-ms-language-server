@@ -163,7 +163,13 @@ jobs:
       working-directory: editors/code
       run: npm run compile
 
-    - name: Run E2E tests
+    - name: Run E2E tests (Linux)
+      if: ${{ matrix.os == 'ubuntu-latest' }}
       working-directory: editors/code
       run: xvfb-run -a npm test
+
+    - name: Run E2E tests
+      if: ${{ matrix.os != 'ubuntu-latest' }}
+      working-directory: editors/code
+      run: npm test
 
