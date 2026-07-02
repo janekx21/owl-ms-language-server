@@ -1,72 +1,36 @@
-Prefix: : <https://example.com/ontology#>
-Prefix: rdfs: <https://www.w3.org/2000/01/rdf-schema#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+Prefix: : <http://small/ontology#>
 
-Ontology:
-Class: <https://example.com/ontology#B>
+Ontology: <http://small/ontology>
+
+
+AnnotationProperty: rdfs:label
+
+
+AnnotationProperty: depricated
+
+
+Datatype: bool
+    Annotations: rdfs:label "Wahrheitswert"@de
+    Annotations: rdfs:label "Boolean"@en
+    EquivalentTo: xsd:boolean
+
+Datatype: xsd:boolean
+
+
+Class: <http://small/ontology#B>
     SubClassOf: owl:Thing
+
 Class: B
     SubClassOf: owl:Thing
+
 Class: :B
     SubClassOf: owl:Thing
-Class: <https://example.com/ontology#B>
-    Annotations: rdfs:label "B thing"
+
+Class: <http://small/ontology#B>
+    Annotations: rdfs:label "B thing", depricated "true"^^bool
     SubClassOf: owl:Thing
 
+Class: owl:Thing
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        

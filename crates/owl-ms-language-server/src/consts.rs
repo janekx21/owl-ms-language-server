@@ -1,14 +1,25 @@
-use crate::workspace::{FrameInfo, FrameType, Iri};
+use crate::workspace::{Annotation, FrameInfo, FrameType, Iri};
 use indoc::indoc;
+
+// Build in xsd datatypes
+pub const STRING_IRI: &str = "http://www.w3.org/2001/XMLSchema#string";
+pub const INTEGER_IRI: &str = "http://www.w3.org/2001/XMLSchema#integer";
+pub const DECIMAL_IRI: &str = "http://www.w3.org/2001/XMLSchema#decimal";
+pub const FLOAT_IRI: &str = "http://www.w3.org/2001/XMLSchema#float";
+
+pub const LABEL_IRI: &str = "http://www.w3.org/2000/01/rdf-schema#label";
 
 pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
     match &iri[..] {
-        "http://www.w3.org/2000/01/rdf-schema#label" => vec![FrameInfo {
-            iri: "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-            annotations: vec![(
-                "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                "label".to_string(),
-            )]
+        LABEL_IRI => vec![FrameInfo {
+            iri: LABEL_IRI.to_string(),
+            annotations: vec![Annotation {
+                frame_iri: LABEL_IRI.to_string(),
+                iri: LABEL_IRI.to_string(),
+                string_value: "label".to_string(),
+                language: None,
+                datatype: STRING_IRI.to_string(),
+            }]
             .into_iter()
             .collect(),
             frame_type: FrameType::AnnotationProperty,
@@ -16,10 +27,13 @@ pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
         }],
         "http://www.w3.org/2000/01/rdf-schema#comment" => vec![FrameInfo {
             iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
-            annotations: vec![(
-                "http://www.w3.org/2000/01/rdf-schema#label".to_string(),
-                "comment".to_string(),
-            )]
+            annotations: vec![Annotation {
+                frame_iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
+                iri: LABEL_IRI.to_string(),
+                string_value: "comment".to_string(),
+                language: None,
+                datatype: STRING_IRI.to_string(),
+            }]
             .into_iter()
             .collect(),
             frame_type: FrameType::AnnotationProperty,

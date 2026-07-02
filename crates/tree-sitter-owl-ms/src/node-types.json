@@ -1959,12 +1959,44 @@
   {
     "type": "string_literal_no_language",
     "named": true,
-    "fields": {}
+    "fields": {
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "quoted_string",
+            "named": true
+          }
+        ]
+      }
+    }
   },
   {
     "type": "string_literal_with_language",
     "named": true,
-    "fields": {}
+    "fields": {
+      "language": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "language_tag",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "quoted_string",
+            "named": true
+          }
+        ]
+      }
+    }
   },
   {
     "type": "sub_class_of",
@@ -2046,32 +2078,43 @@
   {
     "type": "typed_literal",
     "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "datatype_iri",
-          "named": true
-        },
-        {
-          "type": "keyword_decimal",
-          "named": true
-        },
-        {
-          "type": "keyword_float",
-          "named": true
-        },
-        {
-          "type": "keyword_integer",
-          "named": true
-        },
-        {
-          "type": "keyword_string",
-          "named": true
-        }
-      ]
+    "fields": {
+      "datatype": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "datatype_iri",
+            "named": true
+          },
+          {
+            "type": "keyword_decimal",
+            "named": true
+          },
+          {
+            "type": "keyword_float",
+            "named": true
+          },
+          {
+            "type": "keyword_integer",
+            "named": true
+          },
+          {
+            "type": "keyword_string",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "quoted_string",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -2375,6 +2418,10 @@
     "named": true
   },
   {
+    "type": "language_tag",
+    "named": true
+  },
+  {
     "type": "max",
     "named": false
   },
@@ -2396,6 +2443,10 @@
   },
   {
     "type": "prefix_name",
+    "named": true
+  },
+  {
+    "type": "quoted_string",
     "named": true
   },
   {

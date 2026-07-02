@@ -1,5 +1,7 @@
 use crate::catalog::CatalogUri;
-use crate::consts::{get_fixed_infos, keyword_hover_info};
+use crate::consts::{
+    get_fixed_infos, keyword_hover_info, DECIMAL_IRI, FLOAT_IRI, INTEGER_IRI, LABEL_IRI, STRING_IRI,
+};
 use crate::error::{Error, Result, ResultExt, ResultIterator};
 use crate::pos::Position;
 use crate::queries::{
@@ -235,11 +237,14 @@ impl Workspace {
                                 Box::new(
                                     item.annotations
                                         .iter()
-                                        .filter(|(_, value)| {
-                                            value.to_lowercase().starts_with(&partial_lower)
+                                        .filter(|annotation| {
+                                            annotation
+                                                .string_value
+                                                .to_lowercase()
+                                                .starts_with(&partial_lower)
                                         })
-                                        .map(|(full, _)| {
-                                            (full.clone(), item.iri.clone(), item.clone())
+                                        .map(|annotation| {
+                                            (annotation.iri.clone(), item.iri.clone(), item.clone())
                                         }),
                                 )
                             }
@@ -318,10 +323,10 @@ impl Workspace {
             }
             "simple_iri" | "abbreviated_iri" => {
                 let iri = node_text(node, doc.rope());
-                debug!("Getting node info for {iri} at doc {}", doc.uri());
                 let iri = doc
                     .abbreviated_iri_to_full_iri(&iri)
                     .unwrap_or(iri.to_string());
+                debug!("Getting node info for {iri} at doc {}", doc.uri());
                 self.get_frame_info(&iri)
                     .map(|fi| fi.info_display(self))
                     .unwrap_or(iri)
@@ -1198,7 +1203,7 @@ impl InternalDocument {
 
                 let label =
                 // timeit("get frame info recursive", || {
-                    Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs).ok_or(Error::FrameInfoNotFound(iri.clone()))?.label()
+                    Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs).ok_or(Error::FrameInfoNotFound(iri.clone()))?.label(workspace)
                 // })
                 // .and_then(|frame_info| frame_info.label())
                 .unwrap_or_default();
@@ -1315,7 +1320,7 @@ impl InternalDocument {
                         None
                     } else {
                         Some((
-                            frame.label().unwrap_or(full),
+                            frame.label(workspace).unwrap_or(full),
                             frame.info_display(workspace),
                             iri,
                         ))
@@ -2037,9 +2042,6 @@ pub struct QueriedDocument {
     pub imports: Vec<RangeBox<Iri>>,
 }
 
-/// Frame IRI, Annotation IRI, Literal
-type Annotation = (String, String, String);
-
 impl QueriedDocument {
     /// Finds flat references to other document URL's in this document
     pub fn reachable_urls(
@@ -2120,10 +2122,10 @@ impl QueriedDocument {
         annotations
             .par_iter()
             .map(|rb| {
-                let (frame_iri, annotation_iri, literal) = rb.value();
+                let annotation = rb.value();
                 FrameInfo {
-                    iri: frame_iri.clone(),
-                    annotations: vec![(annotation_iri.clone(), literal.clone())],
+                    iri: annotation.frame_iri.clone(),
+                    annotations: vec![annotation.clone()],
                     frame_type: FrameType::Unknown,
                     definitions: Vec::new(),
                 }
@@ -2159,10 +2161,7 @@ impl QueriedDocument {
             )
     }
 
-    fn document_annotations(
-        &self,
-        parsed_document: &ParsedDocument,
-    ) -> Vec<RangeBox<(String, String, String)>> {
+    fn document_annotations(&self, parsed_document: &ParsedDocument) -> Vec<RangeBox<Annotation>> {
         self.document_annotations_in_range(parsed_document, Range::FULL_RANGE)
     }
 
@@ -2174,27 +2173,77 @@ impl QueriedDocument {
         parsed_document
             .query_range(&ALL_QUERIES.annotation_query, range)
             .iter()
-            .map(|m| match &m.captures[..] {
-                [frame_iri_capture, annotation_iri_capture, literal_capture, frame_capture] => {
-                    let frame_iri = trim_full_iri(frame_iri_capture.node.text.clone());
-                    let frame_iri = self
-                        .abbreviated_iri_to_full_iri(&frame_iri)
-                        .unwrap_or(frame_iri);
+            .map(|m| {
+                let frame_iri_capture =
+                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "frame_iri")
+                        .expect("frame capture");
+                let annotation_iri_capture =
+                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "iri")
+                        .expect("iri capture");
+                let value_capture =
+                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "literal")
+                        .expect("value capture");
+                let frame_capture =
+                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "frame")
+                        .expect("frame_capture");
 
-                    let annotation_iri = trim_full_iri(annotation_iri_capture.node.text.clone());
-                    let annotation_iri = self
-                        .abbreviated_iri_to_full_iri(&annotation_iri)
-                        .unwrap_or(annotation_iri);
+                let datatype_capture =
+                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "datatype");
 
-                    let literal = trim_string_value(&literal_capture.node.text);
+                let language_capture =
+                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "language");
 
-                    RangeBox::new(
-                        (frame_iri, annotation_iri, literal),
-                        frame_capture.node.range,
-                    )
-                }
-                _ => unreachable!(),
+                let frame_iri = trim_full_iri(frame_iri_capture.node.text.clone());
+                let frame_iri = self
+                    .abbreviated_iri_to_full_iri(&frame_iri)
+                    .unwrap_or(frame_iri);
+
+                let annotation_iri = trim_full_iri(annotation_iri_capture.node.text.clone());
+                let annotation_iri = self
+                    .abbreviated_iri_to_full_iri(&annotation_iri)
+                    .unwrap_or(annotation_iri);
+
+                let literal = trim_string_value(&value_capture.node.text);
+
+                let language = language_capture
+                    .map(|c| c.node.text.trim_start_matches('@').to_string())
+                    .and_then(|tag| language::Language::try_from(tag).ok());
+                // TODO #180 spawn diagnostics about wrong language
+
+                let datatype =
+                    datatype_capture.map_or(STRING_IRI.to_string(), |c| match c.node.kind {
+                        "keyword_integer" => INTEGER_IRI.to_string(),
+                        "keyword_decimal" => DECIMAL_IRI.to_string(),
+                        "keyword_float" => FLOAT_IRI.to_string(),
+                        "keyword_string" => STRING_IRI.to_string(),
+                        _ => self
+                            .abbreviated_iri_to_full_iri(&c.node.text)
+                            .unwrap_or(c.node.text.clone()),
+                    });
+
+                // The value can decide the type
+                // TODO maybe check with range of annotation property
+                let datatype = match value_capture.node.kind {
+                    "integer_literal" => INTEGER_IRI.to_string(),
+                    "decimal_literal" => DECIMAL_IRI.to_string(),
+                    "floating_point_literal" => FLOAT_IRI.to_string(),
+                    _ => datatype,
+                };
+
+                let annotation = Annotation {
+                    frame_iri,
+                    iri: annotation_iri,
+                    string_value: literal,
+                    language,
+                    datatype,
+                };
+
+                RangeBox::new(annotation, frame_capture.node.range)
             })
+            // TODO remove
+            // .collect::<HashSet<RangeBox<Annotation>>>()
+            // .into_iter()
+            // .sorted_unstable()
             .collect_vec()
     }
 
@@ -2384,6 +2433,19 @@ impl QueriedDocument {
     }
 }
 
+fn capture_by_name<'a>(
+    query: &'a Query,
+    captures: &'a [UnwrappedQueryCapture],
+    name: &'static str,
+) -> Option<&'a UnwrappedQueryCapture> {
+    captures.iter().find(|c| {
+        c.index
+            == query
+                .capture_index_for_name(name)
+                .expect("capture name should be valid")
+    })
+}
+
 fn build_iri_locations(references: &Vec<RangeBox<String>>) -> HashMap<String, Vec<RangeBox<()>>> {
     let mut iri_locations: HashMap<String, Vec<RangeBox<()>>> =
         HashMap::with_capacity(references.len());
@@ -2458,9 +2520,7 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
                             AnnotationValue::Literal(literal) => match literal {
                                 Literal::Simple { literal } => SimpleTerm::LiteralDatatype(
                                     literal.clone().into(),
-                                    IriRef::new_unchecked(MownStr::from_ref(
-                                        "http://www.w3.org/2001/XMLSchema#string",
-                                    )),
+                                    IriRef::new_unchecked(MownStr::from_ref(STRING_IRI)),
                                 ),
                                 Literal::Language { literal, lang } => SimpleTerm::LiteralLanguage(
                                     literal.clone().into(),
@@ -2795,28 +2855,56 @@ fn get_frame_info_helper_ex(doc: &ExternalDocument, iri: &Iri) -> Option<FrameIn
             Any,
         )
         .flatten()
-        .map(|[_, p, o]| FrameInfo {
-            iri: iri.clone(),
-            annotations: once((simple_term_to_string(p), simple_term_to_string(o))).collect(),
-            frame_type: FrameType::Unknown,
-            definitions: vec![Location {
-                uri: doc.uri.clone(),
-                range: Range::ZERO,
-            }],
+        .map(|[s, p, o]| {
+            let ann = simple_term_to_annotation(o);
+            FrameInfo {
+                iri: iri.clone(),
+                annotations: vec![Annotation {
+                    frame_iri: simple_term_literal(s),
+                    iri: simple_term_literal(p),
+                    string_value: ann.0,
+                    language: ann.2,
+                    datatype: ann.1,
+                }],
+                frame_type: FrameType::Unknown,
+                definitions: vec![Location {
+                    uri: doc.uri.clone(),
+                    range: Range::ZERO,
+                }],
+            }
         })
         .tree_reduce(FrameInfo::merge)
 }
 
-fn simple_term_to_string(simple_term: &SimpleTerm) -> String {
+fn simple_term_to_annotation(
+    simple_term: &SimpleTerm,
+) -> (String, String, Option<language::Language>) {
+    // TODO some string iri datatypes are not correct here
+    match simple_term {
+        SimpleTerm::Iri(iri_ref) => (iri_ref.to_string(), STRING_IRI.to_string(), None), // TODO string_iri is not the correct one here right?
+        SimpleTerm::BlankNode(bnode_id) => (bnode_id.to_string(), STRING_IRI.to_string(), None),
+        SimpleTerm::LiteralDatatype(mown_str, iri_ref) => {
+            (mown_str.to_string(), iri_ref.to_string(), None)
+        }
+
+        SimpleTerm::LiteralLanguage(mown_str, language_tag) => (
+            mown_str.to_string(),
+            STRING_IRI.to_string(),
+            language::Language::try_from(language_tag.to_string()).ok(),
+        ),
+        SimpleTerm::Triple(_) => ("TODO triple".into(), STRING_IRI.into(), None),
+        SimpleTerm::Variable(var_name) => (var_name.to_string(), STRING_IRI.into(), None),
+    }
+}
+
+fn simple_term_literal(simple_term: &SimpleTerm) -> String {
     match simple_term {
         SimpleTerm::Iri(iri_ref) => iri_ref.to_string(),
         SimpleTerm::BlankNode(bnode_id) => bnode_id.to_string(),
-        SimpleTerm::LiteralDatatype(mown_str, iri_ref) => match iri_ref.as_str() {
-            "http://www.w3.org/2001/XMLSchema#string" => mown_str.to_string(),
-            _ => format!("\"{mown_str}\"^^{iri_ref}"),
-        },
-        SimpleTerm::LiteralLanguage(mown_str, language_tag) => {
-            format!("\"{mown_str}\"@{}", language_tag.borrowed())
+        SimpleTerm::LiteralDatatype(mown_str, _) => mown_str.to_string(),
+
+        SimpleTerm::LiteralLanguage(mown_str, _) => {
+            format!("{mown_str}")
         }
         SimpleTerm::Triple(_) => "TODO triple".into(),
         SimpleTerm::Variable(var_name) => var_name.to_string(),
@@ -2861,9 +2949,18 @@ pub struct UnwrappedNode {
 #[derive(Clone, Debug)]
 pub struct FrameInfo {
     pub iri: Iri,
-    pub annotations: Vec<(Iri, String)>,
+    pub annotations: Vec<Annotation>,
     pub frame_type: FrameType,
     pub definitions: Vec<Location>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Annotation {
+    pub frame_iri: Iri,
+    pub iri: Iri,
+    pub string_value: String,
+    pub language: Option<language::Language>,
+    pub datatype: Iri,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -2907,19 +3004,34 @@ impl FrameInfo {
         };
     }
 
-    const LABEL_IRI: &'static str = "http://www.w3.org/2000/01/rdf-schema#label";
-
-    pub fn label(&self) -> Option<String> {
-        self.annotation_display(FrameInfo::LABEL_IRI)
+    pub fn label(&self, workspace: &Workspace) -> Option<String> {
+        self.annotation_display(LABEL_IRI, workspace)
     }
 
-    pub fn annotation_display(&self, iri: &str) -> Option<String> {
+    pub fn annotation_display(&self, iri: &str, workspace: &Workspace) -> Option<String> {
         let joined = self
             .annotations
             .iter()
-            .filter(|(x, _)| x == iri)
-            // TODO #20 make this more usable by providing multiple lines with indentation
-            .map(|(_, s)| trim_string_value(s))
+            .filter(|annotation| annotation.iri == iri)
+            .map(|annotation| {
+                if let Some(language) = &annotation.language {
+                    format!("{} @ {}", &annotation.string_value, &language.name())
+                } else if annotation.datatype != STRING_IRI && iri != LABEL_IRI
+                // Endless recursion if label is a valid iri
+                {
+                    let datatype_label = workspace
+                        .get_frame_info(&annotation.datatype)
+                        .map(|fi| {
+                            fi.label(workspace)
+                                .unwrap_or_else(|| trim_url_before_last(&fi.iri).to_string())
+                        })
+                        .unwrap_or(annotation.datatype.clone());
+
+                    format!("{} ^^ {}", annotation.string_value, datatype_label)
+                } else {
+                    annotation.string_value.clone()
+                }
+            })
             .join(", ");
 
         if joined.is_empty() {
@@ -2932,7 +3044,7 @@ impl FrameInfo {
     pub fn info_display(&self, workspace: &Workspace) -> String {
         let entity = self.frame_type;
         let label = self
-            .label()
+            .label(workspace)
             .unwrap_or(trim_url_before_last(&self.iri).to_string());
 
         debug!("info display / frame annotations {:#?}", self.annotations);
@@ -2940,16 +3052,20 @@ impl FrameInfo {
         let annotations = self
             .annotations
             .iter()
-            .map(|(iri, _)| {
+            // This should be unique, because they get joined in `annotation_display`
+            .unique_by(|a| &a.iri)
+            .map(|annotation| {
                 let iri_label = workspace
-                    .get_frame_info(iri)
+                    .get_frame_info(&annotation.iri)
                     .map(|fi| {
-                        fi.label()
+                        fi.label(workspace)
                             .unwrap_or_else(|| trim_url_before_last(&fi.iri).to_string())
                     })
-                    .unwrap_or(iri.clone());
+                    .unwrap_or(annotation.iri.clone());
                 // TODO #28 use values directly
-                let mut annotation_display = self.annotation_display(iri).unwrap_or(iri.clone());
+                let mut annotation_display = self
+                    .annotation_display(&annotation.iri, workspace)
+                    .unwrap_or(annotation.iri.clone());
 
                 // If this is a multiline string then give it some space to work with
                 if annotation_display.contains('\n') {
@@ -2972,12 +3088,12 @@ impl FrameInfo {
         if self.iri.contains(query) {
             sum += 5000;
         }
-        for (annotation_iri, value) in &self.annotations {
-            if value.contains(query) {
-                if annotation_iri == FrameInfo::LABEL_IRI {
+        for annotation in &self.annotations {
+            if annotation.string_value.contains(query) {
+                if annotation.iri == LABEL_IRI {
                     sum += 1000;
 
-                    if let Some((l, r)) = value.split_once(query) {
+                    if let Some((l, r)) = annotation.string_value.split_once(query) {
                         // Starts with query
                         if l.is_empty() {
                             sum += 100;

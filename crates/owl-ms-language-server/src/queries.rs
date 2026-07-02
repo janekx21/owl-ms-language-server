@@ -60,8 +60,6 @@ pub struct AllQueries {
     pub frame_query: Query,
     pub prefix: Query,
     pub ontology: Query,
-    pub error: Query,
-    pub missing: Query,
 }
 
 // All queries are in one struct for easy testing. Invalid ones are detected by unit tests.
@@ -91,10 +89,20 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
                 (annotation
                     (annotation_property_iri)@iri
                     [
-                        (string_literal_no_language)
-                        (string_literal_with_language)
-                        (typed_literal)
-                    ]@literal)))@frame
+                        (string_literal_no_language
+                            value: (_) @literal)
+                        (string_literal_with_language
+                            value: (_) @literal
+                            language: (_) @language)
+                        (typed_literal
+                            value: (_) @literal
+                            datatype: (_) @datatype
+                            )
+
+                        (integer_literal) @literal
+                        (decimal_literal) @literal
+                        (floating_point_literal) @literal
+                    ])))@frame
         ",
     )
     .expect("valid query"),
@@ -123,20 +131,6 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
         &LANGUAGE,
         "
             (ontology iri: (_)@iri version_iri: (_)@version_iri ? )
-        ",
-    )
-    .expect("valid query"),
-    error: Query::new(
-        &LANGUAGE,
-        "
-            (ERROR)@error
-        ",
-    )
-    .expect("valid query"),
-    missing: Query::new(
-        &LANGUAGE,
-        "
-            (MISSING)@missing
         ",
     )
     .expect("valid query"),

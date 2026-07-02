@@ -1166,6 +1166,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "language"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b83a70a175305f50301af15cb76697fe775a1a00550f06dd87d756da09e61ec"
+dependencies = [
+ "thiserror 2.0.16",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1363,6 +1372,7 @@ dependencies = [
  "horned-owl",
  "indoc",
  "itertools 0.14.0",
+ "language",
  "log",
  "oxiri",
  "pprof",
