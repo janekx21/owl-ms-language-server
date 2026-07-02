@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.0.0...v1.1.0) (2026-07-02)
+
+
+### Features
+
+* [#51](https://github.com/janekx21/owl-ms-language-server/issues/51) datatype and language info on annotation literals ([#181](https://github.com/janekx21/owl-ms-language-server/issues/181)) ([7bca91e](https://github.com/janekx21/owl-ms-language-server/commit/7bca91eba83e37b0b627790702a44634e5b28209))
+
 ## [1.0.0](https://github.com/janekx21/owl-ms-language-server/compare/v0.13.2...v1.0.0) (2026-06-29)
 
 
