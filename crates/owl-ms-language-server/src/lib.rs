@@ -784,12 +784,12 @@ impl LanguageServer for Backend {
     ) -> Result<Option<DocumentSymbolResponse>> {
         let url = params.text_document.uri;
         let sync = self.read_sync().await;
-        let (doc, _) = sync.get_internal_document(&url)?;
+        let (doc, workspace) = sync.get_internal_document(&url)?;
         let infos = doc.all_frame_infos();
         return Ok(Some(DocumentSymbolResponse::Flat(
             infos
                 .flat_map(|info| {
-                    let name = info.label().unwrap_or_else(|| {
+                    let name = info.label(workspace).unwrap_or_else(|| {
                         doc.full_iri_to_abbreviated_iri(&info.iri)
                             .unwrap_or(info.iri.clone())
                     });
@@ -826,50 +826,50 @@ impl LanguageServer for Backend {
 
         let sync = self.read_sync().await;
         let workspaces = sync.workspaces();
-        let all_frame_infos = workspaces
+        let symbols = workspaces
             .iter()
-            .flat_map(workspace::Workspace::all_frame_infos);
-
-        let symbols = all_frame_infos
-            .filter_map(|fi| {
-                let score = fi.matches(&query);
-                if score > 0 {
-                    Some((score, fi))
-                } else {
-                    None
-                }
-            })
-            .sorted_by_key(|(score, _)| *score)
-            .rev()
-            .flat_map(|(_, fi)| {
-                let name = fi.label().unwrap_or(fi.iri.clone());
-
-                #[allow(deprecated)] // All fields need to be specified
-                fi.definitions
-                    .iter()
-                    .map(|definition| {
-                        let url = &definition.uri;
-                        let location = sync
-                            .get_internal_document(url)
-                            .map(|(doc, _)| {
-                                definition.clone().into_lsp(doc.rope(), self.encoding())
-                            })
-                            .and_then(|r| r.inspect_err(|e| error!("{e}")))
-                            .unwrap_or(Location {
-                                uri: url.clone(),
-                                range: lsp_types::Range::default(),
-                            });
-
-                        SymbolInformation {
-                            name: name.clone(),
-                            kind: fi.frame_type.into(),
-                            tags: None,
-                            deprecated: None,
-                            location,
-                            container_name: None,
+            .flat_map(|ws| {
+                ws.all_frame_infos()
+                    .filter_map(|fi| {
+                        let score = fi.matches(&query);
+                        if score > 0 {
+                            Some((score, fi))
+                        } else {
+                            None
                         }
                     })
-                    .collect_vec()
+                    .sorted_by_key(|(score, _)| *score)
+                    .rev()
+                    .flat_map(|(_, fi)| {
+                        let name = fi.label(ws).unwrap_or(fi.iri.clone());
+
+                        #[allow(deprecated)] // All fields need to be specified
+                        fi.definitions
+                            .iter()
+                            .map(|definition| {
+                                let url = &definition.uri;
+                                let location = sync
+                                    .get_internal_document(url)
+                                    .map(|(doc, _)| {
+                                        definition.clone().into_lsp(doc.rope(), self.encoding())
+                                    })
+                                    .and_then(|r| r.inspect_err(|e| error!("{e}")))
+                                    .unwrap_or(Location {
+                                        uri: url.clone(),
+                                        range: lsp_types::Range::default(),
+                                    });
+
+                                SymbolInformation {
+                                    name: name.clone(),
+                                    kind: fi.frame_type.into(),
+                                    tags: None,
+                                    deprecated: None,
+                                    location,
+                                    container_name: None,
+                                }
+                            })
+                            .collect_vec()
+                    })
             })
             .collect_vec();
 
