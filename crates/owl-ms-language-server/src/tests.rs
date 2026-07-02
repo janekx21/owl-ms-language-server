@@ -452,6 +452,75 @@ async fn backend_hover_on_class_should_show_class_info() {
     assert!(contents.contains("IRI: Janek"));
 }
 
+#[test(tokio::test)]
+async fn backend_hover_on_class_should_show_datatype_label() {
+    setup();
+    // Arrange
+    let service = arrange_backend(
+        None,
+        vec![("http://www.w3.org/2000/01/rdf-schema#", "dummy")],
+    )
+    .await;
+
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = r#"
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Prefix: : <http://invalid/o#>
+        Ontology: HoverOnto
+            Class: Janek
+                Annotations:
+                    rdfs:deprecated "true"^^bool
+
+            AnnotationProperty: rdfs:label
+            AnnotationProperty: rdfs:deprecated
+            Datatype: bool
+                Annotations: rdfs:label "Wahrheitswert"@de
+    "#;
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl2md".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let hover_result = service
+        .inner()
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url.clone() },
+                position: lsp_types::Position::new(4, 21), // hover "Janek" the class definition iri
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    assert_empty_diagnostics(&service).await;
+    let hover_result = hover_result.unwrap();
+
+    let contents = match hover_result.contents {
+        HoverContents::Scalar(MarkedString::String(str)) => str,
+        _ => panic!("Did not think of that"),
+    };
+    info!("Contents: {}", contents);
+
+    assert!(contents.contains("Class"));
+    assert!(contents.contains("Janek"));
+    assert!(contents.contains("Wahrheitswert"));
+    assert!(contents.contains("German"));
+}
+
 async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
     let tmp_dir = arrange_workspace_folders(|dir| {
         vec![
