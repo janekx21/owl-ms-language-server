@@ -1,5 +1,7 @@
 use crate::catalog::CatalogUri;
-use crate::consts::{get_fixed_infos, keyword_hover_info, LABEL_IRI, STRING_IRI};
+use crate::consts::{
+    get_fixed_infos, keyword_hover_info, DECIMAL_IRI, FLOAT_IRI, INTEGER_IRI, LABEL_IRI, STRING_IRI,
+};
 use crate::error::{Error, Result, ResultExt, ResultIterator};
 use crate::pos::Position;
 use crate::queries::{
@@ -2208,10 +2210,25 @@ impl QueriedDocument {
                     .and_then(|tag| language::Language::try_from(tag).ok());
                 // TODO #180 spawn diagnostics about wrong language
 
-                let datatype = datatype_capture.map_or(STRING_IRI.to_string(), |c| {
-                    self.abbreviated_iri_to_full_iri(&c.node.text)
-                        .unwrap_or(c.node.text.clone())
-                });
+                let datatype =
+                    datatype_capture.map_or(STRING_IRI.to_string(), |c| match c.node.kind {
+                        "keyword_integer" => INTEGER_IRI.to_string(),
+                        "keyword_decimal" => DECIMAL_IRI.to_string(),
+                        "keyword_float" => FLOAT_IRI.to_string(),
+                        "keyword_string" => STRING_IRI.to_string(),
+                        _ => self
+                            .abbreviated_iri_to_full_iri(&c.node.text)
+                            .unwrap_or(c.node.text.clone()),
+                    });
+
+                // The value can decide the type
+                // TODO maybe check with range of annotation property
+                let datatype = match value_capture.node.kind {
+                    "integer_literal" => INTEGER_IRI.to_string(),
+                    "decimal_literal" => DECIMAL_IRI.to_string(),
+                    "floating_point_literal" => FLOAT_IRI.to_string(),
+                    _ => datatype,
+                };
 
                 let annotation = Annotation {
                     frame_iri,
@@ -2862,6 +2879,7 @@ fn get_frame_info_helper_ex(doc: &ExternalDocument, iri: &Iri) -> Option<FrameIn
 fn simple_term_to_annotation(
     simple_term: &SimpleTerm,
 ) -> (String, String, Option<language::Language>) {
+    // TODO some string iri datatypes are not correct here
     match simple_term {
         SimpleTerm::Iri(iri_ref) => (iri_ref.to_string(), STRING_IRI.to_string(), None), // TODO string_iri is not the correct one here right?
         SimpleTerm::BlankNode(bnode_id) => (bnode_id.to_string(), STRING_IRI.to_string(), None),
@@ -2998,7 +3016,9 @@ impl FrameInfo {
             .map(|annotation| {
                 if let Some(language) = &annotation.language {
                     format!("{} @ {}", &annotation.string_value, &language.name())
-                } else if annotation.datatype != STRING_IRI {
+                } else if annotation.datatype != STRING_IRI && iri != LABEL_IRI
+                // Endless recursion if label is a valid iri
+                {
                     let datatype_label = workspace
                         .get_frame_info(&annotation.datatype)
                         .map(|fi| {

@@ -1,7 +1,12 @@
 use crate::workspace::{Annotation, FrameInfo, FrameType, Iri};
 use indoc::indoc;
 
+// Build in xsd datatypes
 pub const STRING_IRI: &str = "http://www.w3.org/2001/XMLSchema#string";
+pub const INTEGER_IRI: &str = "http://www.w3.org/2001/XMLSchema#integer";
+pub const DECIMAL_IRI: &str = "http://www.w3.org/2001/XMLSchema#decimal";
+pub const FLOAT_IRI: &str = "http://www.w3.org/2001/XMLSchema#float";
+
 pub const LABEL_IRI: &str = "http://www.w3.org/2000/01/rdf-schema#label";
 
 pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {

@@ -838,6 +838,7 @@ impl LanguageServer for Backend {
                             None
                         }
                     })
+                    // TODO minor. This is not applied correctly. It needs to be done after the workspaces merge the results.
                     .sorted_by_key(|(score, _)| *score)
                     .rev()
                     .flat_map(|(_, fi)| {
