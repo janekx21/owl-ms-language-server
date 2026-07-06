@@ -14,6 +14,7 @@ use crate::{
     rope_provider::RopeProvider, LANGUAGE,
 };
 use cached::{cached, Cached};
+use enum_dispatch::enum_dispatch;
 use horned_owl::model::Component::{self, AnnotationAssertion};
 use horned_owl::model::{
     AnnotationProperty, AnnotationSubject, AnnotationValue, ArcStr, Build, DataProperty, Datatype,
@@ -102,12 +103,21 @@ pub fn clear_caches() {
 #[derive(Debug)]
 pub struct Workspace {
     /// Maps a Path/URL to a document that can be internal or external
-    internal_documents: HashMap<PathBuf, InternalDocument>,
+    internal_documents: HashMap<PathBuf, DocumentVariant>,
     external_documents: HashMap<Url, ExternalDocument>,
     folder: WorkspaceFolder,
     catalogs: Vec<Catalog>,
     pub index_handles: Vec<JoinHandle<()>>,
 }
+
+#[enum_dispatch(OntologyDocument)]
+#[derive(Debug)]
+enum DocumentVariant {
+    Internal(InternalDocument),
+}
+
+#[enum_dispatch]
+trait OntologyDocument {}
 
 impl Display for Workspace {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -133,10 +143,11 @@ impl Workspace {
 
     /// Inserts an internal document into the workspace and returns a reference to it.
     /// This will replace the document with the same URL if there was one.
-    pub fn insert_internal_document(&mut self, document: InternalDocument) -> &InternalDocument {
-        debug!("Insert internal document {document}");
+    pub fn insert_internal_document(&mut self, document: DocumentVariant) -> &InternalDocument {
+        debug!("Insert internal document {document:?}");
         let path = document.path().to_path_buf();
-        self.internal_documents.insert(path.clone(), document);
+        self.internal_documents
+            .insert(path.clone(), document.into());
         self.internal_documents
             .get(&path)
             .expect("document should be present")
@@ -924,6 +935,14 @@ impl InternalDocument {
         self.id.version
     }
 
+    pub fn rope(&self) -> &Rope {
+        &self.parsed_document.rope
+    }
+
+    pub fn tree(&self) -> &Tree {
+        &self.parsed_document.tree
+    }
+
     pub fn new_with_path(uri: Url, version: i32, text: String, path: PathBuf) -> InternalDocument {
         let id = DocumentId { path, uri, version };
 
@@ -948,14 +967,6 @@ impl InternalDocument {
             queried_document,
             stage2,
         }
-    }
-
-    pub fn rope(&self) -> &Rope {
-        &self.parsed_document.rope
-    }
-
-    pub fn tree(&self) -> &Tree {
-        &self.parsed_document.tree
     }
 
     pub fn prefixes(&self) -> HashMap<String, String> {
