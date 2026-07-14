@@ -1,6 +1,7 @@
 use crate::catalog::CatalogUri;
 use crate::consts::{
-    get_fixed_infos, keyword_hover_info, DECIMAL_IRI, FLOAT_IRI, INTEGER_IRI, LABEL_IRI, STRING_IRI,
+    child_keywords_for_kind, get_fixed_infos, keyword_hover_info, DECIMAL_IRI, FLOAT_IRI,
+    INTEGER_IRI, LABEL_IRI, STRING_IRI,
 };
 use crate::error::{Error, Result, ResultExt, ResultIterator};
 use crate::pos::Position;
@@ -171,6 +172,14 @@ pub trait OntologyDocument {
 
     // Tree querie methods are not included here, because they are document specific
 
+    // Document-level position queries (grammar-agnostic)
+    fn full_range(&self) -> Range;
+    fn iri_at(&self, pos: Position) -> Option<RangeBox<IriAtPosition>>;
+    fn rename_range(&self, pos: Position) -> Option<Range>;
+    fn rename_info_at(&self, pos: Position, new_name: &str) -> Result<Option<RenameInfo>>;
+    fn keyword_actions_at(&self, pos: Position) -> Vec<KeywordAction>;
+    fn all_iris_in_range(&self, range: Range) -> Vec<RangeBox<Iri>>;
+
     // Requests
     fn formatted(&self, options: &FormattingSettings) -> String;
     fn hover(&self, pos: Position) -> Option<HoverResult>;
@@ -187,17 +196,37 @@ pub trait OntologyDocument {
     ) -> Vec<(String, String, String)>;
     fn rename_edits(
         &self,
-        full_iri: &String,
-        new_iri: Option<&String>,
-        iri_kind: &String,
+        full_iri: &Iri,
+        new_iri: Option<&Iri>,
+        frame_type: FrameType,
         original: &str,
     ) -> Vec<(Range, String)>;
     fn find_iri_references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range>;
 }
 
-enum HoverResult {
-    Iri(Iri),
-    Keyword(String),
+pub(crate) enum HoverResult {
+    Iri { iri: Iri, range: Range },
+    Keyword { text: String, range: Range },
+}
+
+pub struct IriAtPosition {
+    pub full_iri: Iri,
+    pub is_import: bool,
+    /// `None` for import IRIs and positions where no frame context was found
+    pub frame_type: Option<FrameType>,
+}
+
+pub struct RenameInfo {
+    pub full_iri: Iri,
+    pub new_iri: Option<Iri>,
+    pub frame_type: FrameType,
+    pub original: String,
+}
+
+pub struct KeywordAction {
+    pub parent_name: String,
+    pub new_text: String,
+    pub range: Range,
 }
 
 impl DocumentVariant {
@@ -1033,10 +1062,6 @@ impl OntologyDocument for InternalDocument {
         &self.parsed_document.rope
     }
 
-    fn tree(&self) -> &Tree {
-        &self.parsed_document.tree
-    }
-
     fn all_frame_infos(&self) -> impl Iterator<Item = &FrameInfo> {
         self.stage2.all_frame_infos.values()
     }
@@ -1125,18 +1150,6 @@ impl OntologyDocument for InternalDocument {
         &self.stage2.annotations
     }
 
-    fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
-        self.parsed_document.query(query)
-    }
-
-    fn query_range(&self, query: &Query, range: Range) -> Vec<UnwrappedQueryMatch> {
-        self.parsed_document.query_range(query, range)
-    }
-
-    fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
-        node_by_id(&self.parsed_document, id)
-    }
-
     fn formatted(&self, options: &FormattingSettings) -> String {
         let root = self.tree().root_node();
         let doc = to_doc(&root, self.rope(), options);
@@ -1145,7 +1158,206 @@ impl OntologyDocument for InternalDocument {
     }
 
     fn hover(&self, pos: Position) -> Option<HoverResult> {
-        todo!()
+        let node = self
+            .tree()
+            .root_node()
+            .named_descendant_for_point_range(pos.into(), pos.into())?;
+        let range: Range = node.range().into();
+        match node.kind() {
+            "full_iri" => Some(HoverResult::Iri {
+                iri: trim_full_iri(node_text(&node, self.rope())),
+                range,
+            }),
+            "simple_iri" | "abbreviated_iri" => {
+                let iri = node_text(&node, self.rope());
+                let full_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                Some(HoverResult::Iri {
+                    iri: full_iri,
+                    range,
+                })
+            }
+            kind => {
+                let text = keyword_hover_info(kind);
+                if text.is_empty() {
+                    None
+                } else {
+                    Some(HoverResult::Keyword { text, range })
+                }
+            }
+        }
+    }
+
+    fn full_range(&self) -> Range {
+        self.tree().root_node().range().into()
+    }
+
+    fn iri_at(&self, pos: Position) -> Option<RangeBox<IriAtPosition>> {
+        let node = self
+            .tree()
+            .root_node()
+            .named_descendant_for_point_range(pos.into(), pos.into())?;
+        let range: Range = node.range().into();
+        let parent_kind = node.parent()?.kind();
+        let is_import = parent_kind == "import";
+        let frame_type = if is_import {
+            None
+        } else {
+            match FrameType::parse(parent_kind) {
+                FrameType::Invalid | FrameType::Unknown => None,
+                ft => Some(ft),
+            }
+        };
+        match node.kind() {
+            "full_iri" => Some(RangeBox::new(
+                IriAtPosition {
+                    full_iri: trim_full_iri(node_text(&node, self.rope())),
+                    is_import,
+                    frame_type,
+                },
+                range,
+            )),
+            "simple_iri" | "abbreviated_iri" => {
+                let iri = node_text(&node, self.rope());
+                let full_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                Some(RangeBox::new(
+                    IriAtPosition {
+                        full_iri,
+                        is_import,
+                        frame_type,
+                    },
+                    range,
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    fn rename_range(&self, pos: Position) -> Option<Range> {
+        let node = self
+            .tree()
+            .root_node()
+            .named_descendant_for_point_range(pos.into(), pos.into())?;
+        match node.parent()?.kind() {
+            "datatype_iri"
+            | "class_iri"
+            | "annotation_property_iri"
+            | "ontology_iri"
+            | "data_property_iri"
+            | "version_iri"
+            | "object_property_iri"
+            | "annotation_property_iri_annotated_list"
+            | "individual_iri" => {}
+            _ => return None,
+        }
+        match node.kind() {
+            "full_iri" => {
+                let range: Range = node.range().into();
+                Some(Range {
+                    start: range.start.moved_right(1, self.rope()),
+                    end: range.end.moved_left(1, self.rope()),
+                })
+            }
+            "simple_iri" => Some(node.range().into()),
+            "abbreviated_iri" => {
+                let range: Range = node.range().into();
+                let text = node_text(&node, self.rope()).to_string();
+                let col_offset = text
+                    .find(':')
+                    .expect("abbreviated_iri to contain at least one :")
+                    + 1;
+                #[allow(clippy::cast_possible_truncation)]
+                Some(Range {
+                    start: range.start.moved_right(col_offset as u32, self.rope()),
+                    ..range
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn rename_info_at(&self, pos: Position, new_name: &str) -> Result<Option<RenameInfo>> {
+        let node = self
+            .tree()
+            .root_node()
+            .named_descendant_for_point_range(pos.into(), pos.into())
+            .ok_or(Error::PositionOutOfBounds(pos))?;
+        let parent_kind = match node.parent() {
+            Some(p) => p.kind(),
+            None => return Ok(None),
+        };
+        let frame_type = FrameType::parse(parent_kind);
+        if matches!(frame_type, FrameType::Invalid | FrameType::Unknown) {
+            return Ok(None);
+        }
+        Ok(match node.kind() {
+            "full_iri" => {
+                let full_iri = trim_full_iri(node_text(&node, self.rope()));
+                Some(RenameInfo {
+                    full_iri,
+                    new_iri: Some(new_name.to_string()),
+                    frame_type,
+                    original: new_name.to_string(),
+                })
+            }
+            "simple_iri" => {
+                let iri = node_text(&node, self.rope());
+                Some(RenameInfo {
+                    full_iri: self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri),
+                    new_iri: self.abbreviated_iri_to_full_iri(new_name),
+                    frame_type,
+                    original: new_name.to_string(),
+                })
+            }
+            "abbreviated_iri" => {
+                let iri = node_text(&node, self.rope()).to_string();
+                let (prefix, _) = iri
+                    .split_once(':')
+                    .expect("abbreviated_iri to contain at least one :");
+                let new_original = format!("{prefix}:{new_name}");
+                Some(RenameInfo {
+                    full_iri: self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri),
+                    new_iri: self.abbreviated_iri_to_full_iri(&new_original),
+                    frame_type,
+                    original: new_original,
+                })
+            }
+            _ => None,
+        })
+    }
+
+    fn keyword_actions_at(&self, pos: Position) -> Vec<KeywordAction> {
+        let Some(mut node) = self
+            .tree()
+            .root_node()
+            .named_descendant_for_point_range(pos.into(), pos.into())
+        else {
+            return vec![];
+        };
+        let mut actions = vec![];
+        while let Some(parent) = node.parent() {
+            let kwds = child_keywords_for_kind(node.kind());
+            for (parent_name, new_text) in kwds {
+                actions.push(KeywordAction {
+                    parent_name: parent_name.to_string(),
+                    new_text: format!("\n{new_text}"),
+                    range: node.range().into(),
+                });
+            }
+            node = parent;
+        }
+        actions
+    }
+
+    fn all_iris_in_range(&self, range: Range) -> Vec<RangeBox<Iri>> {
+        self.query_range(&ALL_QUERIES.iri_query_all, range)
+            .into_iter()
+            .flat_map(|match_| match_.captures)
+            .map(|capture| {
+                let iri = trim_full_iri(capture.node.text);
+                let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                RangeBox::new(iri, capture.node.range)
+            })
+            .collect()
     }
 
     fn sematic_tokens(
@@ -1292,16 +1504,16 @@ impl OntologyDocument for InternalDocument {
 
     fn rename_edits(
         &self,
-        full_iri: &String,
-        new_iri: Option<&String>,
-        iri_kind: &String,
+        full_iri: &Iri,
+        new_iri: Option<&Iri>,
+        frame_type: FrameType,
         original: &str,
     ) -> Vec<(Range, String)> {
         self.parsed_document
             .query(&ALL_QUERIES.iri_query_all)
             .into_iter()
             .map(|m| {
-                let (iri, range, parent_kind) = match &m.captures[..] {
+                let (iri, range, node_frame_type) = match &m.captures[..] {
                     [iri_capture] => (
                         match iri_capture.node.kind {
                             "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
@@ -1311,15 +1523,17 @@ impl OntologyDocument for InternalDocument {
                             _ => unreachable!(),
                         },
                         iri_capture.node.range,
-                        self.node_by_id(iri_capture.node.id)
-                            .expect("the node id to be valid")
-                            .parent()
-                            .expect("the iri node to have a parent of a specific iri kind")
-                            .kind(),
+                        FrameType::parse(
+                            self.node_by_id(iri_capture.node.id)
+                                .expect("the node id to be valid")
+                                .parent()
+                                .expect("the iri node to have a parent of a specific iri kind")
+                                .kind(),
+                        ),
                     ),
                     _ => unreachable!(),
                 };
-                if &iri == full_iri && iri_kind == parent_kind {
+                if &iri == full_iri && node_frame_type == frame_type {
                     Ok(Some((
                         range,
                         new_iri
@@ -1381,6 +1595,22 @@ impl OntologyDocument for InternalDocument {
 }
 
 impl InternalDocument {
+    pub fn tree(&self) -> &Tree {
+        &self.parsed_document.tree
+    }
+
+    pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
+        self.parsed_document.query(query)
+    }
+
+    pub fn query_range(&self, query: &Query, range: Range) -> Vec<UnwrappedQueryMatch> {
+        self.parsed_document.query_range(query, range)
+    }
+
+    pub fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
+        node_by_id(&self.parsed_document, id)
+    }
+
     pub fn new(uri: Url, version: i32, text: String) -> InternalDocument {
         let path = uri.to_file_path().expect("URL should be a file path");
         Self::new_with_path(uri, version, text, path)
@@ -1544,12 +1774,11 @@ pub fn inlay_hint(
 ) -> Vec<InlayHint> {
     let reachable_docs = reachable_docs_recursive(doc, workspace, true);
     debug!("Reachable docs for {} are {reachable_docs:#?}", doc.uri());
-    doc.query_range(&ALL_QUERIES.iri_query_all, range)
+    doc.all_iris_in_range(range)
         .into_iter()
-        .flat_map(|match_| match_.captures)
-        .map(|capture| {
-            let iri = trim_full_iri(capture.node.text);
-            let iri = doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+        .map(|rb| {
+            let iri = rb.value().clone();
+            let end = rb.range().end;
 
             let label = Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs)
                 .ok_or(Error::FrameInfoNotFound(iri.clone()))?
@@ -1567,7 +1796,7 @@ pub fn inlay_hint(
                 Ok(None)
             } else {
                 Ok(Some(InlayHint {
-                    position: capture.node.range.end.into_lsp(doc.rope(), encoding)?,
+                    position: end.into_lsp(doc.rope(), encoding)?,
                     label: InlayHintLabel::String(label),
                     kind: None,
                     text_edits: None,
@@ -3366,11 +3595,11 @@ impl FrameType {
     pub fn parse(kind: &str) -> FrameType {
         match kind {
             "datatype_iri" | "datatype_frame" => FrameType::DataType,
-            "annotation_property_iri" | "annotation_property_frame" => {
-                FrameType::AnnotationProperty
-            }
+            "annotation_property_iri"
+            | "annotation_property_frame"
+            | "annotation_property_iri_annotated_list" => FrameType::AnnotationProperty,
             "individual_iri" | "individual_frame" => FrameType::Individual,
-            "ontology_iri" | "ontology_frame" => FrameType::Ontology,
+            "ontology_iri" | "ontology_frame" | "version_iri" => FrameType::Ontology,
             "data_property_iri" | "data_property_frame" => FrameType::DataProperty,
             "object_property_iri" | "object_property_frame" => FrameType::ObjectProperty,
             "class_frame" | "class_iri" => FrameType::Class,

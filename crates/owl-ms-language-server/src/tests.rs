@@ -301,7 +301,7 @@ async fn backend_did_open_should_create_document() {
     assert_eq!(doc.uri(), &url);
     assert_eq!(doc.version(), 0);
     assert_eq!(doc.rope().to_string(), "abc");
-    assert!(doc.tree().root_node().is_error());
+    assert!(!doc.local_diagnostics().is_empty());
 }
 
 /// This tests if the "did_change" feature works on the lsp. It takes the document DEF and adds two changes resolving in ABCDEFGHI.

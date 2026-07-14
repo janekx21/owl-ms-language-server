@@ -33,14 +33,14 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
 use tree_sitter_c2rust::Language;
-use workspace::{node_text, trim_full_iri, Workspace};
+use workspace::Workspace;
 
-use crate::consts::child_keywords_for_kind;
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{
     inlay_hint as document_inlay_hint, publish_lsp_diagnostics, reachable_docs_recursive, Document,
-    DocumentReference, DocumentVariant, FormattingSettings, FrameType, OntologyDocument,
+    DocumentReference, DocumentVariant, FormattingSettings, HoverResult,
+    IriAtPosition, KeywordAction, OntologyDocument, RenameInfo,
 };
 
 // Re-export for benchmarks
@@ -538,7 +538,7 @@ impl LanguageServer for Backend {
         // TODO just send the diff
         let text = doc.formatted(&options);
 
-        let range: Range = doc.tree().root_node().range().into();
+        let range = doc.full_range();
 
         return Ok(Some(vec![TextEdit {
             range: range.into_lsp(doc.rope(), self.encoding())?,
@@ -561,23 +561,27 @@ impl LanguageServer for Backend {
             doc.rope(),
             self.encoding(),
         )?;
-        let node = doc
-            .tree()
-            .root_node()
-            .named_descendant_for_point_range(pos.into(), pos.into())
-            .ok_or(Error::PositionOutOfBounds(pos))?;
 
-        let info = ws.node_info(&node, doc);
-
-        Ok(if info.is_empty() {
-            None
-        } else {
-            // Transitive into
-            let range: Range = node.range().into();
-            Some(Hover {
-                contents: HoverContents::Scalar(MarkedString::String(info)),
+        Ok(match doc.hover(pos) {
+            None => None,
+            Some(HoverResult::Keyword { text, range }) => Some(Hover {
+                contents: HoverContents::Scalar(MarkedString::String(text)),
                 range: Some(range.into_lsp(doc.rope(), self.encoding())?),
-            })
+            }),
+            Some(HoverResult::Iri { iri, range }) => {
+                let info = ws
+                    .get_frame_info(&iri)
+                    .map(|fi| fi.info_display(ws))
+                    .unwrap_or(iri);
+                if info.is_empty() {
+                    None
+                } else {
+                    Some(Hover {
+                        contents: HoverContents::Scalar(MarkedString::String(info)),
+                        range: Some(range.into_lsp(doc.rope(), self.encoding())?),
+                    })
+                }
+            }
         })
     }
 
@@ -618,29 +622,14 @@ impl LanguageServer for Backend {
             self.encoding(),
         )?;
 
-        let leaf_node = doc
-            .tree()
-            .root_node()
-            .named_descendant_for_point_range(pos.into(), pos.into())
-            .ok_or(Error::PositionOutOfBounds(pos))?;
-
         let reachable_docs = reachable_docs_recursive(doc, workspace, true);
 
-        let node_is_iri = ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind());
-        if node_is_iri {
-            let iri = trim_full_iri(node_text(&leaf_node, doc.rope()));
-            let iri = doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-
+        if let Some(iri_at) = doc.iri_at(pos) {
+            let IriAtPosition { full_iri: iri, is_import, .. } = iri_at.value();
             debug!("Try goto definition of {iri}");
 
-            let iri_is_import_iri = leaf_node
-                .parent()
-                .expect("iri node should have parent")
-                .kind()
-                == "import";
-
-            if iri_is_import_iri {
-                let url = Url::parse(&iri).map_err(|_| Error::InvalidUrl(url.clone()))?;
+            if *is_import {
+                let url = Url::parse(iri).map_err(|_| Error::InvalidUrl(url.clone()))?;
                 // This does not work for external documents from prefixes
                 let path = workspace.url_to_path_with_catalog(&url);
                 if let Some(path) = path {
@@ -648,7 +637,7 @@ impl LanguageServer for Backend {
                 }
             } else {
                 let frame_info =
-                    Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs);
+                    Workspace::get_frame_info_recursive(workspace, iri, &reachable_docs);
                 if let Some(frame_info) = frame_info {
                     let locations = frame_info
                         .definitions
@@ -895,25 +884,7 @@ impl LanguageServer for Backend {
             self.encoding(),
         )?;
 
-        let node = doc
-            .tree()
-            .root_node()
-            .named_descendant_for_point_range(pos.into(), pos.into())
-            .ok_or(Error::PositionOutOfBounds(pos))?;
-
-        let full_iri_option = match node.kind() {
-            "full_iri" => Some(trim_full_iri(node_text(&node, doc.rope()))),
-            "simple_iri" | "abbreviated_iri" => {
-                let iri = node_text(&node, doc.rope());
-                Some(
-                    doc.abbreviated_iri_to_full_iri(&iri)
-                        .unwrap_or(iri.to_string()),
-                )
-            }
-            _ => None,
-        };
-
-        Ok(if let Some(full_iri) = full_iri_option {
+        Ok(if let Some(full_iri) = doc.iri_at(pos).map(|rb| rb.value().full_iri.clone()) {
             let locations = workspace
                 .internal_documents()
                 .flat_map(|doc| {
@@ -948,68 +919,11 @@ impl LanguageServer for Backend {
         let (doc, _) = sync.get_internal_document(&url)?;
         let pos: Position = Position::from_lsp(params.position, doc.rope(), self.encoding())?;
 
-        fn node_range(position: Position, doc: &DocumentVariant) -> Option<Range> {
-            debug!("prepare_rename try {position:?}");
-            let node = doc
-                .tree()
-                .root_node()
-                .named_descendant_for_point_range(position.into(), position.into())?;
-
-            // This excludes prefix declaration, import and annotation target IRIs
-            match node.parent()?.kind() {
-                "datatype_iri"
-                | "class_iri"
-                | "annotation_property_iri"
-                | "ontology_iri"
-                | "data_property_iri"
-                | "version_iri"
-                | "object_property_iri"
-                | "annotation_property_iri_annotated_list"
-                | "individual_iri" => {}
-                _ => return None,
-            }
-
-            match node.kind() {
-                "full_iri" => {
-                    let range: Range = node.range().into();
-                    let range = Range {
-                        start: range.start.moved_right(1, doc.rope()),
-                        end: range.end.moved_left(1, doc.rope()),
-                    };
-                    Some(range)
-                }
-                "simple_iri" => {
-                    let range: Range = node.range().into();
-                    Some(range)
-                }
-                "abbreviated_iri" => {
-                    let range: Range = node.range().into();
-                    let text = node_text(&node, doc.rope()).to_string();
-                    let col_offset = text
-                        .find(':')
-                        .expect("abbreviated_iri to contain at least one :")
-                        + 1;
-                    let range = Range {
-                        // The column offset will never be that big
-                        #[allow(clippy::cast_possible_truncation)]
-                        start: range.start.moved_right(col_offset as u32, doc.rope()),
-                        ..range
-                    };
-                    Some(range)
-                }
-                _ => None,
-            }
-        }
-
-        let range = node_range(pos, doc)
+        let range = doc.rename_range(pos)
             .or_else(|| {
-                // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
-                // For example: ThisIsSomeIri| other text
-                //                           ^
-                //                       Cursor
+                // check one position left because renames should work when cursor is at end (inclusive) of a word
                 debug!("prepare rename try one position left");
-                let position = pos.moved_left(1, doc.rope());
-                node_range(position, doc)
+                doc.rename_range(pos.moved_left(1, doc.rope()))
             })
             .map(|range| {
                 Ok(PrepareRenameResponse::Range(
@@ -1036,25 +950,23 @@ impl LanguageServer for Backend {
             self.encoding(),
         )?;
 
-        let old_and_new_iri = if let Some(x) = rename_helper(pos, doc, new_name.clone())? {
-            Some(x)
-        } else {
-            // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
-            // For example: ThisIsSomeIri| other text
-            //                           ^
-            //                       Cursor
-            debug!("prepare rename try one position left");
-            let position = pos.moved_left(1, doc.rope());
-            rename_helper(position, doc, new_name)?
-        };
+        let rename_info = doc.rename_info_at(pos, &new_name)?
+            .or_else(|| {
+                // check one position left because renames should work when cursor is at end (inclusive) of a word
+                debug!("prepare rename try one position left");
+                doc.rename_info_at(pos.moved_left(1, doc.rope()), &new_name)
+                    .inspect_err(|e: &Error| error!("{e}"))
+                    .ok()
+                    .flatten()
+            });
 
-        if let Some((full_iri, new_iri, iri_kind, original)) = old_and_new_iri {
+        if let Some(RenameInfo { full_iri, new_iri, frame_type, original }) = rename_info {
             debug!("renaming resolved iris from {full_iri:?} to {new_iri:?}");
             let changes = workspace
                 .internal_documents()
                 .map(|doc| {
                     let edits = doc
-                        .rename_edits(&full_iri, new_iri.as_ref(), &iri_kind, &original)
+                        .rename_edits(&full_iri, new_iri.as_ref(), frame_type, &original)
                         .into_iter()
                         .filter_map(|(range, str)| {
                             range
@@ -1105,70 +1017,6 @@ fn single_path_response(path: &Path) -> GotoDefinitionResponse {
     })
 }
 
-type IriKindName = Option<(String, Option<String>, String, String)>;
-
-fn rename_helper(
-    position: Position,
-    doc: &DocumentVariant,
-    new_name: String,
-) -> Result<IriKindName> {
-    let node = doc
-        .tree()
-        .root_node()
-        .named_descendant_for_point_range(position.into(), position.into())
-        .ok_or(Error::PositionOutOfBounds(position))?;
-
-    match node.kind() {
-        "full_iri" => {
-            let iri_kind = node
-                .parent()
-                .expect("full_iri to have a parent")
-                .kind()
-                .to_string();
-            let iri = trim_full_iri(node_text(&node, doc.rope()));
-            Ok(Some((
-                iri.clone(),
-                Some(new_name.clone()),
-                iri_kind,
-                new_name,
-            )))
-        }
-        "simple_iri" => {
-            let iri = node_text(&node, doc.rope());
-            let iri_kind = node
-                .parent()
-                .expect("simple_iri to have a parent")
-                .kind()
-                .to_string();
-            Ok(Some((
-                doc.abbreviated_iri_to_full_iri(&iri)
-                    .unwrap_or(iri.to_string()),
-                doc.abbreviated_iri_to_full_iri(&new_name),
-                iri_kind,
-                new_name,
-            )))
-        }
-        "abbreviated_iri" => {
-            let iri_kind = node
-                .parent()
-                .expect("abbreviated_iri to have a parent")
-                .kind()
-                .to_string();
-            let iri = node_text(&node, doc.rope()).to_string();
-            let (prefix, _) = iri
-                .split_once(':')
-                .expect("abbreviated_iri to contain at least one :");
-            Ok(Some((
-                doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri.clone()),
-                doc.abbreviated_iri_to_full_iri(&format!("{prefix}:{new_name}")),
-                iri_kind,
-                format!("{prefix}:{new_name}"),
-            )))
-        }
-        _ => Ok(None),
-    }
-}
-
 fn missin_iri_actions(
     pos: Position,
     doc: &DocumentVariant,
@@ -1179,32 +1027,24 @@ fn missin_iri_actions(
     // to internal one should take place somehow. Not needed now I think.
     // Also I dont know how they are matched
 
-    let node = doc
-        .tree()
-        .root_node()
-        .named_descendant_for_point_range(pos.into(), pos.into())
-        .ok_or(Error::PositionOutOfBounds(pos))?;
+    let frame_type = doc
+        .iri_at(pos)
+        .and_then(|rb| rb.value().frame_type);
 
     let diagnostics = workspace::diagnostics(doc, ws);
     let diagnostics_under_cursor = diagnostics
         .into_iter()
         .filter(|diagnostic| diagnostic.range.contains(pos));
 
-    let end: Position = doc.tree().root_node().range().end_point.into();
-    let end_lsp = end.into_lsp(doc.rope(), encoding)?;
+    let end_lsp = doc.full_range().end.into_lsp(doc.rope(), encoding)?;
     let create_missing_iri_actions = diagnostics_under_cursor.filter_map(|d| match &d.kind {
         workspace::DiagnosticKind::MissingIri(full_iri) => {
-            let iri = doc.full_iri_to_shorter_iri(&full_iri);
-            let iri_kind = node
-                .parent()
-                .expect("Missing IRI node should have parent")
-                .kind();
-
-            let frame_type = FrameType::parse(iri_kind);
-            let definition_str = frame_type.to_definition()?;
+            let iri = doc.full_iri_to_shorter_iri(full_iri);
+            let ft = frame_type?;
+            let definition_str = ft.to_definition()?;
 
             Some(CodeActionOrCommand::CodeAction(CodeAction {
-                title: format!("Create {frame_type} for {iri}",),
+                title: format!("Create {ft} for {iri}"),
                 edit: Some(WorkspaceEdit {
                     changes: Some(HashMap::from([(
                         doc.uri().clone(),
@@ -1232,22 +1072,11 @@ fn keyword_actions(
     doc: &DocumentVariant,
     encoding: &PositionEncodingKind,
 ) -> Result<Vec<CodeActionOrCommand>> {
-    let mut actions = vec![];
-
-    let mut node = doc
-        .tree()
-        .root_node()
-        .named_descendant_for_point_range(pos.into(), pos.into())
-        .ok_or(Error::PositionOutOfBounds(pos))?;
-
-    while let Some(parent) = node.parent() {
-        let kind = node.kind();
-        let kwds = child_keywords_for_kind(kind);
-
-        for (parent_name, new_text) in kwds {
-            let range: Range = node.range().into();
+    doc.keyword_actions_at(pos)
+        .into_iter()
+        .map(|KeywordAction { parent_name, new_text, range }| {
             let lsp_range = range.into_lsp(doc.rope(), encoding)?;
-            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+            Ok(CodeActionOrCommand::CodeAction(CodeAction {
                 title: format!("In {parent_name} add {}", new_text.trim()),
                 edit: Some(WorkspaceEdit {
                     changes: Some(HashMap::from([(
@@ -1257,19 +1086,15 @@ fn keyword_actions(
                                 start: lsp_range.end,
                                 end: lsp_range.end,
                             },
-                            new_text: format!("\n{new_text}"),
+                            new_text,
                         }],
                     )])),
                     ..Default::default()
                 }),
                 ..Default::default()
-            }));
-        }
-
-        node = parent;
-    }
-
-    Ok(actions)
+            }))
+        })
+        .collect()
 }
 
 impl Backend {
