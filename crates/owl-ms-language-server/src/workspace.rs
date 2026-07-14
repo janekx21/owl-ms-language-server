@@ -128,7 +128,8 @@ pub trait OntologyDocument {
 
     // Content
     fn rope(&self) -> &Rope;
-    fn tree(&self) -> &Tree;
+
+    // The tree is not includes here, because it is document specific
 
     // Frame infos
     fn all_frame_infos(&self) -> impl Iterator<Item = &FrameInfo>;
@@ -144,11 +145,54 @@ pub trait OntologyDocument {
     /// This includes prefixes, references and imports
     fn directly_references_doc(&self) -> impl Iterator<Item = &Url>;
 
-    fn edit<'a>(&mut self, changes: impl Iterator<Item = &'a RangeBox<String>>) -> Result<()>;
+    // Diagnostics data
+    fn local_diagnostics(&self) -> &[Diagnostic];
+    fn iri_locations(&self) -> &HashMap<Iri, Vec<RangeBox<()>>>;
+
+    // IRI conversions
+    fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<String>;
+    fn full_iri_to_abbreviated_iri(&self, full_iri: &str) -> Option<String>;
+    fn full_iri_to_shorter_iri(&self, full_iri: &str) -> String {
+        self.full_iri_to_abbreviated_iri(full_iri)
+            .unwrap_or_else(|| {
+                if full_iri.contains("://") {
+                    format!("<{full_iri}>")
+                } else {
+                    full_iri.to_string()
+                }
+            })
+    }
+
+    // Prefix/import access
+    fn import_iris(&self) -> impl Iterator<Item = &Iri>;
+    fn prefix_iris(&self) -> impl Iterator<Item = &Iri>;
+    fn prefixes(&self) -> HashMap<String, String>;
+    fn annotations(&self) -> &[RangeBox<Annotation>];
+
+    // Tree querie methods are not included here, because they are document specific
 
     // Requests
-    fn formatted(&self, options: &FormattingSettings);
+    fn formatted(&self, options: &FormattingSettings) -> String;
     fn hover(&self, pos: Position) -> Option<HoverResult>;
+    fn sematic_tokens(
+        &self,
+        range: Option<Range>,
+        encoding: &PositionEncodingKind,
+    ) -> Result<Vec<SemanticToken>>;
+    fn get_keyword_competions_at(&self, pos: Position) -> Vec<String>;
+    fn get_iri_completions_at(
+        &self,
+        pos: Position,
+        workspace: &Workspace,
+    ) -> Vec<(String, String, String)>;
+    fn rename_edits(
+        &self,
+        full_iri: &String,
+        new_iri: Option<&String>,
+        iri_kind: &String,
+        original: &str,
+    ) -> Vec<(Range, String)>;
+    fn find_iri_references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range>;
 }
 
 enum HoverResult {
@@ -157,8 +201,20 @@ enum HoverResult {
 }
 
 impl DocumentVariant {
-    pub fn new(url: Url, version: i32, text: String) {
-        todo!()
+    pub fn new(url: Url, version: i32, text: String) -> DocumentVariant {
+        DocumentVariant::Internal(InternalDocument::new(url, version, text))
+    }
+
+    pub fn edit(
+        self,
+        params: DidChangeTextDocumentParams,
+        encoding: &PositionEncodingKind,
+    ) -> Result<DocumentVariant> {
+        match self {
+            DocumentVariant::Internal(doc) => doc
+                .edit_inner(params, encoding)
+                .map(DocumentVariant::Internal),
+        }
     }
 }
 
@@ -358,7 +414,7 @@ impl Workspace {
             .tree_reduce(FrameInfo::merge)
     }
 
-    pub fn node_info(&self, node: &Node, doc: &InternalDocument) -> String {
+    pub fn node_info(&self, node: &Node, doc: &DocumentVariant) -> String {
         match node.kind() {
             "class_frame" | "annotation_property_frame" | "class_iri" => {
                 // Goto first named child and repeat
@@ -537,7 +593,7 @@ impl Workspace {
                     document_text,
                     path.to_path_buf(),
                 );
-                Ok(Document::Internal(document))
+                Ok(Document::Internal(document.into()))
             }
             "owl" | "owx" => {
                 let document = ExternalDocument::new(document_text, path_url)?;
@@ -635,7 +691,7 @@ pub enum DocumentReference<'a> {
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)] // Not boxing this is fine because the size ratio is just about 1.6
 pub enum Document {
-    Internal(InternalDocument),
+    Internal(DocumentVariant),
     External(ExternalDocument),
 }
 
@@ -1023,16 +1079,304 @@ impl OntologyDocument for InternalDocument {
             .chain(self.stage2.directly_reachable_other_urls.iter())
     }
 
-    fn formatted(&self, options: &FormattingSettings) {
-        todo!()
+    fn local_diagnostics(&self) -> &[Diagnostic] {
+        &self.stage2.local_diagnostics
+    }
+
+    fn iri_locations(&self) -> &HashMap<Iri, Vec<RangeBox<()>>> {
+        &self.stage2.iri_locations
+    }
+
+    fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<String> {
+        self.queried_document.abbreviated_iri_to_full_iri(iri)
+    }
+
+    fn full_iri_to_abbreviated_iri(&self, full_iri: &str) -> Option<String> {
+        self.queried_document
+            .prefixes
+            .iter()
+            .map(|(k, v)| (k.clone(), v.value().clone()))
+            .filter_map(|(prefix, url)| match full_iri.split_once(&url[..]) {
+                Some(("", post)) if prefix.is_empty() => Some(post.to_string()),
+                Some(("", post)) => Some(prefix + ":" + post),
+                Some(_) | None => None,
+            })
+            .sorted_by_key(String::len)
+            .next()
+    }
+
+    fn import_iris(&self) -> impl Iterator<Item = &Iri> {
+        self.queried_document.imports.iter().map(RangeBox::value)
+    }
+
+    fn prefix_iris(&self) -> impl Iterator<Item = &Iri> {
+        self.queried_document.prefixes.values().map(RangeBox::value)
+    }
+
+    fn prefixes(&self) -> HashMap<String, String> {
+        self.queried_document
+            .prefixes
+            .iter()
+            .map(|(k, v)| (k.clone(), v.value().clone()))
+            .collect()
+    }
+
+    fn annotations(&self) -> &[RangeBox<Annotation>] {
+        &self.stage2.annotations
+    }
+
+    fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
+        self.parsed_document.query(query)
+    }
+
+    fn query_range(&self, query: &Query, range: Range) -> Vec<UnwrappedQueryMatch> {
+        self.parsed_document.query_range(query, range)
+    }
+
+    fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
+        node_by_id(&self.parsed_document, id)
+    }
+
+    fn formatted(&self, options: &FormattingSettings) -> String {
+        let root = self.tree().root_node();
+        let doc = to_doc(&root, self.rope(), options);
+        debug!("doc:\n{doc:#?}");
+        doc.pretty(options.ruler_width as usize).to_string()
     }
 
     fn hover(&self, pos: Position) -> Option<HoverResult> {
         todo!()
     }
 
-    fn edit<'a>(&mut self, changes: impl Iterator<Item = &'a RangeBox<String>>) -> Result<()> {
-        todo!()
+    fn sematic_tokens(
+        &self,
+        range: Option<Range>,
+        encoding: &PositionEncodingKind,
+    ) -> Result<Vec<SemanticToken>> {
+        let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
+        let query = Query::new(&LANGUAGE, query_source).expect("valid query expect");
+        let mut query_cursor = QueryCursor::new();
+        if let Some(range) = range {
+            query_cursor.set_point_range(range.into());
+        }
+        let matches = query_cursor.matches(
+            &query,
+            self.tree().root_node(),
+            RopeProvider::new(self.rope()),
+        );
+
+        let mut tokens = vec![];
+        let mut nodes = matches
+            .map_deref(|m| m.captures)
+            .flatten()
+            .map(|c| {
+                (
+                    c.node,
+                    treesitter_highlight_capture_into_semantic_token_type_index(
+                        query.capture_names()[c.index as usize],
+                    ),
+                )
+            })
+            .collect_vec();
+
+        nodes.sort_unstable_by_key(|(n, _)| n.start_byte());
+
+        let mut last_line = 0;
+        let mut last_character = 0;
+        for (node, type_index) in nodes {
+            let range: Range = node.range().into();
+            #[allow(clippy::cast_possible_truncation)]
+            let length = range.len_lsp(self.rope(), encoding) as u32;
+            let range = range.into_lsp(self.rope(), encoding)?;
+            let start = range.start;
+
+            let delta_line = start.line - last_line;
+            let delta_start = if delta_line == 0 {
+                start.character - last_character
+            } else {
+                start.character
+            };
+
+            tokens.push(SemanticToken {
+                delta_line,
+                delta_start,
+                length,
+                token_type: type_index,
+                token_modifiers_bitset: 0,
+            });
+
+            last_line = start.line;
+            last_character = start.character;
+        }
+        Ok(tokens)
+    }
+
+    fn get_keyword_competions_at(&self, pos: Position) -> Vec<String> {
+        let pos_one_left = pos.moved_left(1, self.rope());
+        let mut node = self
+            .tree()
+            .root_node()
+            .named_descendant_for_point_range(pos_one_left.into(), pos_one_left.into())
+            .expect("The pos to be in at least one node");
+
+        let mut lei = if node.parent().is_none() {
+            LANGUAGE
+                .lookahead_iterator(1)
+                .expect("state 1 should be valid")
+        } else {
+            let mut lei = LANGUAGE.lookahead_iterator(node.parse_state());
+            while lei.is_none() {
+                let parent = node.parent();
+                if let Some(parent) = parent {
+                    node = parent;
+                    lei = LANGUAGE.lookahead_iterator(node.parse_state());
+                } else {
+                    lei = LANGUAGE.lookahead_iterator(1);
+                }
+            }
+            lei.expect("while none loop should have set it to some")
+        };
+
+        let line = self
+            .rope()
+            .get_line(pos.line() as usize)
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        let partial = word_before_character(pos.character_byte() as usize, &line);
+
+        lei.iter_names()
+            .inspect(|n| debug!("- LEI name: {n}"))
+            .filter_map(|kind| (*queries::KEYWORDS_MAP).get(kind).cloned())
+            .filter(|kw| kw.starts_with(&partial))
+            .collect_vec()
+    }
+
+    fn get_iri_completions_at(
+        &self,
+        pos: Position,
+        workspace: &Workspace,
+    ) -> Vec<(String, String, String)> {
+        let pos_one_left = pos.moved_left(1, self.rope());
+        let node = self
+            .tree()
+            .root_node()
+            .named_descendant_for_point_range(pos_one_left.into(), pos_one_left.into())
+            .expect("The pos to be in at least one node");
+
+        let partial_text = node_text(&node, self.rope()).to_string();
+
+        if node.kind() == "simple_iri" {
+            debug!("Try iris...");
+            workspace
+                .search_frame(&partial_text)
+                .into_iter()
+                .unique_by(|(_, iri, _)| iri.clone())
+                .sorted_unstable_by_key(|(v, _, _)| v.clone())
+                .filter_map(|(full, maybe_full_iri, frame)| {
+                    let iri = self.full_iri_to_shorter_iri(&maybe_full_iri);
+                    if iri == partial_text {
+                        None
+                    } else {
+                        Some((
+                            frame.label(workspace).unwrap_or(full),
+                            frame.info_display(workspace),
+                            iri,
+                        ))
+                    }
+                })
+                .collect_vec()
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn rename_edits(
+        &self,
+        full_iri: &String,
+        new_iri: Option<&String>,
+        iri_kind: &String,
+        original: &str,
+    ) -> Vec<(Range, String)> {
+        self.parsed_document
+            .query(&ALL_QUERIES.iri_query_all)
+            .into_iter()
+            .map(|m| {
+                let (iri, range, parent_kind) = match &m.captures[..] {
+                    [iri_capture] => (
+                        match iri_capture.node.kind {
+                            "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
+                            "simple_iri" | "abbreviated_iri" => self
+                                .abbreviated_iri_to_full_iri(&iri_capture.node.text)
+                                .unwrap_or(iri_capture.node.text.clone()),
+                            _ => unreachable!(),
+                        },
+                        iri_capture.node.range,
+                        self.node_by_id(iri_capture.node.id)
+                            .expect("the node id to be valid")
+                            .parent()
+                            .expect("the iri node to have a parent of a specific iri kind")
+                            .kind(),
+                    ),
+                    _ => unreachable!(),
+                };
+                if &iri == full_iri && iri_kind == parent_kind {
+                    Ok(Some((
+                        range,
+                        new_iri
+                            .map(|new_iri| self.full_iri_to_shorter_iri(new_iri))
+                            .unwrap_or(original.to_string()),
+                    )))
+                } else {
+                    Ok(None)
+                }
+            })
+            .filter_and_log()
+            .flatten()
+            .collect_vec()
+    }
+
+    fn find_iri_references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range> {
+        self.parsed_document
+            .query(&ALL_QUERIES.iri_query_references)
+            .into_iter()
+            .map(|m| {
+                let (iri, range, node_id) = match &m.captures[..] {
+                    [iri_capture] => (
+                        match iri_capture.node.kind {
+                            "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
+                            "simple_iri" | "abbreviated_iri" => self
+                                .abbreviated_iri_to_full_iri(&iri_capture.node.text)
+                                .unwrap_or(iri_capture.node.text.clone()),
+                            _ => unreachable!(),
+                        },
+                        iri_capture.node.range,
+                        iri_capture.node.id,
+                    ),
+                    _ => unreachable!(),
+                };
+
+                if &iri == full_iri {
+                    if !include_declaration {
+                        if let Some(node) = self.node_by_id(node_id) {
+                            let iri_context_kind = node
+                                .parent()
+                                .expect("IRIs should have parent nodes")
+                                .parent()
+                                .expect("IRI supertype should have a parent")
+                                .kind();
+                            if iri_context_kind.ends_with("frame") {
+                                return Ok(None);
+                            }
+                        }
+                    }
+                    Ok(Some(range))
+                } else {
+                    Ok(None)
+                }
+            })
+            .filter_and_log()
+            .flatten()
+            .collect_vec()
     }
 }
 
@@ -1068,26 +1412,7 @@ impl InternalDocument {
         }
     }
 
-    pub fn prefixes(&self) -> HashMap<String, String> {
-        self.queried_document
-            .prefixes
-            .iter()
-            .map(|(k, v)| (k.clone(), v.value().clone()))
-            .collect()
-    }
-
-    pub fn formatted(&self, options: &FormattingSettings) -> String {
-        let root = self.tree().root_node();
-        let doc = to_doc(&root, self.rope(), options);
-        debug!("doc:\n{doc:#?}");
-        doc.pretty(options.ruler_width as usize).to_string()
-    }
-
-    pub fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
-        node_by_id(&self.parsed_document, id)
-    }
-
-    pub fn edit(
+    pub fn edit_inner(
         self, // TODO #30 do a mut instead so the analytics do not get dropped
         params: DidChangeTextDocumentParams,
         encoding: &PositionEncodingKind,
@@ -1175,361 +1500,6 @@ impl InternalDocument {
 
         Ok(doc)
     }
-
-    /// Converts a full IRI into an abbreviated one by splitting it.
-    /// Works a bit like `make_relative`
-    ///
-    /// With `Prefix: o: http://foo.bar/o#` and `doc.full_iri_to_abbreviated_iri("http://foo.bar/o#a")` -> `o:a`
-    pub fn full_iri_to_abbreviated_iri(&self, full_iri: &str) -> Option<String> {
-        self.prefixes()
-            .iter()
-            .filter_map(|(prefix, url)| match full_iri.split_once(url) {
-                Some(("", post)) if prefix.is_empty() => Some(post.to_string()),
-                Some(("", post)) => Some(prefix.to_owned() + ":" + post),
-                Some(_) | None => None,
-            })
-            .sorted_by_key(String::len) // short IRI's are preferred
-            .next()
-    }
-
-    /// Converts a full IRI maybe into an abbreviated IRI or just adds < > braces
-    pub fn full_iri_to_shorter_iri(&self, full_iri: &str) -> String {
-        self.full_iri_to_abbreviated_iri(full_iri)
-            .unwrap_or_else(|| {
-                // Sometimes the IRI can not be converted but it is also not a full IRI or kind of URI.
-                // In these cases it is best to just skip adding the < > braces.
-                // This is probibly caused by not having a default/empty prefix.
-                if full_iri.contains("://") {
-                    format!("<{full_iri}>")
-                } else {
-                    full_iri.to_string()
-                }
-            })
-    }
-
-    pub fn inlay_hint(
-        &self,
-        range: Range,
-        encoding: &PositionEncodingKind,
-        workspace: &Workspace,
-    ) -> Vec<tower_lsp::lsp_types::InlayHint> {
-        let reachable_docs = self.reachable_docs_recursive(workspace, true);
-        debug!("Reachable docs for {} are {reachable_docs:#?}", self.uri());
-        // TODO cache this in stage2
-        self
-            .parsed_document
-            .query_range(&ALL_QUERIES.iri_query_all, range)
-            .into_iter()
-            .flat_map(|match_| match_.captures)
-            .map(|capture| {
-                let iri = trim_full_iri(capture.node.text);
-                let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-
-                let label =
-                // timeit("get frame info recursive", || {
-                    Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs).ok_or(Error::FrameInfoNotFound(iri.clone()))?.label(workspace)
-                // })
-                // .and_then(|frame_info| frame_info.label())
-                .unwrap_or_default();
-
-                trace!("Found {label} for {iri}");
-
-                let mut label_normalized = label.clone().to_lowercase();
-                label_normalized.retain(char::is_alphanumeric);
-
-                let same = iri.to_lowercase().contains(&label_normalized);
-
-                if label.is_empty() || same {
-                    Ok(None)
-                } else {
-                    Ok(Some(InlayHint {
-                        position: capture.node.range.end.into_lsp(self.rope(), encoding)?,
-                        label: InlayHintLabel::String(label),
-                        kind: None,
-                        text_edits: None,
-                        tooltip: None,
-                        padding_left: Some(true),
-                        padding_right: None,
-                        data: None,
-                    }))
-                }
-            })
-            .filter_and_log()
-            .flatten()
-            .collect()
-    }
-
-    pub fn get_keyword_competions_at(&self, pos: Position) -> Vec<String> {
-        let pos_one_left = pos.moved_left(1, self.rope());
-        let mut node = self
-            .tree()
-            .root_node()
-            .named_descendant_for_point_range(pos_one_left.into(), pos_one_left.into())
-            .expect("The pos to be in at least one node");
-
-        // The first case is needed, becaus it catches the empty doc case
-        let mut lei = if node.parent().is_none() {
-            // Has no parent -> Is root
-            LANGUAGE
-                .lookahead_iterator(1)
-                .expect("state 1 should be valid")
-        } else {
-            let mut lei = LANGUAGE.lookahead_iterator(node.parse_state());
-
-            while lei.is_none() {
-                let parent = node.parent();
-                if let Some(parent) = parent {
-                    node = parent;
-                    lei = LANGUAGE.lookahead_iterator(node.parse_state());
-                } else {
-                    // Has no parent -> Is root
-                    lei = LANGUAGE.lookahead_iterator(1);
-                }
-            }
-            lei.expect("while none loop should have set it to some")
-        };
-
-        let line = self
-            .rope()
-            .get_line(pos.line() as usize)
-            .map(|s| s.to_string())
-            .unwrap_or_default();
-        let partial = word_before_character(pos.character_byte() as usize, &line);
-
-        lei.iter_names()
-            .inspect(|n| debug!("- LEI name: {n}"))
-            .filter_map(|kind| (*queries::KEYWORDS_MAP).get(kind).cloned())
-            .filter(|kw| kw.starts_with(&partial))
-            .collect_vec()
-    }
-
-    // (Label, Details, Insert Text)
-    pub fn get_iri_completions_at(
-        &self,
-        pos: Position,
-        workspace: &Workspace,
-    ) -> Vec<(String, String, String)> {
-        let pos_one_left = pos.moved_left(1, self.rope());
-
-        let node = self
-            .tree()
-            .root_node()
-            .named_descendant_for_point_range(pos_one_left.into(), pos_one_left.into())
-            .expect("The pos to be in at least one node");
-
-        // Generate the list of iris that can be inserted.
-        let partial_text = node_text(&node, self.rope()).to_string();
-
-        if node.kind() == "simple_iri" {
-            debug!("Try iris...");
-
-            workspace
-                .search_frame(&partial_text)
-                .into_iter()
-                .unique_by(|(_, iri, _)| iri.clone())
-                .sorted_unstable_by_key(|(v, _, _)| v.clone())
-                .filter_map(|(full, maybe_full_iri, frame)| {
-                    // TODO this will not be correct for all workspace frames (I think)
-                    let iri = self.full_iri_to_shorter_iri(&maybe_full_iri);
-
-                    if iri == partial_text {
-                        None
-                    } else {
-                        Some((
-                            frame.label(workspace).unwrap_or(full),
-                            frame.info_display(workspace),
-                            iri,
-                        ))
-                    }
-                })
-                // TODO #29 add items for simple iri, abbriviated iri and full iri
-                // Take the shortest one maybe
-                .collect_vec()
-        } else {
-            Vec::new()
-        }
-    }
-
-    pub fn sematic_tokens(
-        &self,
-        range: Option<Range>,
-        encoding: &PositionEncodingKind,
-    ) -> Result<Vec<SemanticToken>> {
-        let doc = self;
-        let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
-
-        let query = Query::new(&LANGUAGE, query_source).expect("valid query expect");
-        let mut query_cursor = QueryCursor::new();
-        if let Some(range) = range {
-            query_cursor.set_point_range(range.into());
-        }
-        let matches = query_cursor.matches(
-            &query,
-            doc.tree().root_node(),
-            RopeProvider::new(doc.rope()),
-        );
-
-        let mut tokens = vec![];
-
-        let mut nodes = matches
-            .map_deref(|m| m.captures)
-            .flatten()
-            .map(|c| {
-                (
-                    c.node,
-                    treesitter_highlight_capture_into_semantic_token_type_index(
-                        query.capture_names()[c.index as usize],
-                    ),
-                )
-            })
-            .collect_vec();
-
-        // node start points need to be strictly in order, because the delta might otherwise negatively overflow
-        // TODO is this needed? are query matches in order?
-        nodes.sort_unstable_by_key(|(n, _)| n.start_byte());
-
-        let mut last_line = 0;
-        let mut last_character = 0; // the indexing is encoding dependent
-        for (node, type_index) in nodes {
-            let range: Range = node.range().into();
-            // This will never happen tokens are never longer than u32
-            #[allow(clippy::cast_possible_truncation)]
-            let length = range.len_lsp(self.rope(), encoding) as u32;
-            let range = range.into_lsp(self.rope(), encoding)?;
-            let start = range.start;
-
-            let delta_line = start.line - last_line;
-            let delta_start = if delta_line == 0 {
-                start.character - last_character // same line
-            } else {
-                start.character // some other line
-            };
-
-            let token = SemanticToken {
-                delta_line,
-                delta_start,
-                length,
-                token_type: type_index,
-                token_modifiers_bitset: 0,
-            };
-
-            last_line = start.line;
-            last_character = start.character;
-            tokens.push(token);
-        }
-        Ok(tokens)
-    }
-
-    /// What other urls are directly (depth = 1) reachable from this document.
-    /// Contains all import URL's unprocessed.
-    pub fn reachable_urls(&self, include_prefix: bool) -> Vec<Url> {
-        // TODO please do not clone this thing :>
-        let mut urls = self.stage2.directly_reachable_import_urls.clone();
-        if include_prefix {
-            urls.extend(self.stage2.directly_reachable_other_urls.iter().cloned());
-            urls
-        } else {
-            urls
-        }
-    }
-
-    pub fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<String> {
-        self.queried_document.abbreviated_iri_to_full_iri(iri)
-    }
-
-    pub fn rename_edits(
-        &self,
-        full_iri: &String,
-        new_iri: Option<&String>,
-        iri_kind: &String,
-        original: &str,
-    ) -> Vec<(Range, String)> {
-        self.parsed_document
-            .query(&ALL_QUERIES.iri_query_all)
-            .into_iter()
-            .map(|m| {
-                let (iri, range, parent_kind) = match &m.captures[..] {
-                    [iri_capture] => (
-                        match iri_capture.node.kind {
-                            "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
-                            "simple_iri" | "abbreviated_iri" => self
-                                .abbreviated_iri_to_full_iri(&iri_capture.node.text)
-                                .unwrap_or(iri_capture.node.text.clone()),
-
-                            _ => unreachable!(),
-                        },
-                        iri_capture.node.range,
-                        self.node_by_id(iri_capture.node.id)
-                            .expect("the node id to be valid")
-                            .parent()
-                            .expect("the iri node to have a parent of a specific iri kind")
-                            .kind(),
-                    ),
-                    _ => unreachable!(),
-                };
-                if &iri == full_iri && iri_kind == parent_kind {
-                    Ok(Some((
-                        range,
-                        new_iri
-                            .map(|new_iri| self.full_iri_to_shorter_iri(new_iri))
-                            .unwrap_or(original.to_string()),
-                    )))
-                } else {
-                    Ok(None)
-                }
-            })
-            .filter_and_log()
-            .flatten()
-            .collect_vec()
-    }
-
-    pub fn references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range> {
-        // TODO change this into using queried_document directly
-        self.parsed_document
-            .query(&ALL_QUERIES.iri_query_references)
-            .into_iter()
-            .map(|m| {
-                let (iri, range, node_id) = match &m.captures[..] {
-                    [iri_capture] => (
-                        match iri_capture.node.kind {
-                            "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
-                            "simple_iri" | "abbreviated_iri" => self
-                                .abbreviated_iri_to_full_iri(&iri_capture.node.text)
-                                .unwrap_or(iri_capture.node.text.clone()),
-
-                            _ => unreachable!(),
-                        },
-                        iri_capture.node.range,
-                        iri_capture.node.id,
-                    ),
-                    _ => unreachable!(),
-                };
-
-                if &iri == full_iri {
-                    if !include_declaration {
-                        if let Some(node) = self.node_by_id(node_id) {
-                            let iri_context_kind = node
-                                .parent()
-                                .expect("IRIs should have parent nodes")
-                                .parent()
-                                .expect("IRI supertype should have a parent")
-                                .kind();
-                            if iri_context_kind.ends_with("frame") {
-                                // This is a definition we want to filter out
-                                return Ok(None);
-                            }
-                        }
-                    }
-
-                    Ok(Some(range))
-                } else {
-                    Ok(None)
-                }
-            })
-            .filter_and_log()
-            .flatten()
-            .collect_vec()
-    }
 }
 
 /// Take this document, generate the diagnostics in workspace context and send the results via the client.
@@ -1558,13 +1528,59 @@ pub async fn publish_lsp_diagnostics(
 }
 
 pub fn diagnostics(doc: &DocumentVariant, workspace: &Workspace) -> Vec<Diagnostic> {
-    let local_diagnostics = &doc.stage2.local_diagnostics;
     let workspace_diagnostics = timeit("semantic errors", || semantic_errors(doc, workspace));
-    local_diagnostics
+    doc.local_diagnostics()
         .iter()
         .cloned()
         .chain(workspace_diagnostics)
         .collect_vec()
+}
+
+pub fn inlay_hint(
+    doc: &DocumentVariant,
+    range: Range,
+    encoding: &PositionEncodingKind,
+    workspace: &Workspace,
+) -> Vec<InlayHint> {
+    let reachable_docs = reachable_docs_recursive(doc, workspace, true);
+    debug!("Reachable docs for {} are {reachable_docs:#?}", doc.uri());
+    doc.query_range(&ALL_QUERIES.iri_query_all, range)
+        .into_iter()
+        .flat_map(|match_| match_.captures)
+        .map(|capture| {
+            let iri = trim_full_iri(capture.node.text);
+            let iri = doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+
+            let label = Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs)
+                .ok_or(Error::FrameInfoNotFound(iri.clone()))?
+                .label(workspace)
+                .unwrap_or_default();
+
+            trace!("Found {label} for {iri}");
+
+            let mut label_normalized = label.clone().to_lowercase();
+            label_normalized.retain(char::is_alphanumeric);
+
+            let same = iri.to_lowercase().contains(&label_normalized);
+
+            if label.is_empty() || same {
+                Ok(None)
+            } else {
+                Ok(Some(InlayHint {
+                    position: capture.node.range.end.into_lsp(doc.rope(), encoding)?,
+                    label: InlayHintLabel::String(label),
+                    kind: None,
+                    text_edits: None,
+                    tooltip: None,
+                    padding_left: Some(true),
+                    padding_right: None,
+                    data: None,
+                }))
+            }
+        })
+        .filter_and_log()
+        .flatten()
+        .collect()
 }
 
 /// Returns all document URL's that can be reached (imports, prefixes, ...) from this internal document.
@@ -2854,7 +2870,8 @@ impl ExternalDocument {
         for doc in docs {
             match doc {
                 DocumentReference::Internal(internal_document) => {
-                    internal_document.reachable_docs_recursive_helper(
+                    reachable_docs_recursive_helper(
+                        internal_document,
                         result,
                         workspace,
                         include_prefix,
@@ -3250,12 +3267,11 @@ fn semantic_errors(doc: &DocumentVariant, workspace: &Workspace) -> Vec<Diagnost
 
     debug!(
         "semantic_errors / doc {:?} uses {uses:#?} defines {defines:#?}",
-        doc.uri() // TODO was id
+        doc.uri()
     );
 
     let imports_recursive = timeit("semantic errors  reachable", || {
-        // This takes the longes :<
-        doc.reachable_docs_recursive(workspace, false)
+        reachable_docs_recursive(doc, workspace, false)
     });
     debug!("Imports recursive {} {:#?}", doc.uri(), imports_recursive);
 
@@ -3263,7 +3279,11 @@ fn semantic_errors(doc: &DocumentVariant, workspace: &Workspace) -> Vec<Diagnost
         if let Some(doc) = workspace.document_by_url(&url) {
             match doc {
                 DocumentReference::Internal(internal_document) => {
-                    defines.extend(internal_document.definitions().cloned());
+                    defines.extend(
+                        internal_document
+                            .definitions()
+                            .map(|rb| rb.value().iri.clone()),
+                    );
                 }
                 DocumentReference::External(external_document) => {
                     defines.extend(external_document.definitions().clone());
@@ -3273,34 +3293,30 @@ fn semantic_errors(doc: &DocumentVariant, workspace: &Workspace) -> Vec<Diagnost
     }
 
     // TODO this is a quick fix for now. The correct way will be not not include prefixes in the used Iris
-    let prefixes: HashSet<&Iri> = doc
-        .queried_document
-        .prefixes
-        .values()
-        .map(RangeBox::value)
-        .collect();
-    let imports = &doc.queried_document.imports;
+    let prefixes: HashSet<&Iri> = doc.prefix_iris().collect();
+    let import_iris: Vec<&Iri> = doc.import_iris().collect();
 
-    let ontology_id = &doc.queried_document.ontology_id;
+    let ontology_iri = doc.ontology_iri();
+    let version_iri = doc.version_iri();
 
     for diff in uses
         .difference(&defines)
         .filter(|iri| !prefixes.contains(*iri))
-        .filter(|iri| !imports.iter().map(RangeBox::value).contains(*iri))
+        .filter(|iri| !import_iris.contains(iri))
     {
         // Skip ontology and version IRIs
-        if let Some((iri, version)) = ontology_id.as_ref().map(RangeBox::value) {
+        if let Some(ref iri) = ontology_iri {
             if diff == iri {
                 continue;
             }
-            if let Some(version) = version {
-                if diff == version {
-                    continue;
-                }
+        }
+        if let Some(ref version) = version_iri {
+            if diff == version {
+                continue;
             }
         }
 
-        if let Some(vec) = doc.stage2.iri_locations.get(diff) {
+        if let Some(vec) = doc.iri_locations().get(diff) {
             for ele in vec {
                 diagnostics.push(Diagnostic {
                     range: *ele.range(),

@@ -39,7 +39,8 @@ use crate::consts::child_keywords_for_kind;
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{
-    Document, DocumentReference, DocumentVariant, FormattingSettings, FrameType,
+    inlay_hint as document_inlay_hint, publish_lsp_diagnostics, reachable_docs_recursive, Document,
+    DocumentReference, DocumentVariant, FormattingSettings, FrameType, OntologyDocument,
 };
 
 // Re-export for benchmarks
@@ -90,13 +91,12 @@ impl Backend {
             // So my error type is not send and terefore we need the conversion to ok()
             #[allow(clippy::match_result_ok)]
             if let Some((document, workspace)) = sync.get_internal_document(&file_url).ok() {
-                document
-                    .publish_lsp_diagnostics(workspace, encoding, &mini_backend.client)
+                publish_lsp_diagnostics(document, workspace, encoding, &mini_backend.client)
                     .await;
 
                 // Create diagnostics for files that depend on this file
                 for other_internal_doc in workspace.internal_documents() {
-                    let depends_on_me = other_internal_doc.reachable_urls(false).iter().any(|u| {
+                    let depends_on_me = other_internal_doc.directly_imports().any(|u| {
                         workspace.document_by_url(u) == Some(DocumentReference::Internal(document))
                     });
 
@@ -168,11 +168,11 @@ impl Backend {
 
                 if let Some(doc) = resolved_doc {
                     match doc {
-                        Document::Internal(internal_document) => {
-                            for ele in internal_document.reachable_urls(true) {
+                        Document::Internal(doc_variant) => {
+                            for ele in doc_variant.directly_references_doc() {
                                 todo.push_back((ele.clone(), 1));
                             }
-                            let file_url = Url::from_file_path(internal_document.path())
+                            let file_url = Url::from_file_path(doc_variant.path())
                                 .expect("Path should also be a Url");
                             {
                                 let mut sync = mini_backend.sync.write().await;
@@ -180,7 +180,7 @@ impl Backend {
                                     &Url::from_file_path(&path)
                                         .expect("File path should be convertable to URL"),
                                 );
-                                workspace.insert_internal_document(internal_document);
+                                workspace.insert_internal_document(doc_variant);
                             }
 
                             mini_backend.update_diagnostics_for_url_and_dependent(file_url);
@@ -350,7 +350,6 @@ async fn build_todo_list(
     let document = workspace.get_internal_document(path).unwrap();
     document
         .directly_references_doc()
-        .iter()
         .map(|u| (u.clone(), 1))
         .collect()
 }
@@ -599,7 +598,7 @@ impl LanguageServer for Backend {
                 .ok_or(Error::InvalidUrl(url.clone()))?
         );
 
-        let hints = document.inlay_hint(range, self.encoding(), workspace);
+        let hints = document_inlay_hint(document, range, self.encoding(), workspace);
 
         Ok(Some(hints))
     }
@@ -625,7 +624,7 @@ impl LanguageServer for Backend {
             .named_descendant_for_point_range(pos.into(), pos.into())
             .ok_or(Error::PositionOutOfBounds(pos))?;
 
-        let reachable_docs = doc.reachable_docs_recursive(workspace, true);
+        let reachable_docs = reachable_docs_recursive(doc, workspace, true);
 
         let node_is_iri = ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind());
         if node_is_iri {
@@ -918,7 +917,7 @@ impl LanguageServer for Backend {
             let locations = workspace
                 .internal_documents()
                 .flat_map(|doc| {
-                    doc.references(&full_iri, params.context.include_declaration)
+                    doc.find_iri_references(&full_iri, params.context.include_declaration)
                         .into_iter()
                         .filter_map(|range| {
                             range
@@ -1186,7 +1185,7 @@ fn missin_iri_actions(
         .named_descendant_for_point_range(pos.into(), pos.into())
         .ok_or(Error::PositionOutOfBounds(pos))?;
 
-    let diagnostics = doc.diagnostics(ws);
+    let diagnostics = workspace::diagnostics(doc, ws);
     let diagnostics_under_cursor = diagnostics
         .into_iter()
         .filter(|diagnostic| diagnostic.range.contains(pos));
@@ -1195,7 +1194,7 @@ fn missin_iri_actions(
     let end_lsp = end.into_lsp(doc.rope(), encoding)?;
     let create_missing_iri_actions = diagnostics_under_cursor.filter_map(|d| match &d.kind {
         workspace::DiagnosticKind::MissingIri(full_iri) => {
-            let iri = doc.full_iri_to_shorter_iri(full_iri);
+            let iri = doc.full_iri_to_shorter_iri(&full_iri);
             let iri_kind = node
                 .parent()
                 .expect("Missing IRI node should have parent")
