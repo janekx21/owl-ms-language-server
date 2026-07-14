@@ -39,7 +39,7 @@ use crate::consts::child_keywords_for_kind;
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{
-    Document, DocumentReference, FormattingSettings, FrameType, InternalDocument,
+    Document, DocumentReference, DocumentVariant, FormattingSettings, FrameType,
 };
 
 // Re-export for benchmarks
@@ -349,7 +349,7 @@ async fn build_todo_list(
 
     let document = workspace.get_internal_document(path).unwrap();
     document
-        .reachable_urls(true)
+        .directly_references_doc()
         .iter()
         .map(|u| (u.clone(), 1))
         .collect()
@@ -431,7 +431,7 @@ impl LanguageServer for Backend {
             let mut sync = self.write_sync().await;
 
             let workspace = sync.get_or_insert_workspace_mut(&file_url);
-            let internal_document = InternalDocument::new(
+            let internal_document = DocumentVariant::new(
                 file_url.clone(),
                 params.text_document.version,
                 params.text_document.text,
@@ -949,7 +949,7 @@ impl LanguageServer for Backend {
         let (doc, _) = sync.get_internal_document(&url)?;
         let pos: Position = Position::from_lsp(params.position, doc.rope(), self.encoding())?;
 
-        fn node_range(position: Position, doc: &InternalDocument) -> Option<Range> {
+        fn node_range(position: Position, doc: &DocumentVariant) -> Option<Range> {
             debug!("prepare_rename try {position:?}");
             let node = doc
                 .tree()
@@ -1110,7 +1110,7 @@ type IriKindName = Option<(String, Option<String>, String, String)>;
 
 fn rename_helper(
     position: Position,
-    doc: &InternalDocument,
+    doc: &DocumentVariant,
     new_name: String,
 ) -> Result<IriKindName> {
     let node = doc
@@ -1172,7 +1172,7 @@ fn rename_helper(
 
 fn missin_iri_actions(
     pos: Position,
-    doc: &InternalDocument,
+    doc: &DocumentVariant,
     ws: &Workspace,
     encoding: &PositionEncodingKind,
 ) -> Result<Vec<CodeActionOrCommand>> {
@@ -1230,7 +1230,7 @@ fn missin_iri_actions(
 
 fn keyword_actions(
     pos: Position,
-    doc: &InternalDocument,
+    doc: &DocumentVariant,
     encoding: &PositionEncodingKind,
 ) -> Result<Vec<CodeActionOrCommand>> {
     let mut actions = vec![];

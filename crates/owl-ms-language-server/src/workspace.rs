@@ -111,13 +111,56 @@ pub struct Workspace {
 }
 
 #[enum_dispatch(OntologyDocument)]
-#[derive(Debug)]
-enum DocumentVariant {
+#[derive(Debug, PartialEq, Eq)]
+pub enum DocumentVariant {
     Internal(InternalDocument),
 }
 
+/// This is a RW internal document trait
 #[enum_dispatch]
-trait OntologyDocument {}
+pub trait OntologyDocument {
+    fn path(&self) -> &Path;
+
+    fn uri(&self) -> &Url;
+
+    /// This version is not the ontology version but the LSP version.
+    fn version(&self) -> i32;
+
+    // Content
+    fn rope(&self) -> &Rope;
+    fn tree(&self) -> &Tree;
+
+    // Frame infos
+    fn all_frame_infos(&self) -> impl Iterator<Item = &FrameInfo>;
+    fn frame_info_by_iri(&self, iri: &Iri) -> Option<FrameInfo>;
+
+    // Analytics
+    fn ontology_iri(&self) -> Option<Iri>;
+    fn version_iri(&self) -> Option<Iri>;
+    fn definitions(&self) -> impl Iterator<Item = &RangeBox<IriDefinition>>;
+    fn references(&self) -> impl Iterator<Item = &RangeBox<Iri>>;
+    // There are also indirect imports, but they need to be resolved in the workspace
+    fn directly_imports(&self) -> impl Iterator<Item = &Url>;
+    /// This includes prefixes, references and imports
+    fn directly_references_doc(&self) -> impl Iterator<Item = &Url>;
+
+    fn edit<'a>(&mut self, changes: impl Iterator<Item = &'a RangeBox<String>>) -> Result<()>;
+
+    // Requests
+    fn formatted(&self, options: &FormattingSettings);
+    fn hover(&self, pos: Position) -> Option<HoverResult>;
+}
+
+enum HoverResult {
+    Iri(Iri),
+    Keyword(String),
+}
+
+impl DocumentVariant {
+    pub fn new(url: Url, version: i32, text: String) {
+        todo!()
+    }
+}
 
 impl Display for Workspace {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -143,7 +186,7 @@ impl Workspace {
 
     /// Inserts an internal document into the workspace and returns a reference to it.
     /// This will replace the document with the same URL if there was one.
-    pub fn insert_internal_document(&mut self, document: DocumentVariant) -> &InternalDocument {
+    pub fn insert_internal_document(&mut self, document: DocumentVariant) -> &DocumentVariant {
         debug!("Insert internal document {document:?}");
         let path = document.path().to_path_buf();
         self.internal_documents
@@ -153,13 +196,13 @@ impl Workspace {
             .expect("document should be present")
     }
 
-    pub fn get_internal_document(&self, path: &Path) -> Result<&InternalDocument> {
+    pub fn get_internal_document(&self, path: &Path) -> Result<&DocumentVariant> {
         self.internal_documents
             .get(path)
             .ok_or(Error::InternalDocumentNotFound(path.to_path_buf()))
     }
 
-    pub fn take_internal_document(&mut self, path: &Path) -> Result<InternalDocument> {
+    pub fn take_internal_document(&mut self, path: &Path) -> Result<DocumentVariant> {
         self.internal_documents
             .remove(path)
             .ok_or(Error::InternalDocumentNotFound(path.to_path_buf()))
@@ -171,7 +214,7 @@ impl Workspace {
 
     pub fn internal_documents(
         &self,
-    ) -> std::collections::hash_map::Values<'_, PathBuf, InternalDocument> {
+    ) -> std::collections::hash_map::Values<'_, PathBuf, DocumentVariant> {
         self.internal_documents.values()
     }
 
@@ -214,7 +257,7 @@ impl Workspace {
 
     pub fn all_frame_infos(&self) -> impl Iterator<Item = &FrameInfo> {
         self.internal_documents()
-            .flat_map(InternalDocument::all_frame_infos)
+            .flat_map(OntologyDocument::all_frame_infos)
     }
 
     /// Returns the path for the cache folder
@@ -585,7 +628,7 @@ fn cache_doc(workspace: &Workspace, doc: &ExternalDocument) {
 #[derive(Debug, PartialEq, Eq)]
 pub enum DocumentReference<'a> {
     // Not boxing this is fine because the size ratio is just about 1.6
-    Internal(&'a InternalDocument),
+    Internal(&'a DocumentVariant),
     External(&'a ExternalDocument),
 }
 
@@ -599,7 +642,7 @@ pub enum Document {
 /// Internal documents are OMN files on disk.
 /// Text -> Parsed -> Queried -> Analyzed -> ``InternalDocument``
 #[derive(Debug)]
-pub struct InternalDocument {
+struct InternalDocument {
     id: DocumentId,
     parsed_document: ParsedDocument,
     pub queried_document: QueriedDocument,
@@ -917,30 +960,86 @@ impl PartialEq for InternalDocument {
     }
 }
 
+impl OntologyDocument for InternalDocument {
+    fn path(&self) -> &Path {
+        &self.id.path
+    }
+
+    fn uri(&self) -> &Url {
+        &self.id.uri
+    }
+
+    fn version(&self) -> i32 {
+        self.id.version
+    }
+
+    fn rope(&self) -> &Rope {
+        &self.parsed_document.rope
+    }
+
+    fn tree(&self) -> &Tree {
+        &self.parsed_document.tree
+    }
+
+    fn all_frame_infos(&self) -> impl Iterator<Item = &FrameInfo> {
+        self.stage2.all_frame_infos.values()
+    }
+
+    fn frame_info_by_iri(&self, iri: &Iri) -> Option<FrameInfo> {
+        self.stage2.all_frame_infos.get(iri).cloned()
+    }
+
+    fn definitions(&self) -> impl Iterator<Item = &RangeBox<IriDefinition>> {
+        self.stage2.definitions.iter()
+    }
+
+    fn ontology_iri(&self) -> Option<Iri> {
+        self.queried_document
+            .ontology_id
+            .as_ref()
+            .map(|rb| rb.value().0.clone())
+    }
+
+    fn version_iri(&self) -> Option<Iri> {
+        self.queried_document
+            .ontology_id
+            .as_ref()
+            .and_then(|rb| rb.value().1.clone())
+    }
+
+    fn references(&self) -> impl Iterator<Item = &RangeBox<Iri>> {
+        self.stage2.references.iter()
+    }
+
+    fn directly_imports(&self) -> impl Iterator<Item = &Url> {
+        self.stage2.directly_reachable_import_urls.iter()
+    }
+
+    #[doc = " This includes prefixes, references and imports"]
+    fn directly_references_doc(&self) -> impl Iterator<Item = &Url> {
+        self.stage2
+            .directly_reachable_import_urls
+            .iter()
+            .chain(self.stage2.directly_reachable_other_urls.iter())
+    }
+
+    fn formatted(&self, options: &FormattingSettings) {
+        todo!()
+    }
+
+    fn hover(&self, pos: Position) -> Option<HoverResult> {
+        todo!()
+    }
+
+    fn edit<'a>(&mut self, changes: impl Iterator<Item = &'a RangeBox<String>>) -> Result<()> {
+        todo!()
+    }
+}
+
 impl InternalDocument {
     pub fn new(uri: Url, version: i32, text: String) -> InternalDocument {
         let path = uri.to_file_path().expect("URL should be a file path");
         Self::new_with_path(uri, version, text, path)
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.id.path
-    }
-
-    pub fn uri(&self) -> &Url {
-        &self.id.uri
-    }
-
-    pub fn version(&self) -> i32 {
-        self.id.version
-    }
-
-    pub fn rope(&self) -> &Rope {
-        &self.parsed_document.rope
-    }
-
-    pub fn tree(&self) -> &Tree {
-        &self.parsed_document.tree
     }
 
     pub fn new_with_path(uri: Url, version: i32, text: String, path: PathBuf) -> InternalDocument {
@@ -977,16 +1076,6 @@ impl InternalDocument {
             .collect()
     }
 
-    pub fn diagnostics(&self, workspace: &Workspace) -> Vec<Diagnostic> {
-        let local_diagnostics = &self.stage2.local_diagnostics;
-        let workspace_diagnostics = timeit("semantic errors", || semantic_errors(self, workspace));
-        local_diagnostics
-            .iter()
-            .cloned()
-            .chain(workspace_diagnostics)
-            .collect_vec()
-    }
-
     pub fn formatted(&self, options: &FormattingSettings) -> String {
         let root = self.tree().root_node();
         let doc = to_doc(&root, self.rope(), options);
@@ -996,82 +1085,6 @@ impl InternalDocument {
 
     pub fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
         node_by_id(&self.parsed_document, id)
-    }
-
-    /// Returns all document URL's that can be reached (imports, prefixes, ...) from this internal document.
-    /// Does not load anything.
-    pub fn reachable_docs_recursive(
-        &self,
-        workspace: &Workspace,
-        include_prefix: bool,
-    ) -> Vec<Url> {
-        reachable_docs_recursive_cached(self, workspace, include_prefix)
-    }
-
-    fn reachable_docs_recursive_helper(
-        &self,
-        result: &mut HashSet<Url>,
-        workspace: &Workspace,
-        include_prefix: bool,
-    ) -> Result<()> {
-        if result.contains(self.uri()) {
-            // Do nothing
-            return Ok(());
-        }
-
-        result.insert(self.uri().clone());
-
-        let urls = self.reachable_urls(include_prefix);
-
-        let docs = urls
-            .iter()
-            .filter_map(|url| {
-                workspace.document_by_url(url)
-                // TODO maybe reactivate but for now lets not log here
-                // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
-                // .inspect_log()
-                // .ok()
-            })
-            .collect_vec();
-
-        // Ignore these debugging traces
-        trace!("reachable docs recursive step tries:");
-        for u in &urls {
-            trace!("{u}");
-        }
-        trace!("but gets just:");
-        for r in &docs {
-            trace!("{r:?}");
-        }
-        trace!("internal documents loaded:");
-        for p in workspace.internal_documents.keys() {
-            trace!("{}", p.display());
-        }
-        trace!("external documents loaded:");
-        for u in workspace.external_documents.keys() {
-            trace!("{u}");
-        }
-
-        for doc in docs {
-            match doc {
-                DocumentReference::Internal(internal_document) => {
-                    internal_document.reachable_docs_recursive_helper(
-                        result,
-                        workspace,
-                        include_prefix,
-                    )?;
-                }
-                DocumentReference::External(external_document) => {
-                    external_document.reachable_docs_recursive_helper(
-                        workspace,
-                        result,
-                        0,
-                        include_prefix,
-                    )?;
-                }
-            }
-        }
-        Ok(())
     }
 
     pub fn edit(
@@ -1244,14 +1257,6 @@ impl InternalDocument {
             .filter_and_log()
             .flatten()
             .collect()
-    }
-
-    pub fn frame_info_by_iri(&self, iri: &Iri) -> Option<FrameInfo> {
-        self.stage2.all_frame_infos.get(iri).cloned()
-    }
-
-    pub fn all_frame_infos(&self) -> impl Iterator<Item = &FrameInfo> {
-        self.stage2.all_frame_infos.values()
     }
 
     pub fn get_keyword_competions_at(&self, pos: Position) -> Vec<String> {
@@ -1525,36 +1530,114 @@ impl InternalDocument {
             .flatten()
             .collect_vec()
     }
+}
 
-    /// Take this document, generate the diagnostics in workspace context and send the results via the client.
-    pub async fn publish_lsp_diagnostics(
-        &self,
-        workspace: &Workspace,
-        encoding: &PositionEncodingKind,
-        client: &tower_lsp::Client,
-    ) {
-        let diagnostics = self
-            .diagnostics(workspace)
-            .iter()
-            .map(|diagnostic| {
-                diagnostic
-                    .clone()
-                    .into_lsp_diagnostic(self.rope(), encoding)
-            })
-            .filter_and_log()
-            .collect_vec();
+/// Take this document, generate the diagnostics in workspace context and send the results via the client.
+pub async fn publish_lsp_diagnostics(
+    doc: &DocumentVariant,
+    workspace: &Workspace,
+    encoding: &PositionEncodingKind,
+    client: &tower_lsp::Client,
+) {
+    let diagnostics = diagnostics(doc, workspace)
+        .iter()
+        .map(|diagnostic| diagnostic.clone().into_lsp_diagnostic(doc.rope(), encoding))
+        .filter_and_log()
+        .collect_vec();
 
-        // TODO create diagnostics for files that depend on this file
-        debug!(
-            "Publish diagnostics for {} {:#?}",
-            self.path().display(),
-            diagnostics
-        );
+    // TODO create diagnostics for files that depend on this file
+    debug!(
+        "Publish diagnostics for {} {:#?}",
+        doc.path().display(),
+        diagnostics
+    );
 
-        client
-            .publish_diagnostics(self.uri().clone(), diagnostics, Some(self.version()))
-            .await;
+    client
+        .publish_diagnostics(doc.uri().clone(), diagnostics, Some(doc.version()))
+        .await;
+}
+
+pub fn diagnostics(doc: &DocumentVariant, workspace: &Workspace) -> Vec<Diagnostic> {
+    let local_diagnostics = &doc.stage2.local_diagnostics;
+    let workspace_diagnostics = timeit("semantic errors", || semantic_errors(doc, workspace));
+    local_diagnostics
+        .iter()
+        .cloned()
+        .chain(workspace_diagnostics)
+        .collect_vec()
+}
+
+/// Returns all document URL's that can be reached (imports, prefixes, ...) from this internal document.
+/// Does not load anything.
+pub fn reachable_docs_recursive(
+    doc: &DocumentVariant,
+    workspace: &Workspace,
+    include_prefix: bool,
+) -> Vec<Url> {
+    reachable_docs_recursive_cached(doc, workspace, include_prefix)
+}
+
+fn reachable_docs_recursive_helper(
+    doc: &DocumentVariant,
+    result: &mut HashSet<Url>,
+    workspace: &Workspace,
+    include_prefix: bool,
+) -> Result<()> {
+    if result.contains(doc.uri()) {
+        // Do nothing
+        return Ok(());
     }
+
+    result.insert(doc.uri().clone());
+
+    let urls: Box<dyn Iterator<Item = &Url>> = if include_prefix {
+        Box::new(doc.directly_references_doc())
+    } else {
+        Box::new(doc.directly_imports())
+    };
+
+    let docs = urls
+        .inspect(|u| trace!("{u}"))
+        .filter_map(|url| {
+            workspace.document_by_url(url)
+            // TODO maybe reactivate but for now lets not log here
+            // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&doc.try_get_workspace()?, &url)
+            // .inspect_log()
+            // .ok()
+        })
+        .collect_vec();
+
+    // Ignore these debugging traces
+    trace!("reachable docs recursive step tries:");
+    trace!("but gets just:");
+    for r in &docs {
+        trace!("{r:?}");
+    }
+    trace!("internal documents loaded:");
+    for p in workspace.internal_documents.keys() {
+        trace!("{}", p.display());
+    }
+    trace!("external documents loaded:");
+    for u in workspace.external_documents.keys() {
+        trace!("{u}");
+    }
+
+    for doc in docs {
+        match doc {
+            DocumentReference::Internal(next_doc) => {
+                reachable_docs_recursive_helper(next_doc, result, workspace, include_prefix)?;
+            }
+            DocumentReference::External(external_document) => {
+                external_document.reachable_docs_recursive_helper(
+                    workspace,
+                    result,
+                    0,
+                    include_prefix,
+                )?;
+            }
+        }
+    }
+    Ok(())
 }
 
 const RANGE_GROW: u32 = 1;
@@ -3158,26 +3241,16 @@ pub fn node_text(node: &Node, rope: &Rope) -> String {
         .map_or(String::new(), |rs| rs.to_string())
 }
 
-fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnostic> {
+fn semantic_errors(doc: &DocumentVariant, workspace: &Workspace) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    let uses: &HashSet<Iri> = &doc
-        .stage2
-        .references
-        .iter()
-        .map(|rb| rb.value().clone())
-        .collect();
+    let uses: &HashSet<Iri> = &doc.references().map(|rb| rb.value().clone()).collect();
 
-    let mut defines: HashSet<String> = doc
-        .stage2
-        .definitions
-        .iter()
-        .map(|rb| rb.value().iri.clone())
-        .collect();
+    let mut defines: HashSet<String> = doc.definitions().map(|rb| rb.value().iri.clone()).collect();
 
     debug!(
         "semantic_errors / doc {:?} uses {uses:#?} defines {defines:#?}",
-        doc.id
+        doc.uri() // TODO was id
     );
 
     let imports_recursive = timeit("semantic errors  reachable", || {
@@ -3190,13 +3263,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
         if let Some(doc) = workspace.document_by_url(&url) {
             match doc {
                 DocumentReference::Internal(internal_document) => {
-                    defines.extend(
-                        internal_document
-                            .stage2
-                            .definitions
-                            .iter()
-                            .map(|rb| rb.value().iri.clone()),
-                    );
+                    defines.extend(internal_document.definitions().cloned());
                 }
                 DocumentReference::External(external_document) => {
                     defines.extend(external_document.definitions().clone());
@@ -3618,13 +3685,12 @@ fn frame_to_doc(
 // This can not be cached, because some dependencies are maybe not loaded.
 // Therefore the result could change indepenent of the document.
 fn reachable_docs_recursive_cached(
-    doc: &InternalDocument,
+    doc: &DocumentVariant,
     workspace: &Workspace,
     include_prefix: bool,
 ) -> Vec<Url> {
     let mut set: HashSet<Url> = HashSet::new();
-    doc.reachable_docs_recursive_helper(&mut set, workspace, include_prefix)
-        .log_if_error();
+    reachable_docs_recursive_helper(doc, &mut set, workspace, include_prefix).log_if_error();
     set.into_iter().collect_vec()
 }
 
