@@ -4,7 +4,7 @@ use crate::{
     range::{Change, Range},
     rope_provider::RopeProvider,
     test_helpers::*,
-    workspace::apply_change_to_rope_and_tree,
+    workspace::{apply_change_to_rope_and_tree, diagnostics as ws_diagnostics, OntologyDocument},
     *,
 };
 use horned_owl::{
@@ -4024,20 +4024,8 @@ async fn backend_did_change_should_update_ontology_id() {
         "#}
     );
 
-    let id = document
-        .queried_document
-        .ontology_id
-        .as_ref()
-        .unwrap()
-        .value();
-
-    assert_eq!(
-        id,
-        &(
-            "http://invalid/othername".to_string(),
-            Some("http://invalid/ontology/123".to_string())
-        )
-    );
+    assert_eq!(document.ontology_iri(), Some("http://invalid/othername".to_string()));
+    assert_eq!(document.version_iri(), Some("http://invalid/ontology/123".to_string()));
 }
 
 #[test(tokio::test)]
@@ -4105,14 +4093,8 @@ async fn backend_did_change_with_syntax_change_should_update_ontology_id() {
         "#}
     );
 
-    let id = document
-        .queried_document
-        .ontology_id
-        .as_ref()
-        .unwrap()
-        .value();
-
-    assert_eq!(id, &("http://invalid/ontology".to_string(), None));
+    assert_eq!(document.ontology_iri(), Some("http://invalid/ontology".to_string()));
+    assert_eq!(document.version_iri(), None);
 }
 
 #[test(tokio::test)]
@@ -4204,20 +4186,8 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
         "#}
     );
 
-    let id = document
-        .queried_document
-        .ontology_id
-        .as_ref()
-        .unwrap()
-        .value();
-
-    assert_eq!(
-        id,
-        &(
-            "http://invalid/othername".to_string(),
-            Some("http://invalid/ontology/321".to_string())
-        )
-    );
+    assert_eq!(document.ontology_iri(), Some("http://invalid/othername".to_string()));
+    assert_eq!(document.version_iri(), Some("http://invalid/ontology/321".to_string()));
 }
 
 #[test(tokio::test)]
@@ -4287,12 +4257,7 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports() {
         "#}
     );
 
-    let imports = document
-        .queried_document
-        .imports
-        .iter()
-        .map(|i| i.value().clone())
-        .collect_vec();
+    let imports = document.import_iris().cloned().collect_vec();
 
     assert_eq!(imports, Vec::<String>::new());
 }
@@ -4394,12 +4359,7 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports_2() {
         "#}
     );
 
-    let imports = document
-        .queried_document
-        .imports
-        .iter()
-        .map(|i| i.value().clone())
-        .collect_vec();
+    let imports = document.import_iris().cloned().collect_vec();
 
     assert_eq!(
         imports,
@@ -4506,13 +4466,7 @@ async fn backend_did_change_with_large_syntax_change_should_update_prefixes() {
         "#}
     );
 
-    let prefixes = document
-        .queried_document
-        .prefixes
-        .iter()
-        .map(|(k, v)| (k.clone(), v.value().clone()))
-        .sorted() // Hash map entry orders are random. Lets sort them.
-        .collect_vec();
+    let prefixes = document.prefixes().into_iter().sorted().collect_vec();
 
     assert_eq!(
         prefixes,
@@ -4605,7 +4559,7 @@ async fn backend_did_change_with_some_should_prune_diagnostics() {
         "#}
     );
 
-    let diagnostics = document.diagnostics(workspace);
+    let diagnostics = ws_diagnostics(document, workspace);
 
     assert!(!diagnostics.iter().any(|d| d.label().contains('X')));
 }
@@ -4649,7 +4603,7 @@ async fn backend_diagnostics_with_syntax_error_should_report_nice_message() {
         .unwrap_or_else(|_| panic!("Multiple documents"));
 
     // Assert
-    let diagnostics = document.diagnostics(workspace);
+    let diagnostics = ws_diagnostics(document, workspace);
     info!("{:#?}", diagnostics);
     assert!(diagnostics
         .iter()
@@ -4666,7 +4620,7 @@ async fn backend_diagnostics_with_syntax_error_should_report_nice_message() {
 
 mod fuzz {
     use crate::{
-        workspace::{FrameInfo, QueriedDocument},
+        workspace::{diagnostics as ws_diagnostics, FrameInfo, OntologyDocument},
         Backend,
     };
 
@@ -4763,24 +4717,26 @@ mod fuzz {
             .sorted()
             .join("\n");
 
-        let diagnostics = doc.diagnostics(ws);
-        let prefixes_ = doc.prefixes().into_iter().sorted().collect_vec();
-        let QueriedDocument {
-            ontology_id,
-            prefixes,
-            imports,
-        } = &doc.queried_document;
-        let prefixes = prefixes.iter().sorted().collect_vec();
+        let diagnostics = ws_diagnostics(doc, ws);
+        let prefixes = doc.prefixes().into_iter().sorted().collect_vec();
+        let ontology_id = (doc.ontology_iri(), doc.version_iri());
+        let imports = doc.import_iris().cloned().sorted().collect_vec();
 
-        let definitions = &doc
-            .stage2
-            .definitions
+        let definitions = doc
+            .definitions()
+            .sorted_by_key(|rb| rb.value().iri.clone())
+            .collect_vec();
+        let references = doc
+            .references()
+            .sorted_by_key(|rb| rb.value())
+            .collect_vec();
+        let annotations = doc
+            .annotations()
             .iter()
-            .sorted_by_key(|rb| rb.value().iri.clone());
-        let references = &doc.stage2.references.iter().sorted_by_key(|rb| rb.value());
-        let annotations = &doc.stage2.annotations.iter().sorted_by_key(|rb| rb.value());
+            .sorted_by_key(|rb| rb.value())
+            .collect_vec();
 
-        format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes_:#?}\n\n# Queried Document\n{ontology_id:#?}{prefixes:#?}{imports:#?}\n\n# Definitions\n{definitions:#?}\n\n# References\n{references:#?}\n\n# Annotations\n{annotations:#?}")
+        format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes:#?}\n\n# Ontology ID\n{ontology_id:#?}\n\n# Imports\n{imports:#?}\n\n# Definitions\n{definitions:#?}\n\n# References\n{references:#?}\n\n# Annotations\n{annotations:#?}")
     }
 
     proptest! {
