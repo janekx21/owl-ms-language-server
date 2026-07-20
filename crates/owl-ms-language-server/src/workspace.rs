@@ -121,6 +121,7 @@ pub enum InternalDocument {
 
 /// The read/write internal document trait.
 /// Every ontology document that the user can edit should implement this trait.
+/// Tree state and querie methods are not included here, because they are document specific.
 #[enum_dispatch]
 pub trait OntologyDocument {
     /// The file path of this text file
@@ -134,8 +135,6 @@ pub trait OntologyDocument {
 
     /// Text content stored as a rope
     fn rope(&self) -> &Rope;
-
-    // The tree is not includes here, because it is document specific
 
     // Frame infos
     fn frame_infos(&self) -> impl Iterator<Item = &FrameInfo>;
@@ -182,35 +181,49 @@ pub trait OntologyDocument {
 
     /// Prefix map with key prefix and value prefix target
     fn prefixes(&self) -> HashMap<String, String>;
-    fn annotations(&self) -> &[RangeBox<Annotation>];
-
-    // Tree querie methods are not included here, because they are document specific
 
     // Document-level position queries (grammar-agnostic)
-    fn full_range(&self) -> Range;
+    /// The range of the document content.
+    fn range(&self) -> Range;
+    /// Takes a positon and returns an IRI and a range when one is found at that position.
+    /// It does not include the '<' '>' chars of a full iri.
     fn iri_at(&self, pos: Position) -> Option<RangeBox<IriAtPosition>>;
+
+    /// The range of an IRI that can be renamed. Does not include '<' '>' or prefixes.
+    /// So it should trigger like this:
+    /// ```txt
+    /// foo:bar    --->    "bar"
+    ///   ^
+    ///  Cursor
+    /// ```
     fn rename_range(&self, pos: Position) -> Option<Range>;
+    /// Generate informations for renaming
     fn rename_info_at(&self, pos: Position, new_name: &str) -> Result<Option<RenameInfo>>;
+    /// Takes a [`RenameInfo`] and returns the edits that will get performed by the rename
+    fn rename_edits(&self, rename_info: &RenameInfo) -> Vec<RangeBox<String>>;
+
+    /// Get actions for creating keywords at a position
     fn keyword_actions_at(&self, pos: Position) -> Vec<KeywordAction>;
+
+    /// Get all iris that are in a range
     fn all_iris_in_range(&self, range: Range) -> Vec<RangeBox<Iri>>;
 
     // Requests
+    /// A formatted version of the document
     fn formatted(&self, options: &FormattingSettings) -> String;
+    /// Hover information at a position
     fn hover(&self, pos: Position) -> Option<HoverResult>;
+    /// All highlights
     fn highlights(&self, range: Range) -> Highlights;
+    /// A keyword completion
     fn get_keyword_competions_at(&self, pos: Position) -> Vec<String>;
+    /// An IRI completion at a position
     fn get_iri_completions_at(
         &self,
         pos: Position,
         workspace: &Workspace,
-    ) -> Vec<(String, String, String)>;
-    fn rename_edits(
-        &self,
-        full_iri: &Iri,
-        new_iri: Option<&Iri>,
-        frame_type: FrameType,
-        original: &str,
-    ) -> Vec<(Range, String)>;
+    ) -> Vec<(String, String, String)>; // TODO can this be done in another way???
+
     fn find_iri_references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range>;
 }
 
@@ -226,10 +239,17 @@ pub struct IriAtPosition {
     pub frame_type: Option<FrameType>,
 }
 
+/// Some info for renaming
+#[derive(Debug)]
 pub struct RenameInfo {
+    /// The IRI of the thing that gets renamed
     pub full_iri: Iri,
+    /// The IRI that the thing is getting renamed to
     pub new_iri: Option<Iri>,
+    /// The frame type of the thing that gets renamed
     pub frame_type: FrameType,
+    /// The text that actualy gets inserted.
+    /// This can e.g. be an abbreviated IRI
     pub original: String,
 }
 
@@ -1156,10 +1176,6 @@ impl OntologyDocument for InternalOmnDocument {
             .collect()
     }
 
-    fn annotations(&self) -> &[RangeBox<Annotation>] {
-        &self.stage2.annotations
-    }
-
     fn formatted(&self, options: &FormattingSettings) -> String {
         let root = self.tree().root_node();
         let doc = to_doc(&root, self.rope(), options);
@@ -1197,7 +1213,7 @@ impl OntologyDocument for InternalOmnDocument {
         }
     }
 
-    fn full_range(&self) -> Range {
+    fn range(&self) -> Range {
         self.tree().root_node().range().into()
     }
 
@@ -1243,6 +1259,8 @@ impl OntologyDocument for InternalOmnDocument {
     }
 
     fn rename_range(&self, pos: Position) -> Option<Range> {
+        // self.iri_at(pos).map(|iri| iri.range().clone())
+
         let node = self
             .tree()
             .root_node()
@@ -1260,6 +1278,7 @@ impl OntologyDocument for InternalOmnDocument {
             _ => return None,
         }
         match node.kind() {
+            // Only the text not the '<' '>' so <http://a.b/c> -> http://a.b/c
             "full_iri" => {
                 let range: Range = node.range().into();
                 Some(Range {
@@ -1267,7 +1286,10 @@ impl OntologyDocument for InternalOmnDocument {
                     end: range.end.moved_left(1, self.rope()),
                 })
             }
+
             "simple_iri" => Some(node.range().into()),
+
+            // Only the text after the ':' so foo:bar -> bar
             "abbreviated_iri" => {
                 let range: Range = node.range().into();
                 let text = node_text(&node, self.rope()).to_string();
@@ -1319,13 +1341,15 @@ impl OntologyDocument for InternalOmnDocument {
                 })
             }
             "abbreviated_iri" => {
-                let iri = node_text(&node, self.rope()).to_string();
-                let (prefix, _) = iri
+                let annreviated_iri = node_text(&node, self.rope()).to_string();
+                let (prefix, _) = annreviated_iri
                     .split_once(':')
                     .expect("abbreviated_iri to contain at least one :");
                 let new_original = format!("{prefix}:{new_name}");
                 Some(RenameInfo {
-                    full_iri: self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri),
+                    full_iri: self
+                        .abbreviated_iri_to_full_iri(&annreviated_iri)
+                        .unwrap_or(annreviated_iri),
                     new_iri: self.abbreviated_iri_to_full_iri(&new_original),
                     frame_type,
                     original: new_original,
@@ -1484,13 +1508,14 @@ impl OntologyDocument for InternalOmnDocument {
         }
     }
 
-    fn rename_edits(
-        &self,
-        full_iri: &Iri,
-        new_iri: Option<&Iri>,
-        frame_type: FrameType,
-        original: &str,
-    ) -> Vec<(Range, String)> {
+    fn rename_edits(&self, rename_info: &RenameInfo) -> Vec<RangeBox<String>> {
+        let RenameInfo {
+            full_iri,
+            new_iri,
+            frame_type,
+            original,
+        } = rename_info;
+
         self.parsed_document
             .query(&ALL_QUERIES.iri_query_all)
             .into_iter()
@@ -1515,12 +1540,13 @@ impl OntologyDocument for InternalOmnDocument {
                     ),
                     _ => unreachable!(),
                 };
-                if &iri == full_iri && node_frame_type == frame_type {
-                    Ok(Some((
-                        range,
+                if &iri == full_iri && &node_frame_type == frame_type {
+                    Ok(Some(RangeBox::new(
                         new_iri
-                            .map(|new_iri| self.full_iri_to_shorter_iri(new_iri))
+                            .clone()
+                            .map(|new_iri| self.full_iri_to_shorter_iri(&new_iri))
                             .unwrap_or(original.to_string()),
+                        range,
                     )))
                 } else {
                     Ok(None)
