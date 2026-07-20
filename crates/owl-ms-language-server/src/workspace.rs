@@ -53,8 +53,7 @@ use std::{
 use tokio::task::JoinHandle;
 use tower_lsp::lsp_types::{
     self, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
-    PositionEncodingKind, SemanticToken, SymbolKind, TextDocumentContentChangeEvent, Url,
-    WorkspaceFolder,
+    PositionEncodingKind, SymbolKind, TextDocumentContentChangeEvent, Url, WorkspaceFolder,
 };
 use tree_sitter_c2rust::{InputEdit, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
@@ -183,11 +182,7 @@ pub trait OntologyDocument {
     // Requests
     fn formatted(&self, options: &FormattingSettings) -> String;
     fn hover(&self, pos: Position) -> Option<HoverResult>;
-    fn sematic_tokens(
-        &self,
-        range: Option<Range>,
-        encoding: &PositionEncodingKind,
-    ) -> Result<Vec<SemanticToken>>;
+    fn highlights(&self, range: Range) -> Highlights;
     fn get_keyword_competions_at(&self, pos: Position) -> Vec<String>;
     fn get_iri_completions_at(
         &self,
@@ -228,6 +223,8 @@ pub struct KeywordAction {
     pub new_text: String,
     pub range: Range,
 }
+
+pub type Highlights = Vec<RangeBox<u32>>;
 
 impl DocumentVariant {
     pub fn new(url: Url, version: i32, text: String) -> DocumentVariant {
@@ -274,8 +271,7 @@ impl Workspace {
     pub fn insert_internal_document(&mut self, document: DocumentVariant) -> &DocumentVariant {
         debug!("Insert internal document {document:?}");
         let path = document.path().to_path_buf();
-        self.internal_documents
-            .insert(path.clone(), document.into());
+        self.internal_documents.insert(path.clone(), document);
         self.internal_documents
             .get(&path)
             .expect("document should be present")
@@ -1360,15 +1356,11 @@ impl OntologyDocument for InternalDocument {
             .collect()
     }
 
-    fn sematic_tokens(
-        &self,
-        range: Option<Range>,
-        encoding: &PositionEncodingKind,
-    ) -> Result<Vec<SemanticToken>> {
+    fn highlights(&self, range: Range) -> Highlights {
         let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
         let query = Query::new(&LANGUAGE, query_source).expect("valid query expect");
         let mut query_cursor = QueryCursor::new();
-        if let Some(range) = range {
+        if range != Range::FULL_RANGE {
             query_cursor.set_point_range(range.into());
         }
         let matches = query_cursor.matches(
@@ -1377,8 +1369,7 @@ impl OntologyDocument for InternalDocument {
             RopeProvider::new(self.rope()),
         );
 
-        let mut tokens = vec![];
-        let mut nodes = matches
+        let nodes = matches
             .map_deref(|m| m.captures)
             .flatten()
             .map(|c| {
@@ -1391,36 +1382,13 @@ impl OntologyDocument for InternalDocument {
             })
             .collect_vec();
 
-        nodes.sort_unstable_by_key(|(n, _)| n.start_byte());
+        // TODO this is not needed right?
+        // nodes.sort_unstable_by_key(|(n, _)| n.start_byte());
 
-        let mut last_line = 0;
-        let mut last_character = 0;
-        for (node, type_index) in nodes {
-            let range: Range = node.range().into();
-            #[allow(clippy::cast_possible_truncation)]
-            let length = range.len_lsp(self.rope(), encoding) as u32;
-            let range = range.into_lsp(self.rope(), encoding)?;
-            let start = range.start;
-
-            let delta_line = start.line - last_line;
-            let delta_start = if delta_line == 0 {
-                start.character - last_character
-            } else {
-                start.character
-            };
-
-            tokens.push(SemanticToken {
-                delta_line,
-                delta_start,
-                length,
-                token_type: type_index,
-                token_modifiers_bitset: 0,
-            });
-
-            last_line = start.line;
-            last_character = start.character;
-        }
-        Ok(tokens)
+        nodes
+            .iter()
+            .map(|(node, type_index)| RangeBox::new(*type_index, node.range().into()))
+            .collect()
     }
 
     fn get_keyword_competions_at(&self, pos: Position) -> Vec<String> {
