@@ -224,7 +224,35 @@ pub trait OntologyDocument {
         workspace: &Workspace,
     ) -> Vec<(String, String, String)>; // TODO can this be done in another way???
 
-    fn find_iri_references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range>;
+    /// Searches for a declared IRI
+    fn find_iri_references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range> {
+        if include_declaration {
+            self.references()
+                .filter(|rb| rb.value() == full_iri)
+                .map(RangeBox::range)
+                .copied()
+                .collect()
+        } else {
+            debug!("def {:#?}", self.definitions().collect_vec());
+            let exclude = self
+                .definitions()
+                .filter(|rb| &rb.value().iri == full_iri)
+                .map(RangeBox::range)
+                .copied()
+                .collect_vec();
+
+            debug!("Exclude {exclude:#?}");
+
+            debug!("ref {:#?}", self.references().collect_vec());
+            // TODO this could be more accurate by including the iri range of the definition in the IriDefinition struct
+            self.references()
+                .filter(|rb| rb.value() == full_iri)
+                .map(RangeBox::range)
+                .filter(|r| !exclude.iter().any(|r2| r2.overlaps(r)))
+                .copied()
+                .collect()
+        }
+    }
 }
 
 pub(crate) enum HoverResult {
@@ -1512,49 +1540,49 @@ impl OntologyDocument for InternalOmnDocument {
             .collect_vec()
     }
 
-    fn find_iri_references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range> {
-        self.parsed_document
-            .query(&ALL_QUERIES.iri_query_references)
-            .into_iter()
-            .map(|m| {
-                let (iri, range, node_id) = match &m.captures[..] {
-                    [iri_capture] => (
-                        match iri_capture.node.kind {
-                            "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
-                            "simple_iri" | "abbreviated_iri" => self
-                                .abbreviated_iri_to_full_iri(&iri_capture.node.text)
-                                .unwrap_or(iri_capture.node.text.clone()),
-                            _ => unreachable!(),
-                        },
-                        iri_capture.node.range,
-                        iri_capture.node.id,
-                    ),
-                    _ => unreachable!(),
-                };
+    // fn find_iri_references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range> {
+    //     self.parsed_document
+    //         .query(&ALL_QUERIES.iri_query_references)
+    //         .into_iter()
+    //         .map(|m| {
+    //             let (iri, range, node_id) = match &m.captures[..] {
+    //                 [iri_capture] => (
+    //                     match iri_capture.node.kind {
+    //                         "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
+    //                         "simple_iri" | "abbreviated_iri" => self
+    //                             .abbreviated_iri_to_full_iri(&iri_capture.node.text)
+    //                             .unwrap_or(iri_capture.node.text.clone()),
+    //                         _ => unreachable!(),
+    //                     },
+    //                     iri_capture.node.range,
+    //                     iri_capture.node.id,
+    //                 ),
+    //                 _ => unreachable!(),
+    //             };
 
-                if &iri == full_iri {
-                    if !include_declaration {
-                        if let Some(node) = self.node_by_id(node_id) {
-                            let iri_context_kind = node
-                                .parent()
-                                .expect("IRIs should have parent nodes")
-                                .parent()
-                                .expect("IRI supertype should have a parent")
-                                .kind();
-                            if iri_context_kind.ends_with("frame") {
-                                return Ok(None);
-                            }
-                        }
-                    }
-                    Ok(Some(range))
-                } else {
-                    Ok(None)
-                }
-            })
-            .filter_and_log()
-            .flatten()
-            .collect_vec()
-    }
+    //             if &iri == full_iri {
+    //                 if !include_declaration {
+    //                     if let Some(node) = self.node_by_id(node_id) {
+    //                         let iri_context_kind = node
+    //                             .parent()
+    //                             .expect("IRIs should have parent nodes")
+    //                             .parent()
+    //                             .expect("IRI supertype should have a parent")
+    //                             .kind();
+    //                         if iri_context_kind.ends_with("frame") {
+    //                             return Ok(None);
+    //                         }
+    //                     }
+    //                 }
+    //                 Ok(Some(range))
+    //             } else {
+    //                 Ok(None)
+    //             }
+    //         })
+    //         .filter_and_log()
+    //         .flatten()
+    //         .collect_vec()
+    // }
 }
 
 impl InternalOmnDocument {
