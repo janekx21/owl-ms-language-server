@@ -624,7 +624,10 @@ impl LanguageServer for Backend {
 
         let reachable_docs = reachable_docs_recursive(doc, workspace, true);
 
-        if let Some(iri_at) = doc.iri_at(pos) {
+        if let Some(iri_at) = doc
+            .iri_at(pos)
+            .or_else(|| doc.iri_at(pos.moved_left(1, doc.rope())))
+        {
             let IriAtPosition {
                 full_iri: iri,
                 is_import,
@@ -893,7 +896,11 @@ impl LanguageServer for Backend {
         )?;
 
         Ok(
-            if let Some(full_iri) = doc.iri_at(pos).map(|rb| rb.value().full_iri.clone()) {
+            if let Some(full_iri) = doc
+                .iri_at(pos)
+                .or_else(|| doc.iri_at(pos.moved_left(1, doc.rope())))
+                .map(|rb| rb.value().full_iri.clone())
+            {
                 let locations = workspace
                     .internal_documents()
                     .flat_map(|doc| {
