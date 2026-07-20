@@ -1394,6 +1394,7 @@ dependencies = [
  "proptest",
  "quick-xml 0.37.5",
  "rayon",
+ "rayon-join",
  "ropey",
  "serde",
  "serde_json",
@@ -1817,6 +1818,15 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "rayon-join"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a70b6645c2840dfed6f3dcf5bda8f986cde4e0d973a64d52d88e843d83d7eb20"
+dependencies = [
+ "rayon",
 ]
 
 [[package]]
