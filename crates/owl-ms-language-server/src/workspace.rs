@@ -809,111 +809,76 @@ impl Stage2Document {
 
         // Retain
         timeit("document.edit / analysis / retain", || {
-            rayon::join(
+            rayon_join::join!(
                 || retain_vec_rb(post_change_ranges, &mut self.definitions),
-                || {
-                    rayon::join(
-                        || retain_vec_rb(post_change_ranges, &mut self.annotations),
-                        || {
-                            retain_vec_rb_on_remove(
-                                post_change_ranges,
-                                &mut self.references,
-                                |range_box| {
-                                    if let Some(values) =
-                                        self.iri_locations.get_mut(range_box.value())
-                                    {
-                                        // Remove all indexed iri locations
-                                        values.retain(|rb| rb.range() != range_box.range());
-                                    }
-                                },
-                            );
-                        },
-                    )
-                },
+                || retain_vec_rb(post_change_ranges, &mut self.annotations),
+                || retain_vec_rb_on_remove(post_change_ranges, &mut self.references, |range_box| {
+                    if let Some(values) = self.iri_locations.get_mut(range_box.value()) {
+                        // Remove all indexed iri locations
+                        values.retain(|rb| rb.range() != range_box.range());
+                    }
+                })
             );
         });
 
         // Add
 
         timeit("document.edit / analysis / extend", || {
-            rayon::join(
-                || {
-                    extend_vec_rb(post_change_ranges, &mut self.definitions, |range| {
-                        queried_document.document_definitions_in_range(parsed_document, range)
-                    });
-                },
-                || {
-                    rayon::join(
-                        || {
-                            extend_vec_rb(post_change_ranges, &mut self.references, |range| {
-                                let add = queried_document
-                                    .document_references_in_range(parsed_document, range);
+            rayon_join::join!(
+                || extend_vec_rb(post_change_ranges, &mut self.definitions, |range| {
+                    queried_document.document_definitions_in_range(parsed_document, range)
+                }),
+                || extend_vec_rb(post_change_ranges, &mut self.references, |range| {
+                    let add = queried_document.document_references_in_range(parsed_document, range);
 
-                                // Readd the index values
-                                for rb in &add {
-                                    let ranges =
-                                        self.iri_locations.entry(rb.value().into()).or_default();
-                                    ranges.push(RangeBox::new((), *rb.range()));
-                                }
+                    // Readd the index values
+                    for rb in &add {
+                        let ranges = self.iri_locations.entry(rb.value().into()).or_default();
+                        ranges.push(RangeBox::new((), *rb.range()));
+                    }
 
-                                add
-                            });
-                        },
-                        || {
-                            // Annotations
-                            // The problem was the following insert not removing a faulty info:
-                            //
-                            //  Ontology: <http://example.org/fuzz-test>
-                            //      Class: Foo
-                            //  Class: OTHER Annotations: rdfs:label "OTHER"
-                            //          Annotations: rdfs:label "Foo Label"
-                            //
-                            // After removing the OTHER class the annotations still contain
-                            // - OTHER label "Foo Label"
-                            // So the syntax change ranges did not include the annotation that followed :(
-                            //
-                            // Now the range, of each annotation, covers the whole frame.
-
-                            extend_vec_rb(post_change_ranges, &mut self.annotations, |range| {
-                                queried_document
-                                    .document_annotations_in_range(parsed_document, range)
-                            });
-                        },
-                    )
-                },
+                    add
+                }),
+                ||
+                // Annotations
+                // The problem was the following insert not removing a faulty info:
+                //
+                //  Ontology: <http://example.org/fuzz-test>
+                //      Class: Foo
+                //  Class: OTHER Annotations: rdfs:label "OTHER"
+                //          Annotations: rdfs:label "Foo Label"
+                //
+                // After removing the OTHER class the annotations still contain
+                // - OTHER label "Foo Label"
+                // So the syntax change ranges did not include the annotation that followed :(
+                //
+                // Now the range, of each annotation, covers the whole frame.
+                 extend_vec_rb(post_change_ranges, &mut self.annotations, |range| {
+                    queried_document.document_annotations_in_range(parsed_document, range)
+                })
             );
         });
 
         timeit("document.edit / analyse / cleanup", || {
-            rayon::join(
+            rayon_join::join!(
                 || {
-                    rayon::join(
-                        || {
-                            self.definitions.par_sort_unstable();
-                            self.definitions.dedup_by_key(|rb| *rb.range());
-                        },
-                        || {
-                            self.iri_locations.par_iter_mut().for_each(|(_, ranges)| {
-                                // TODO maybe remove all sorts :) (I dont think we need them actualy)
-                                // Lets keep them for now
-                                ranges.par_sort();
-                                ranges.dedup();
-                            });
-                        },
-                    )
+                    self.definitions.par_sort_unstable();
+                    self.definitions.dedup_by_key(|rb| *rb.range());
+                },
+                || self.iri_locations.par_iter_mut().for_each(|(_, ranges)| {
+                    // TODO maybe remove all sorts :) (I dont think we need them actualy)
+                    // Lets keep them for now
+                    ranges.par_sort();
+                    ranges.dedup();
+                }),
+                || {
+                    self.references.par_sort_unstable();
+                    self.references.dedup_by_key(|rb| *rb.range());
                 },
                 || {
-                    rayon::join(
-                        || {
-                            self.references.par_sort_unstable();
-                            self.references.dedup_by_key(|rb| *rb.range());
-                        },
-                        || {
-                            self.annotations.par_sort_unstable();
-                            self.annotations.dedup();
-                        },
-                    )
-                },
+                    self.annotations.par_sort_unstable();
+                    self.annotations.dedup();
+                }
             );
         });
 
@@ -941,25 +906,15 @@ impl Stage2Document {
     }
 
     fn edit_range_boxes(&mut self, changes: &[Change]) {
-        rayon::join(
-            || {
-                rayon::join(
-                    || edit_vec_rb(changes, &mut self.definitions),
-                    || edit_vec_rb(changes, &mut self.references),
-                )
-            },
-            || {
-                rayon::join(
-                    || edit_vec_rb(changes, &mut self.annotations),
-                    || {
-                        self.iri_locations.par_iter_mut().for_each(|(_, rbs)| {
-                            for rb in rbs {
-                                rb.edit(changes.iter());
-                            }
-                        });
-                    },
-                )
-            },
+        rayon_join::join!(
+            || edit_vec_rb(changes, &mut self.definitions),
+            || edit_vec_rb(changes, &mut self.references),
+            || edit_vec_rb(changes, &mut self.annotations),
+            || self.iri_locations.par_iter_mut().for_each(|(_, rbs)| {
+                for rb in rbs {
+                    rb.edit(changes.iter());
+                }
+            })
         );
     }
 }
