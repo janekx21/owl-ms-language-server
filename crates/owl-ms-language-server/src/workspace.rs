@@ -42,6 +42,7 @@ use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter::once;
 use std::path::Path;
+use std::string::ToString;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 use std::{
@@ -102,56 +103,72 @@ pub fn clear_caches() {
 /// Document container
 #[derive(Debug)]
 pub struct Workspace {
-    /// Maps a Path/URL to a document that can be internal or external
-    internal_documents: HashMap<PathBuf, DocumentVariant>,
+    /// Maps a Path/URL to a document that can only be internal
+    internal_documents: HashMap<PathBuf, InternalDocument>,
+    /// Maps a Path/URL to a document that can only be external
     external_documents: HashMap<Url, ExternalDocument>,
     folder: WorkspaceFolder,
     catalogs: Vec<Catalog>,
     pub index_handles: Vec<JoinHandle<()>>,
 }
 
+/// This enum is a proxy for dispatching [`OntologyDocument`] methods
 #[enum_dispatch(OntologyDocument)]
 #[derive(Debug, PartialEq, Eq)]
-pub enum DocumentVariant {
-    Internal(InternalDocument),
+pub enum InternalDocument {
+    InternalOmn(InternalOmnDocument),
 }
 
-/// This is a RW internal document trait
+/// The read/write internal document trait.
+/// Every ontology document that the user can edit should implement this trait.
 #[enum_dispatch]
 pub trait OntologyDocument {
+    /// The file path of this text file
     fn path(&self) -> &Path;
 
+    /// The file url of this text file
     fn uri(&self) -> &Url;
 
-    /// This version is not the ontology version but the LSP version.
+    /// LSP version. Gets incremented when editing. Not to be confused with the ontology version.
     fn version(&self) -> i32;
 
-    // Content
+    /// Text content stored as a rope
     fn rope(&self) -> &Rope;
 
     // The tree is not includes here, because it is document specific
 
     // Frame infos
-    fn all_frame_infos(&self) -> impl Iterator<Item = &FrameInfo>;
-    fn frame_info_by_iri(&self, iri: &Iri) -> Option<FrameInfo>;
+    fn frame_infos(&self) -> impl Iterator<Item = &FrameInfo>;
+    fn find_frame_info(&self, iri: &Iri) -> Option<FrameInfo>;
 
     // Analytics
     fn ontology_iri(&self) -> Option<Iri>;
     fn version_iri(&self) -> Option<Iri>;
     fn definitions(&self) -> impl Iterator<Item = &RangeBox<IriDefinition>>;
     fn references(&self) -> impl Iterator<Item = &RangeBox<Iri>>;
-    // There are also indirect imports, but they need to be resolved in the workspace
+    /// OWL ontolgies that are imported by this ontology.
+    /// There are also indirect imports, but they need to be resolved in the workspace,
+    /// because a single document has no context of the workspace.
     fn directly_imports(&self) -> impl Iterator<Item = &Url>;
     /// This includes prefixes, references and imports
     fn directly_references_doc(&self) -> impl Iterator<Item = &Url>;
 
-    // Diagnostics data
+    /// Errors/Diagnostics that are created by this document alone. This
+    /// includes e.g. syntax errors.
     fn local_diagnostics(&self) -> &[Diagnostic];
+
+    /// Map of IRIs and where to find them
     fn iri_locations(&self) -> &HashMap<Iri, Vec<RangeBox<()>>>;
 
     // IRI conversions
-    fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<String>;
+    /// Taking a (relative) abbreviated or simple IRI and resolving the (absolute) full IRI.
+    /// The reverse of [`full_iri_to_abbreviated_iri`].
+    fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<Iri>;
+    /// Taking a (absolute) full IRI and by prefixing it making it shorter into a (relative)
+    /// abbriviated or simple IRI.
+    /// The reverse of [`abbreviated_iri_to_full_iri`].
     fn full_iri_to_abbreviated_iri(&self, full_iri: &str) -> Option<String>;
+
     fn full_iri_to_shorter_iri(&self, full_iri: &str) -> String {
         self.full_iri_to_abbreviated_iri(full_iri)
             .unwrap_or_else(|| {
@@ -163,9 +180,7 @@ pub trait OntologyDocument {
             })
     }
 
-    // Prefix/import access
-    fn import_iris(&self) -> impl Iterator<Item = &Iri>;
-    fn prefix_iris(&self) -> impl Iterator<Item = &Iri>;
+    /// Prefix map with key prefix and value prefix target
     fn prefixes(&self) -> HashMap<String, String>;
     fn annotations(&self) -> &[RangeBox<Annotation>];
 
@@ -226,20 +241,20 @@ pub struct KeywordAction {
 
 pub type Highlights = Vec<RangeBox<u32>>;
 
-impl DocumentVariant {
-    pub fn new(url: Url, version: i32, text: String) -> DocumentVariant {
-        DocumentVariant::Internal(InternalDocument::new(url, version, text))
+impl InternalDocument {
+    pub fn new(url: Url, version: i32, text: String) -> InternalDocument {
+        InternalDocument::InternalOmn(InternalOmnDocument::new(url, version, text))
     }
 
     pub fn edit(
         self,
         params: DidChangeTextDocumentParams,
         encoding: &PositionEncodingKind,
-    ) -> Result<DocumentVariant> {
+    ) -> Result<InternalDocument> {
         match self {
-            DocumentVariant::Internal(doc) => doc
+            InternalDocument::InternalOmn(doc) => doc
                 .edit_inner(params, encoding)
-                .map(DocumentVariant::Internal),
+                .map(InternalDocument::InternalOmn),
         }
     }
 }
@@ -268,7 +283,7 @@ impl Workspace {
 
     /// Inserts an internal document into the workspace and returns a reference to it.
     /// This will replace the document with the same URL if there was one.
-    pub fn insert_internal_document(&mut self, document: DocumentVariant) -> &DocumentVariant {
+    pub fn insert_internal_document(&mut self, document: InternalDocument) -> &InternalDocument {
         debug!("Insert internal document {document:?}");
         let path = document.path().to_path_buf();
         self.internal_documents.insert(path.clone(), document);
@@ -277,13 +292,13 @@ impl Workspace {
             .expect("document should be present")
     }
 
-    pub fn get_internal_document(&self, path: &Path) -> Result<&DocumentVariant> {
+    pub fn get_internal_document(&self, path: &Path) -> Result<&InternalDocument> {
         self.internal_documents
             .get(path)
             .ok_or(Error::InternalDocumentNotFound(path.to_path_buf()))
     }
 
-    pub fn take_internal_document(&mut self, path: &Path) -> Result<DocumentVariant> {
+    pub fn take_internal_document(&mut self, path: &Path) -> Result<InternalDocument> {
         self.internal_documents
             .remove(path)
             .ok_or(Error::InternalDocumentNotFound(path.to_path_buf()))
@@ -295,7 +310,7 @@ impl Workspace {
 
     pub fn internal_documents(
         &self,
-    ) -> std::collections::hash_map::Values<'_, PathBuf, DocumentVariant> {
+    ) -> std::collections::hash_map::Values<'_, PathBuf, InternalDocument> {
         self.internal_documents.values()
     }
 
@@ -338,7 +353,7 @@ impl Workspace {
 
     pub fn all_frame_infos(&self) -> impl Iterator<Item = &FrameInfo> {
         self.internal_documents()
-            .flat_map(OntologyDocument::all_frame_infos)
+            .flat_map(OntologyDocument::frame_infos)
     }
 
     /// Returns the path for the cache folder
@@ -363,7 +378,7 @@ impl Workspace {
         self.internal_documents
             .values()
             .flat_map(|doc| {
-                doc.all_frame_infos()
+                doc.frame_infos()
                     .flat_map(
                         |item| -> Box<dyn Iterator<Item = (String, Iri, FrameInfo)>> {
                             if item.iri.to_lowercase().contains(&partial_lower) {
@@ -408,7 +423,7 @@ impl Workspace {
         let internal_infos = self
             .internal_documents
             .values()
-            .filter_map(|dm| dm.frame_info_by_iri(iri));
+            .filter_map(|dm| dm.find_frame_info(iri));
 
         internal_infos
             .chain(external_infos)
@@ -427,7 +442,7 @@ impl Workspace {
             .filter_map(|url| {
                 if let Some(doc) = workspace.document_by_url(url) {
                     match &doc {
-                        DocumentReference::Internal(doc) => doc.frame_info_by_iri(iri),
+                        DocumentReference::Internal(doc) => doc.find_frame_info(iri),
                         DocumentReference::External(doc) => doc.get_frame_info(iri),
                     }
                 } else {
@@ -439,7 +454,7 @@ impl Workspace {
             .tree_reduce(FrameInfo::merge)
     }
 
-    pub fn node_info(&self, node: &Node, doc: &DocumentVariant) -> String {
+    pub fn node_info(&self, node: &Node, doc: &InternalDocument) -> String {
         match node.kind() {
             "class_frame" | "annotation_property_frame" | "class_iri" => {
                 // Goto first named child and repeat
@@ -612,7 +627,7 @@ impl Workspace {
             .unwrap_or_default()
         {
             "omn" => {
-                let document = InternalDocument::new_with_path(
+                let document = InternalOmnDocument::new_with_path(
                     original_url,
                     -1,
                     document_text,
@@ -709,21 +724,21 @@ fn cache_doc(workspace: &Workspace, doc: &ExternalDocument) {
 #[derive(Debug, PartialEq, Eq)]
 pub enum DocumentReference<'a> {
     // Not boxing this is fine because the size ratio is just about 1.6
-    Internal(&'a DocumentVariant),
+    Internal(&'a InternalDocument),
     External(&'a ExternalDocument),
 }
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)] // Not boxing this is fine because the size ratio is just about 1.6
 pub enum Document {
-    Internal(DocumentVariant),
+    Internal(InternalDocument),
     External(ExternalDocument),
 }
 
-/// Internal documents are OMN files on disk.
+/// Internal omn ontologies are OMN files on disk.
 /// Text -> Parsed -> Queried -> Analyzed -> ``InternalDocument``
 #[derive(Debug)]
-struct InternalDocument {
+struct InternalOmnDocument {
     id: DocumentId,
     parsed_document: ParsedDocument,
     pub queried_document: QueriedDocument,
@@ -756,6 +771,8 @@ pub struct Stage2Document {
 }
 
 impl Stage2Document {
+    // TODO maybe https://crates.io/crates/rayon-join
+    #[allow(clippy::too_many_lines)] // rayon join takes up most of the lines :(
     fn update(
         &mut self,
         changes: &[Change],
@@ -892,9 +909,14 @@ impl Stage2Document {
                 )
             });
 
-            // self.references = queried_document.document_references(parsed_document);
             self.local_diagnostics = parsed_document.syntax_errors();
             self.all_frame_infos = all_frame_infos;
+
+            // TODO split into seperate functions
+            let (directly_reachable_import_urls, directly_reachable_other_urls) =
+                queried_document.reachable_urls(&self.references, &id.uri);
+            self.directly_reachable_import_urls = directly_reachable_import_urls;
+            self.directly_reachable_other_urls = directly_reachable_other_urls;
         });
     }
 
@@ -1015,7 +1037,7 @@ pub enum DiagnosticKind {
     },
 }
 
-impl Display for InternalDocument {
+impl Display for InternalOmnDocument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -1028,20 +1050,20 @@ impl Display for InternalDocument {
     }
 }
 
-impl core::hash::Hash for InternalDocument {
+impl core::hash::Hash for InternalOmnDocument {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.path().hash(state);
         Hash::hash(&self.version(), state);
     }
 }
-impl Eq for InternalDocument {}
-impl PartialEq for InternalDocument {
+impl Eq for InternalOmnDocument {}
+impl PartialEq for InternalOmnDocument {
     fn eq(&self, other: &Self) -> bool {
         self.rope() == other.rope()
     }
 }
 
-impl OntologyDocument for InternalDocument {
+impl OntologyDocument for InternalOmnDocument {
     fn path(&self) -> &Path {
         &self.id.path
     }
@@ -1058,11 +1080,11 @@ impl OntologyDocument for InternalDocument {
         &self.parsed_document.rope
     }
 
-    fn all_frame_infos(&self) -> impl Iterator<Item = &FrameInfo> {
+    fn frame_infos(&self) -> impl Iterator<Item = &FrameInfo> {
         self.stage2.all_frame_infos.values()
     }
 
-    fn frame_info_by_iri(&self, iri: &Iri) -> Option<FrameInfo> {
+    fn find_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
         self.stage2.all_frame_infos.get(iri).cloned()
     }
 
@@ -1124,14 +1146,6 @@ impl OntologyDocument for InternalDocument {
             })
             .sorted_by_key(String::len)
             .next()
-    }
-
-    fn import_iris(&self) -> impl Iterator<Item = &Iri> {
-        self.queried_document.imports.iter().map(RangeBox::value)
-    }
-
-    fn prefix_iris(&self) -> impl Iterator<Item = &Iri> {
-        self.queried_document.prefixes.values().map(RangeBox::value)
     }
 
     fn prefixes(&self) -> HashMap<String, String> {
@@ -1562,7 +1576,7 @@ impl OntologyDocument for InternalDocument {
     }
 }
 
-impl InternalDocument {
+impl InternalOmnDocument {
     pub fn tree(&self) -> &Tree {
         &self.parsed_document.tree
     }
@@ -1579,12 +1593,17 @@ impl InternalDocument {
         node_by_id(&self.parsed_document, id)
     }
 
-    pub fn new(uri: Url, version: i32, text: String) -> InternalDocument {
+    pub fn new(uri: Url, version: i32, text: String) -> InternalOmnDocument {
         let path = uri.to_file_path().expect("URL should be a file path");
         Self::new_with_path(uri, version, text, path)
     }
 
-    pub fn new_with_path(uri: Url, version: i32, text: String, path: PathBuf) -> InternalDocument {
+    pub fn new_with_path(
+        uri: Url,
+        version: i32,
+        text: String,
+        path: PathBuf,
+    ) -> InternalOmnDocument {
         let id = DocumentId { path, uri, version };
 
         let tree = timeit("create_document / parse", || {
@@ -1602,7 +1621,7 @@ impl InternalDocument {
 
         debug!("Stage2Document -> InternalDocument");
 
-        InternalDocument {
+        InternalOmnDocument {
             id,
             parsed_document,
             queried_document,
@@ -1614,7 +1633,7 @@ impl InternalDocument {
         self, // TODO #30 do a mut instead so the analytics do not get dropped
         params: DidChangeTextDocumentParams,
         encoding: &PositionEncodingKind,
-    ) -> Result<InternalDocument> {
+    ) -> Result<InternalOmnDocument> {
         let new_version = params.text_document.version;
         if self.version() >= new_version {
             return Ok(self); // no change needed
@@ -1633,7 +1652,7 @@ impl InternalDocument {
 
         debug!("content changes {:#?}", params.content_changes);
 
-        let InternalDocument {
+        let InternalOmnDocument {
             id,
             parsed_document,
             mut queried_document,
@@ -1689,7 +1708,7 @@ impl InternalDocument {
             );
         });
 
-        let doc = InternalDocument {
+        let doc = InternalOmnDocument {
             id,
             parsed_document,
             queried_document,
@@ -1702,7 +1721,7 @@ impl InternalDocument {
 
 /// Take this document, generate the diagnostics in workspace context and send the results via the client.
 pub async fn publish_lsp_diagnostics(
-    doc: &DocumentVariant,
+    doc: &InternalDocument,
     workspace: &Workspace,
     encoding: &PositionEncodingKind,
     client: &tower_lsp::Client,
@@ -1725,7 +1744,7 @@ pub async fn publish_lsp_diagnostics(
         .await;
 }
 
-pub fn diagnostics(doc: &DocumentVariant, workspace: &Workspace) -> Vec<Diagnostic> {
+pub fn diagnostics(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnostic> {
     let workspace_diagnostics = timeit("semantic errors", || semantic_errors(doc, workspace));
     doc.local_diagnostics()
         .iter()
@@ -1735,7 +1754,7 @@ pub fn diagnostics(doc: &DocumentVariant, workspace: &Workspace) -> Vec<Diagnost
 }
 
 pub fn inlay_hint(
-    doc: &DocumentVariant,
+    doc: &InternalDocument,
     range: Range,
     encoding: &PositionEncodingKind,
     workspace: &Workspace,
@@ -1783,7 +1802,7 @@ pub fn inlay_hint(
 /// Returns all document URL's that can be reached (imports, prefixes, ...) from this internal document.
 /// Does not load anything.
 pub fn reachable_docs_recursive(
-    doc: &DocumentVariant,
+    doc: &InternalDocument,
     workspace: &Workspace,
     include_prefix: bool,
 ) -> Vec<Url> {
@@ -1791,7 +1810,7 @@ pub fn reachable_docs_recursive(
 }
 
 fn reachable_docs_recursive_helper(
-    doc: &DocumentVariant,
+    doc: &InternalDocument,
     result: &mut HashSet<Url>,
     workspace: &Workspace,
     include_prefix: bool,
@@ -1952,7 +1971,7 @@ impl ParsedDocument {
 
                 let possible_nodes = possible_nodes(node)
                     .iter()
-                    .map(std::string::ToString::to_string)
+                    .map(ToString::to_string)
                     .collect();
                 debug!("Possible nodes: {possible_nodes:#?}");
                 debug!("Parent chain: {parent_chain:#?}");
@@ -2359,7 +2378,11 @@ impl QueriedDocument {
         let imports = self
             .imports
             .iter()
-            .filter_map(|rb| Url::parse(rb.value()).ok())
+            .filter_map(|rb| {
+                Url::parse(rb.value())
+                    .inspect_err(|url_err| error!("Import URL invalid {url_err}"))
+                    .ok()
+            })
             .collect_vec();
 
         // Other urls include prefixes
@@ -3455,7 +3478,7 @@ pub fn node_text(node: &Node, rope: &Rope) -> String {
         .map_or(String::new(), |rs| rs.to_string())
 }
 
-fn semantic_errors(doc: &DocumentVariant, workspace: &Workspace) -> Vec<Diagnostic> {
+fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     let uses: &HashSet<Iri> = &doc.references().map(|rb| rb.value().clone()).collect();
@@ -3490,16 +3513,17 @@ fn semantic_errors(doc: &DocumentVariant, workspace: &Workspace) -> Vec<Diagnost
     }
 
     // TODO this is a quick fix for now. The correct way will be not not include prefixes in the used Iris
-    let prefixes: HashSet<&Iri> = doc.prefix_iris().collect();
-    let import_iris: Vec<&Iri> = doc.import_iris().collect();
+    let prefixes = doc.prefixes();
+    let prefix_iris: HashSet<&Iri> = prefixes.values().collect();
+    let import_iris: Vec<&str> = doc.directly_imports().map(Url::as_str).collect();
 
     let ontology_iri = doc.ontology_iri();
     let version_iri = doc.version_iri();
 
     for diff in uses
         .difference(&defines)
-        .filter(|iri| !prefixes.contains(*iri))
-        .filter(|iri| !import_iris.contains(iri))
+        .filter(|iri| !prefix_iris.contains(*iri))
+        .filter(|iri| !import_iris.contains(&iri.as_str()))
     {
         // Skip ontology and version IRIs
         if let Some(ref iri) = ontology_iri {
@@ -3898,7 +3922,7 @@ fn frame_to_doc(
 // This can not be cached, because some dependencies are maybe not loaded.
 // Therefore the result could change indepenent of the document.
 fn reachable_docs_recursive_cached(
-    doc: &DocumentVariant,
+    doc: &InternalDocument,
     workspace: &Workspace,
     include_prefix: bool,
 ) -> Vec<Url> {
@@ -3940,7 +3964,7 @@ mod tests {
     #[test(tokio::test)]
     async fn internal_document_formatted_should_format_correctly() {
         let tmp_url = TmpUrl::new();
-        let doc = InternalDocument::new(
+        let doc = InternalOmnDocument::new(
             tmp_url.url(),
             -1,
             indoc! {"
@@ -3995,7 +4019,7 @@ mod tests {
     #[test(tokio::test)]
     async fn internal_document_formatted_with_description_should_format_correctly() {
         let tmp_url = TmpUrl::new();
-        let doc = InternalDocument::new(
+        let doc = InternalOmnDocument::new(
             tmp_url.url(),
             -1,
             indoc! {r"
@@ -4041,7 +4065,7 @@ mod tests {
     #[test(tokio::test)]
     async fn internal_document_formatted_without_frame_order_should_format_correctly() {
         let tmp_url = TmpUrl::new();
-        let doc = InternalDocument::new(
+        let doc = InternalOmnDocument::new(
             tmp_url.url(),
             -1,
             indoc! {r"
@@ -4076,7 +4100,7 @@ mod tests {
     #[test(tokio::test)]
     async fn internal_document_abbreviated_iri_to_full_iri_should_convert_abbreviated_iri() {
         let tmp_url = TmpUrl::new();
-        let doc = InternalDocument::new(
+        let doc = InternalOmnDocument::new(
             tmp_url.url(),
             -1,
             "
@@ -4105,7 +4129,7 @@ mod tests {
     #[test]
     fn internal_document_abbreviated_iri_to_full_iri_should_convert_simple_iri() {
         let tmp_url = TmpUrl::new();
-        let doc = InternalDocument::new(
+        let doc = InternalOmnDocument::new(
             tmp_url.url(),
             -1,
             "
@@ -4130,7 +4154,7 @@ mod tests {
     #[test]
     fn internal_document_prefix_should_return_all_prefixes() {
         let tmp_url = TmpUrl::new();
-        let doc = InternalDocument::new(
+        let doc = InternalOmnDocument::new(
             tmp_url.url(),
             -1,
             "
@@ -4180,7 +4204,7 @@ mod tests {
     fn internal_document_get_frame_info_should_show_definitions() {
         // Arrange
         let tmp_url = TmpUrl::new();
-        let doc = InternalDocument::new(
+        let doc = InternalOmnDocument::new(
             tmp_url.url(),
             -1,
             r#"
@@ -4194,7 +4218,7 @@ mod tests {
         );
 
         // Act
-        let info = doc.frame_info_by_iri(&"A".to_string());
+        let info = doc.find_frame_info(&"A".to_string());
 
         // Assert
         info!("{doc:#?}");
@@ -4278,7 +4302,7 @@ mod tests {
     #[test]
     fn full_iri_to_abbreviated_iri_should_work_for_simple_iris() {
         let tmp_url = TmpUrl::new();
-        let doc = InternalDocument::new(
+        let doc = InternalOmnDocument::new(
             tmp_url.url(),
             -1,
             "
@@ -4295,7 +4319,7 @@ mod tests {
     #[test]
     fn full_iri_to_abbreviated_iri_should_work_for_simple_iris_with_empty_prefix() {
         let tmp_url = TmpUrl::new();
-        let doc = InternalDocument::new(
+        let doc = InternalOmnDocument::new(
             tmp_url.url(),
             -1,
             "

@@ -40,8 +40,8 @@ use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{
     inlay_hint as document_inlay_hint, publish_lsp_diagnostics, reachable_docs_recursive, Document,
-    DocumentReference, DocumentVariant, FormattingSettings, Highlights, HoverResult, IriAtPosition,
-    KeywordAction, OntologyDocument, RenameInfo,
+    DocumentReference, FormattingSettings, Highlights, HoverResult, InternalDocument,
+    IriAtPosition, KeywordAction, OntologyDocument, RenameInfo,
 };
 
 // Re-export for benchmarks
@@ -430,7 +430,7 @@ impl LanguageServer for Backend {
             let mut sync = self.write_sync().await;
 
             let workspace = sync.get_or_insert_workspace_mut(&file_url);
-            let internal_document = DocumentVariant::new(
+            let internal_document = InternalDocument::new(
                 file_url.clone(),
                 params.text_document.version,
                 params.text_document.text,
@@ -747,7 +747,7 @@ impl LanguageServer for Backend {
         let (doc, _) = sync.get_internal_document(&url)?;
 
         let highlights = doc.highlights(Range::FULL_RANGE);
-        let tokens = highlights_to_semantic_tokens(highlights, doc.rope(), self.encoding())?;
+        let tokens = highlights_to_semantic_tokens(&highlights, doc.rope(), self.encoding())?;
 
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
@@ -766,7 +766,7 @@ impl LanguageServer for Backend {
         debug!("semantic_tokens_range at {url}:{range}");
 
         let highlights = doc.highlights(range);
-        let tokens = highlights_to_semantic_tokens(highlights, doc.rope(), self.encoding())?;
+        let tokens = highlights_to_semantic_tokens(&highlights, doc.rope(), self.encoding())?;
 
         return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
             result_id: None,
@@ -781,7 +781,7 @@ impl LanguageServer for Backend {
         let url = params.text_document.uri;
         let sync = self.read_sync().await;
         let (doc, workspace) = sync.get_internal_document(&url)?;
-        let infos = doc.all_frame_infos();
+        let infos = doc.frame_infos();
         return Ok(Some(DocumentSymbolResponse::Flat(
             infos
                 .flat_map(|info| {
@@ -1035,7 +1035,7 @@ fn single_path_response(path: &Path) -> GotoDefinitionResponse {
 
 fn missin_iri_actions(
     pos: Position,
-    doc: &DocumentVariant,
+    doc: &InternalDocument,
     ws: &Workspace,
     encoding: &PositionEncodingKind,
 ) -> Result<Vec<CodeActionOrCommand>> {
@@ -1083,7 +1083,7 @@ fn missin_iri_actions(
 
 fn keyword_actions(
     pos: Position,
-    doc: &DocumentVariant,
+    doc: &InternalDocument,
     encoding: &PositionEncodingKind,
 ) -> Result<Vec<CodeActionOrCommand>> {
     doc.keyword_actions_at(pos)
@@ -1145,7 +1145,7 @@ impl USizeextra for usize {}
 
 /// Takes an ordered list of highlights and returns a likst of delta semantic tokens
 fn highlights_to_semantic_tokens(
-    highlights: Highlights,
+    highlights: &Highlights,
     rope: &Rope,
     encoding: &PositionEncodingKind,
 ) -> Result<Vec<SemanticToken>> {

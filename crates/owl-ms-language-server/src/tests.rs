@@ -467,7 +467,7 @@ async fn backend_hover_on_class_should_show_datatype_label() {
 
     let ontology = r#"
         Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-        Prefix: : <http://invalid/o#>
+        Prefix: : <http://example.com/o#>
         Ontology: HoverOnto
             Class: Janek
                 Annotations:
@@ -3968,7 +3968,7 @@ async fn backend_did_change_should_update_ontology_id() {
     let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
 
     let ontology = indoc! { r#"
-        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+        Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
             Class: SomeClass
                 Annotations: rdfs:label "Some Class annotation"
     "#};
@@ -3997,8 +3997,8 @@ async fn backend_did_change_should_update_ontology_id() {
             content_changes: vec![TextDocumentContentChangeEvent {
                 text: "othername".into(),
                 range: Some(lsp_types::Range {
-                    start: lsp_types::Position::new(0, 26),
-                    end: lsp_types::Position::new(0, 34),
+                    start: lsp_types::Position::new(0, 30),
+                    end: lsp_types::Position::new(0, 38),
                 }),
                 range_length: None,
             }],
@@ -4018,14 +4018,20 @@ async fn backend_did_change_should_update_ontology_id() {
     assert_eq!(
         document.rope().to_string(),
         indoc! { r#"
-            Ontology: <http://invalid/othername> <http://invalid/ontology/123>
+            Ontology: <http://example.com/othername> <http://example.com/ontology/123>
                 Class: SomeClass
                     Annotations: rdfs:label "Some Class annotation"
         "#}
     );
 
-    assert_eq!(document.ontology_iri(), Some("http://invalid/othername".to_string()));
-    assert_eq!(document.version_iri(), Some("http://invalid/ontology/123".to_string()));
+    assert_eq!(
+        document.ontology_iri(),
+        Some("http://example.com/othername".to_string())
+    );
+    assert_eq!(
+        document.version_iri(),
+        Some("http://example.com/ontology/123".to_string())
+    );
 }
 
 #[test(tokio::test)]
@@ -4037,7 +4043,7 @@ async fn backend_did_change_with_syntax_change_should_update_ontology_id() {
     let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
 
     let ontology = indoc! { r#"
-        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+        Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
             Class: SomeClass
                 Annotations: rdfs:label "Some Class annotation"
     "#};
@@ -4066,8 +4072,8 @@ async fn backend_did_change_with_syntax_change_should_update_ontology_id() {
             content_changes: vec![TextDocumentContentChangeEvent {
                 text: "Class: Foo".into(),
                 range: Some(lsp_types::Range {
-                    start: lsp_types::Position::new(0, 36),
-                    end: lsp_types::Position::new(0, 65),
+                    start: lsp_types::Position::new(0, 40),
+                    end: lsp_types::Position::new(0, 73),
                 }),
                 range_length: None,
             }],
@@ -4087,13 +4093,16 @@ async fn backend_did_change_with_syntax_change_should_update_ontology_id() {
     assert_eq!(
         document.rope().to_string(),
         indoc! { r#"
-            Ontology: <http://invalid/ontology> Class: Foo
+            Ontology: <http://example.com/ontology> Class: Foo
                 Class: SomeClass
                     Annotations: rdfs:label "Some Class annotation"
         "#}
     );
 
-    assert_eq!(document.ontology_iri(), Some("http://invalid/ontology".to_string()));
+    assert_eq!(
+        document.ontology_iri(),
+        Some("http://example.com/ontology".to_string())
+    );
     assert_eq!(document.version_iri(), None);
 }
 
@@ -4106,9 +4115,9 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
     let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
 
     let ontology = indoc! { r#"
-        Prefix: foo: <http://invalid/foo>
-        Prefix: bar: <http://invalid/bar>
-        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+        Prefix: foo: <http://example.com/foo>
+        Prefix: bar: <http://example.com/bar>
+        Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
             Class: SomeClass
                 Annotations: rdfs:label "Some Class annotation"
     "#};
@@ -4136,7 +4145,7 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
             },
             content_changes: vec![
                 TextDocumentContentChangeEvent {
-                    text: "Ontology: <http://invalid/othername> <http://invalid/ontology/321>\n"
+                    text: "Ontology: <http://example.com/othername> <http://example.com/ontology/321>\n"
                         .into(),
                     range: Some(lsp_types::Range {
                         start: lsp_types::Position::new(1, 0),
@@ -4177,17 +4186,23 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
     assert_eq!(
         document.rope().to_string(),
         indoc! { r#"
-            Prefix: foo: <http://invalid/foo>
-            Ontology: <http://invalid/othername> <http://invalid/ontology/321>
-            #Prefix: bar: <http://invalid/bar>
-            #Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            Prefix: foo: <http://example.com/foo>
+            Ontology: <http://example.com/othername> <http://example.com/ontology/321>
+            #Prefix: bar: <http://example.com/bar>
+            #Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
                 Class: SomeClass
                     Annotations: rdfs:label "Some Class annotation"
         "#}
     );
 
-    assert_eq!(document.ontology_iri(), Some("http://invalid/othername".to_string()));
-    assert_eq!(document.version_iri(), Some("http://invalid/ontology/321".to_string()));
+    assert_eq!(
+        document.ontology_iri(),
+        Some("http://example.com/othername".to_string())
+    );
+    assert_eq!(
+        document.version_iri(),
+        Some("http://example.com/ontology/321".to_string())
+    );
 }
 
 #[test(tokio::test)]
@@ -4199,8 +4214,8 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports() {
     let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
 
     let ontology = indoc! { r#"
-        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
-            Import: <http://invalid/some-other-ontology>
+        Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
+            Import: <http://example.com/some-other-ontology>
             Class: SomeClass
                 Annotations: rdfs:label "Some Class annotation"
     "#};
@@ -4250,14 +4265,17 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports() {
     assert_eq!(
         document.rope().to_string(),
         indoc! { r#"
-            Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
-            #    Import: <http://invalid/some-other-ontology>
+            Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
+            #    Import: <http://example.com/some-other-ontology>
                 Class: SomeClass
                     Annotations: rdfs:label "Some Class annotation"
         "#}
     );
 
-    let imports = document.import_iris().cloned().collect_vec();
+    let imports = document
+        .directly_imports()
+        .map(|url| url.to_string())
+        .collect_vec();
 
     assert_eq!(imports, Vec::<String>::new());
 }
@@ -4271,13 +4289,13 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports_2() {
     let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
 
     let ontology = indoc! { r#"
-        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
-        #    Import: <http://invalid/some-other-ontology>
+        Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
+        #    Import: <http://example.com/some-other-ontology>
 
-        #    Import: <http://invalid/some-other-ontology>
-            Import: <http://invalid/A>
-        #    Import: <http://invalid/B>
-        #    Import: <http://invalid/some-other-ontology>
+        #    Import: <http://example.com/some-other-ontology>
+            Import: <http://example.com/A>
+        #    Import: <http://example.com/B>
+        #    Import: <http://example.com/some-other-ontology>
 
             Class: SomeClass
                 Annotations: rdfs:label "Some Class annotation"
@@ -4346,24 +4364,30 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports_2() {
     assert_eq!(
         document.rope().to_string(),
         indoc! { r#"
-            Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
-                Import: <http://invalid/some-other-ontology>
+            Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
+                Import: <http://example.com/some-other-ontology>
 
-            #    Import: <http://invalid/some-other-ontology>
-            #    Import: <http://invalid/A>
-                Import: <http://invalid/B>
-            #    Import: <http://invalid/some-other-ontology>
+            #    Import: <http://example.com/some-other-ontology>
+            #    Import: <http://example.com/A>
+                Import: <http://example.com/B>
+            #    Import: <http://example.com/some-other-ontology>
 
                 Class: SomeClass
                     Annotations: rdfs:label "Some Class annotation"
         "#}
     );
 
-    let imports = document.import_iris().cloned().collect_vec();
+    let imports = document
+        .directly_imports()
+        .map(|url| url.to_string())
+        .collect_vec();
 
     assert_eq!(
         imports,
-        vec!["http://invalid/some-other-ontology", "http://invalid/B"]
+        vec![
+            "http://example.com/some-other-ontology",
+            "http://example.com/B"
+        ]
     );
 }
 
@@ -4377,14 +4401,14 @@ async fn backend_did_change_with_large_syntax_change_should_update_prefixes() {
 
     let ontology = indoc! { r#"
         # -----------
-        #    Prefix: c: <http://invalid/some-other-ontology>
+        #    Prefix: c: <http://example.com/some-other-ontology>
 
-        #    Prefix: d: <http://invalid/some-other-ontology>
-            Prefix: a: <http://invalid/A>
-        #    Prefix: b: <http://invalid/B>
-        #    Prefix: e: <http://invalid/some-other-ontology>
+        #    Prefix: d: <http://example.com/some-other-ontology>
+            Prefix: a: <http://example.com/A>
+        #    Prefix: b: <http://example.com/B>
+        #    Prefix: e: <http://example.com/some-other-ontology>
 
-        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+        Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
             Class: SomeClass
                 Annotations: rdfs:label "Some Class annotation"
     "#};
@@ -4453,14 +4477,14 @@ async fn backend_did_change_with_large_syntax_change_should_update_prefixes() {
         document.rope().to_string(),
         indoc! { r#"
             # -----------
-                Prefix: c: <http://invalid/some-other-ontology>
+                Prefix: c: <http://example.com/some-other-ontology>
 
-            #    Prefix: d: <http://invalid/some-other-ontology>
-            #    Prefix: a: <http://invalid/A>
-                Prefix: b: <http://invalid/B>
-            #    Prefix: e: <http://invalid/some-other-ontology>
+            #    Prefix: d: <http://example.com/some-other-ontology>
+            #    Prefix: a: <http://example.com/A>
+                Prefix: b: <http://example.com/B>
+            #    Prefix: e: <http://example.com/some-other-ontology>
 
-            Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
                 Class: SomeClass
                     Annotations: rdfs:label "Some Class annotation"
         "#}
@@ -4471,10 +4495,10 @@ async fn backend_did_change_with_large_syntax_change_should_update_prefixes() {
     assert_eq!(
         prefixes,
         vec![
-            ("b".to_string(), "http://invalid/B".to_string()),
+            ("b".to_string(), "http://example.com/B".to_string()),
             (
                 "c".to_string(),
-                "http://invalid/some-other-ontology".to_string()
+                "http://example.com/some-other-ontology".to_string()
             ),
         ]
     );
@@ -4640,7 +4664,7 @@ mod fuzz {
         Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
         Prefix: oth: <http://invalis/other/>
         Ontology: <http://example.org/fuzz-test>
-            Import: <http://invalid/ontology>
+            Import: <http://example.com/ontology>
         
             Class: Foo
                 Annotations: rdfs:label "Foo Label"
@@ -4700,7 +4724,7 @@ mod fuzz {
         let (doc, ws) = sync.get_internal_document(ontology_url).unwrap();
         let initial_rope = doc.rope().to_string();
         let initial_frame_infos = doc
-            .all_frame_infos()
+            .frame_infos()
             .map(
                 |FrameInfo {
                      iri,
@@ -4720,7 +4744,11 @@ mod fuzz {
         let diagnostics = ws_diagnostics(doc, ws);
         let prefixes = doc.prefixes().into_iter().sorted().collect_vec();
         let ontology_id = (doc.ontology_iri(), doc.version_iri());
-        let imports = doc.import_iris().cloned().sorted().collect_vec();
+        let imports = doc
+            .directly_imports()
+            .map(|url| url.to_string())
+            .sorted()
+            .collect_vec();
 
         let definitions = doc
             .definitions()
