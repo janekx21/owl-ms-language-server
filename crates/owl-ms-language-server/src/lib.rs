@@ -22,6 +22,7 @@ use itertools::Itertools;
 use log::{debug, error, info, warn};
 use pos::Position;
 use range::Range;
+use ropey::Rope;
 use std::collections::{HashMap, HashSet, LinkedList};
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
@@ -39,8 +40,8 @@ use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{
     inlay_hint as document_inlay_hint, publish_lsp_diagnostics, reachable_docs_recursive, Document,
-    DocumentReference, DocumentVariant, FormattingSettings, HoverResult,
-    IriAtPosition, KeywordAction, OntologyDocument, RenameInfo,
+    DocumentReference, DocumentVariant, FormattingSettings, Highlights, HoverResult, IriAtPosition,
+    KeywordAction, OntologyDocument, RenameInfo,
 };
 
 // Re-export for benchmarks
@@ -91,8 +92,7 @@ impl Backend {
             // So my error type is not send and terefore we need the conversion to ok()
             #[allow(clippy::match_result_ok)]
             if let Some((document, workspace)) = sync.get_internal_document(&file_url).ok() {
-                publish_lsp_diagnostics(document, workspace, encoding, &mini_backend.client)
-                    .await;
+                publish_lsp_diagnostics(document, workspace, encoding, &mini_backend.client).await;
 
                 // Create diagnostics for files that depend on this file
                 for other_internal_doc in workspace.internal_documents() {
@@ -625,7 +625,11 @@ impl LanguageServer for Backend {
         let reachable_docs = reachable_docs_recursive(doc, workspace, true);
 
         if let Some(iri_at) = doc.iri_at(pos) {
-            let IriAtPosition { full_iri: iri, is_import, .. } = iri_at.value();
+            let IriAtPosition {
+                full_iri: iri,
+                is_import,
+                ..
+            } = iri_at.value();
             debug!("Try goto definition of {iri}");
 
             if *is_import {
@@ -736,12 +740,14 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
-        debug!("semantic_tokens_full at {}", params.text_document.uri);
         let url = params.text_document.uri;
+        debug!("semantic_tokens_full at {url}");
+
         let sync = self.read_sync().await;
         let (doc, _) = sync.get_internal_document(&url)?;
 
-        let tokens = doc.sematic_tokens(None, self.encoding())?;
+        let highlights = doc.highlights(Range::FULL_RANGE);
+        let tokens = highlights_to_semantic_tokens(highlights, doc.rope(), self.encoding())?;
 
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
@@ -753,12 +759,14 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensRangeParams,
     ) -> Result<Option<SemanticTokensRangeResult>> {
-        debug!("semantic_tokens_range at {}", params.text_document.uri);
         let url = params.text_document.uri;
         let sync = self.read_sync().await;
         let (doc, _) = sync.get_internal_document(&url)?;
         let range = Range::from_lsp(&params.range, doc.rope(), self.encoding())?;
-        let tokens = doc.sematic_tokens(Some(range), self.encoding())?;
+        debug!("semantic_tokens_range at {url}:{range}");
+
+        let highlights = doc.highlights(range);
+        let tokens = highlights_to_semantic_tokens(highlights, doc.rope(), self.encoding())?;
 
         return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
             result_id: None,
@@ -884,29 +892,31 @@ impl LanguageServer for Backend {
             self.encoding(),
         )?;
 
-        Ok(if let Some(full_iri) = doc.iri_at(pos).map(|rb| rb.value().full_iri.clone()) {
-            let locations = workspace
-                .internal_documents()
-                .flat_map(|doc| {
-                    doc.find_iri_references(&full_iri, params.context.include_declaration)
-                        .into_iter()
-                        .filter_map(|range| {
-                            range
-                                .into_lsp(doc.rope(), self.encoding())
-                                .inspect_log()
-                                .ok()
-                        })
-                        .map(|range| Location {
-                            uri: Url::from_file_path(doc.path())
-                                .expect("File path should be a valid URL"),
-                            range,
-                        })
-                })
-                .collect_vec();
-            Some(locations)
-        } else {
-            None
-        })
+        Ok(
+            if let Some(full_iri) = doc.iri_at(pos).map(|rb| rb.value().full_iri.clone()) {
+                let locations = workspace
+                    .internal_documents()
+                    .flat_map(|doc| {
+                        doc.find_iri_references(&full_iri, params.context.include_declaration)
+                            .into_iter()
+                            .filter_map(|range| {
+                                range
+                                    .into_lsp(doc.rope(), self.encoding())
+                                    .inspect_log()
+                                    .ok()
+                            })
+                            .map(|range| Location {
+                                uri: Url::from_file_path(doc.path())
+                                    .expect("File path should be a valid URL"),
+                                range,
+                            })
+                    })
+                    .collect_vec();
+                Some(locations)
+            } else {
+                None
+            },
+        )
     }
 
     async fn prepare_rename(
@@ -919,7 +929,8 @@ impl LanguageServer for Backend {
         let (doc, _) = sync.get_internal_document(&url)?;
         let pos: Position = Position::from_lsp(params.position, doc.rope(), self.encoding())?;
 
-        let range = doc.rename_range(pos)
+        let range = doc
+            .rename_range(pos)
             .or_else(|| {
                 // check one position left because renames should work when cursor is at end (inclusive) of a word
                 debug!("prepare rename try one position left");
@@ -950,17 +961,22 @@ impl LanguageServer for Backend {
             self.encoding(),
         )?;
 
-        let rename_info = doc.rename_info_at(pos, &new_name)?
-            .or_else(|| {
-                // check one position left because renames should work when cursor is at end (inclusive) of a word
-                debug!("prepare rename try one position left");
-                doc.rename_info_at(pos.moved_left(1, doc.rope()), &new_name)
-                    .inspect_err(|e: &Error| error!("{e}"))
-                    .ok()
-                    .flatten()
-            });
+        let rename_info = doc.rename_info_at(pos, &new_name)?.or_else(|| {
+            // check one position left because renames should work when cursor is at end (inclusive) of a word
+            debug!("prepare rename try one position left");
+            doc.rename_info_at(pos.moved_left(1, doc.rope()), &new_name)
+                .inspect_err(|e: &Error| error!("{e}"))
+                .ok()
+                .flatten()
+        });
 
-        if let Some(RenameInfo { full_iri, new_iri, frame_type, original }) = rename_info {
+        if let Some(RenameInfo {
+            full_iri,
+            new_iri,
+            frame_type,
+            original,
+        }) = rename_info
+        {
             debug!("renaming resolved iris from {full_iri:?} to {new_iri:?}");
             let changes = workspace
                 .internal_documents()
@@ -1027,9 +1043,7 @@ fn missin_iri_actions(
     // to internal one should take place somehow. Not needed now I think.
     // Also I dont know how they are matched
 
-    let frame_type = doc
-        .iri_at(pos)
-        .and_then(|rb| rb.value().frame_type);
+    let frame_type = doc.iri_at(pos).and_then(|rb| rb.value().frame_type);
 
     let diagnostics = workspace::diagnostics(doc, ws);
     let diagnostics_under_cursor = diagnostics
@@ -1074,26 +1088,32 @@ fn keyword_actions(
 ) -> Result<Vec<CodeActionOrCommand>> {
     doc.keyword_actions_at(pos)
         .into_iter()
-        .map(|KeywordAction { parent_name, new_text, range }| {
-            let lsp_range = range.into_lsp(doc.rope(), encoding)?;
-            Ok(CodeActionOrCommand::CodeAction(CodeAction {
-                title: format!("In {parent_name} add {}", new_text.trim()),
-                edit: Some(WorkspaceEdit {
-                    changes: Some(HashMap::from([(
-                        doc.uri().clone(),
-                        vec![TextEdit {
-                            range: lsp_types::Range {
-                                start: lsp_range.end,
-                                end: lsp_range.end,
-                            },
-                            new_text,
-                        }],
-                    )])),
+        .map(
+            |KeywordAction {
+                 parent_name,
+                 new_text,
+                 range,
+             }| {
+                let lsp_range = range.into_lsp(doc.rope(), encoding)?;
+                Ok(CodeActionOrCommand::CodeAction(CodeAction {
+                    title: format!("In {parent_name} add {}", new_text.trim()),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(HashMap::from([(
+                            doc.uri().clone(),
+                            vec![TextEdit {
+                                range: lsp_types::Range {
+                                    start: lsp_range.end,
+                                    end: lsp_range.end,
+                                },
+                                new_text,
+                            }],
+                        )])),
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            }))
-        })
+                }))
+            },
+        )
         .collect()
 }
 
@@ -1122,3 +1142,42 @@ where
 }
 
 impl USizeextra for usize {}
+
+/// Takes an ordered list of highlights and returns a likst of delta semantic tokens
+fn highlights_to_semantic_tokens(
+    highlights: Highlights,
+    rope: &Rope,
+    encoding: &PositionEncodingKind,
+) -> Result<Vec<SemanticToken>> {
+    let mut tokens = Vec::new();
+    let mut last_line = 0;
+    let mut last_character = 0;
+    for rb in highlights.iter().sorted_unstable() {
+        let range = rb.range();
+        // This is the index of the semantic token.
+        let token_type = *rb.value();
+        #[allow(clippy::cast_possible_truncation)]
+        let length = range.len_lsp(rope, encoding) as u32;
+        let range = range.into_lsp(rope, encoding)?;
+        let start = range.start;
+
+        let delta_line = start.line - last_line;
+        let delta_start = if delta_line == 0 {
+            start.character - last_character
+        } else {
+            start.character
+        };
+
+        tokens.push(SemanticToken {
+            delta_line,
+            delta_start,
+            length,
+            token_type,
+            token_modifiers_bitset: 0,
+        });
+
+        last_line = start.line;
+        last_character = start.character;
+    }
+    Ok(tokens)
+}
