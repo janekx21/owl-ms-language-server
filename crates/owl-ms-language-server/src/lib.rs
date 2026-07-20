@@ -538,7 +538,7 @@ impl LanguageServer for Backend {
         // TODO just send the diff
         let text = doc.formatted(&options);
 
-        let range = doc.full_range();
+        let range = doc.range();
 
         return Ok(Some(vec![TextEdit {
             range: range.into_lsp(doc.rope(), self.encoding())?,
@@ -970,28 +970,22 @@ impl LanguageServer for Backend {
                 .flatten()
         });
 
-        if let Some(RenameInfo {
-            full_iri,
-            new_iri,
-            frame_type,
-            original,
-        }) = rename_info
-        {
-            debug!("renaming resolved iris from {full_iri:?} to {new_iri:?}");
+        if let Some(rename_info) = rename_info {
+            debug!("renaming resolved iris from {rename_info:?}");
             let changes = workspace
                 .internal_documents()
                 .map(|doc| {
                     let edits = doc
-                        .rename_edits(&full_iri, new_iri.as_ref(), frame_type, &original)
+                        .rename_edits(&rename_info)
                         .into_iter()
-                        .filter_map(|(range, str)| {
-                            range
+                        .filter_map(|rb| {
+                            rb.range()
                                 .into_lsp(doc.rope(), self.encoding())
                                 .inspect_log()
                                 .ok()
                                 .map(|range| TextEdit {
                                     range,
-                                    new_text: str,
+                                    new_text: rb.value().clone(),
                                 })
                         })
                         .collect_vec();
@@ -1050,7 +1044,7 @@ fn missin_iri_actions(
         .into_iter()
         .filter(|diagnostic| diagnostic.range.contains(pos));
 
-    let end_lsp = doc.full_range().end.into_lsp(doc.rope(), encoding)?;
+    let end_lsp = doc.range().end.into_lsp(doc.rope(), encoding)?;
     let create_missing_iri_actions = diagnostics_under_cursor.filter_map(|d| match &d.kind {
         workspace::DiagnosticKind::MissingIri(full_iri) => {
             let iri = doc.full_iri_to_shorter_iri(full_iri);

@@ -4758,13 +4758,10 @@ mod fuzz {
             .references()
             .sorted_by_key(|rb| rb.value())
             .collect_vec();
-        let annotations = doc
-            .annotations()
-            .iter()
-            .sorted_by_key(|rb| rb.value())
-            .collect_vec();
 
-        format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes:#?}\n\n# Ontology ID\n{ontology_id:#?}\n\n# Imports\n{imports:#?}\n\n# Definitions\n{definitions:#?}\n\n# References\n{references:#?}\n\n# Annotations\n{annotations:#?}")
+        // Annotations should be part of the frame infos
+
+        format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes:#?}\n\n# Ontology ID\n{ontology_id:#?}\n\n# Imports\n{imports:#?}\n\n# Definitions\n{definitions:#?}\n\n# References\n{references:#?}")
     }
 
     proptest! {

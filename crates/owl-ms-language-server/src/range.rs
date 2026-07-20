@@ -219,6 +219,7 @@ fn translate_pos_pre_to_post(
     }
 }
 
+// TODO convert to rangebox
 #[derive(Debug)]
 pub struct Change {
     pub range: Range,
