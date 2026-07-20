@@ -3,7 +3,7 @@ use tower_lsp::lsp_types::{Url, WorkspaceFolder};
 
 use crate::{
     error::{Error, Result as MyResult},
-    workspace::{DocumentVariant, Workspace},
+    workspace::{InternalDocument, Workspace},
 };
 
 #[derive(Default, Debug)]
@@ -75,7 +75,7 @@ impl SyncBackend {
     }
 
     /// Convinience function to fetch internal document
-    pub fn get_internal_document(&self, url: &Url) -> MyResult<(&DocumentVariant, &Workspace)> {
+    pub fn get_internal_document(&self, url: &Url) -> MyResult<(&InternalDocument, &Workspace)> {
         let workspace = self
             .get_workspace(url)
             .ok_or(Error::DocumentNotFound(url.clone()))?;
@@ -88,7 +88,7 @@ impl SyncBackend {
     pub fn take_internal_document(
         &mut self,
         url: &Url,
-    ) -> MyResult<(DocumentVariant, &mut Workspace)> {
+    ) -> MyResult<(InternalDocument, &mut Workspace)> {
         let workspace = self.get_or_insert_workspace_mut(url);
         let path = url.to_file_path().unwrap(); // TODO
         Ok((workspace.take_internal_document(&path)?, workspace))
