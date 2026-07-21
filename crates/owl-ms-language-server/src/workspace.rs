@@ -12,7 +12,7 @@ use crate::range::{Change, RangeBox};
 use crate::web::{url_to_filename, HttpClient};
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
-    rope_provider::RopeProvider, LANGUAGE,
+    rope_provider::RopeProvider, LANGUAGE_OMN,
 };
 use cached::{cached, Cached};
 use enum_dispatch::enum_dispatch;
@@ -61,7 +61,7 @@ use tree_sitter_c2rust::{InputEdit, Node, Parser, Query, QueryCursor, StreamingI
 static GLOBAL_PARSER: LazyLock<Mutex<Parser>> = LazyLock::new(|| {
     let mut parser = Parser::new();
     parser
-        .set_language(&LANGUAGE)
+        .set_language(&LANGUAGE_OMN)
         .expect("the language to be valid");
     parser.set_logger(Some(Box::new(|type_, str| match type_ {
         tree_sitter_c2rust::LogType::Parse => trace!(target: "tree-sitter-parse", "{str}"),
@@ -1379,7 +1379,7 @@ impl OntologyDocument for InternalOmnDocument {
 
     fn highlights(&self, range: Range) -> Highlights {
         let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
-        let query = Query::new(&LANGUAGE, query_source).expect("valid query expect");
+        let query = Query::new(&LANGUAGE_OMN, query_source).expect("valid query expect");
         let mut query_cursor = QueryCursor::new();
         if range != Range::FULL_RANGE {
             query_cursor.set_point_range(range.into());
@@ -1421,18 +1421,18 @@ impl OntologyDocument for InternalOmnDocument {
             .expect("The pos to be in at least one node");
 
         let mut lei = if node.parent().is_none() {
-            LANGUAGE
+            LANGUAGE_OMN
                 .lookahead_iterator(1)
                 .expect("state 1 should be valid")
         } else {
-            let mut lei = LANGUAGE.lookahead_iterator(node.parse_state());
+            let mut lei = LANGUAGE_OMN.lookahead_iterator(node.parse_state());
             while lei.is_none() {
                 let parent = node.parent();
                 if let Some(parent) = parent {
                     node = parent;
-                    lei = LANGUAGE.lookahead_iterator(node.parse_state());
+                    lei = LANGUAGE_OMN.lookahead_iterator(node.parse_state());
                 } else {
-                    lei = LANGUAGE.lookahead_iterator(1);
+                    lei = LANGUAGE_OMN.lookahead_iterator(1);
                 }
             }
             lei.expect("while none loop should have set it to some")
@@ -2077,7 +2077,7 @@ fn possible_nodes(node: Node<'_>) -> HashSet<&'static str> {
 
     let state = first_leaf(node).parse_state();
 
-    let names = LANGUAGE
+    let names = LANGUAGE_OMN
         .lookahead_iterator(state)
         .map(|mut it| it.iter_names().collect())
         .unwrap_or_default();

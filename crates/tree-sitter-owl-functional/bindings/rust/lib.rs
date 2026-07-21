@@ -5,8 +5,7 @@
 //!
 //! ```
 //! let code = r#"
-//! Ontology: Example
-//!   Class: Person
+//! Ontology(<http://www.example.com/iri> <http://www.example.com/viri>)
 //! "#;
 //! let mut parser = tree_sitter_c2rust::Parser::new();
 //! let language = tree_sitter_owl_functional::LANGUAGE;

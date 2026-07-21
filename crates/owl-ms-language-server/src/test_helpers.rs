@@ -1,5 +1,6 @@
-use crate::{catalog::Catalog, web::HttpClient, workspace, Backend, LANGUAGE};
 use crate::workspace::OntologyDocument;
+use crate::LANGUAGE_OFN;
+use crate::{catalog::Catalog, web::HttpClient, workspace, Backend, LANGUAGE_OMN};
 use itertools::Itertools;
 use log::info;
 use std::{collections::HashMap, fs, path::Path};
@@ -88,9 +89,15 @@ fn arrange_workspace_member(member: WorkspaceMember, path: &Path) {
     }
 }
 
-pub fn arrange_parser() -> Parser {
+pub fn arrange_parser_omn() -> Parser {
     let mut parser = Parser::new();
-    parser.set_language(&LANGUAGE).unwrap();
+    parser.set_language(&LANGUAGE_OMN).unwrap();
+    parser
+}
+
+pub fn arrange_parser_ofn() -> Parser {
+    let mut parser = Parser::new();
+    parser.set_language(&LANGUAGE_OFN).unwrap();
     parser
 }
 

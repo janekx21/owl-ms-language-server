@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::LazyLock};
 use serde::{Deserialize, Serialize};
 use tree_sitter_c2rust::Query;
 
-use crate::LANGUAGE;
+use crate::LANGUAGE_OMN;
 
 pub static NODE_TYPES: LazyLock<HashMap<String, StaticNode>> = LazyLock::new(|| {
     let node_types: Vec<StaticNode> =
@@ -64,11 +64,11 @@ pub struct AllQueries {
 
 // All queries are in one struct for easy testing. Invalid ones are detected by unit tests.
 pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
-    import_query: Query::new(&LANGUAGE, "(import (iri)@iri)").expect("valid query"),
-    iri_query_all: Query::new(&LANGUAGE, "(iri)@iri").expect("valid query"),
+    import_query: Query::new(&LANGUAGE_OMN, "(import (iri)@iri)").expect("valid query"),
+    iri_query_all: Query::new(&LANGUAGE_OMN, "(iri)@iri").expect("valid query"),
     // Just IRIs that are references to frames
     iri_query_references: Query::new(
-        &LANGUAGE,
+        &LANGUAGE_OMN,
         "
         [
           (datatype_iri (_)@iri)
@@ -82,7 +82,7 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
     )
     .expect("valid query"),
     annotation_query: Query::new(
-        &LANGUAGE,
+        &LANGUAGE_OMN,
         "
         (_ iri: (_)@frame_iri
             (annotations
@@ -107,7 +107,7 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
     )
     .expect("valid query"),
     frame_query: Query::new(
-        &LANGUAGE,
+        &LANGUAGE_OMN,
         "
             [
                 (datatype_frame (datatype_iri)@frame_iri)
@@ -121,14 +121,14 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
     )
     .expect("valid query"),
     prefix: Query::new(
-        &LANGUAGE,
+        &LANGUAGE_OMN,
         "
             (prefix_declaration (prefix_name)@name (full_iri)@iri)
         ",
     )
     .expect("valid query"),
     ontology: Query::new(
-        &LANGUAGE,
+        &LANGUAGE_OMN,
         "
             (ontology iri: (_)@iri version_iri: (_)@version_iri ? )
         ",

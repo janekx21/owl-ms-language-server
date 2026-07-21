@@ -29,10 +29,36 @@ use tree_sitter_c2rust::Tree;
 /////////////////////////
 
 #[test]
-fn parse_ontology_should_work() {
+fn parse_ofn_should_work() {
+    let mut parser = arrange_parser_ofn();
+
+    let source_code = "Prefix(:=<http://www.example.com/iri#>)
+Prefix(o:=<http://www.example.com/iri#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://www.example.com/iri>
+<http://www.example.com/viri>
+
+)";
+
+    // Act
+    let tree = parser.parse(source_code, None).unwrap();
+
+    // Assert
+    info!("{tree:?}");
+    assert_eq!(tree.root_node().has_error(), false);
+}
+
+#[test]
+fn parse_omn_should_work() {
     setup();
     // Arrange
-    let mut parser = arrange_parser();
+    let mut parser = arrange_parser_omn();
 
     let source_code = "Ontology: Foobar";
 
@@ -56,7 +82,7 @@ fn reparse_ontology_node_ids() {
     // Just for exploration purposes
     setup();
     // Arrange
-    let mut parser = arrange_parser();
+    let mut parser = arrange_parser_omn();
 
     let source_code = indoc! {"
 Ontology: Foobar

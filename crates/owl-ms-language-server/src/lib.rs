@@ -41,7 +41,7 @@ use crate::web::HttpClient;
 use crate::workspace::{
     inlay_hint as document_inlay_hint, publish_lsp_diagnostics, reachable_docs_recursive, Document,
     DocumentReference, FormattingSettings, Highlights, HoverResult, InternalDocument,
-    IriAtPosition, KeywordAction, OntologyDocument, RenameInfo,
+    IriAtPosition, KeywordAction, OntologyDocument,
 };
 
 // Re-export for benchmarks
@@ -49,7 +49,9 @@ pub use crate::workspace::clear_caches;
 
 // Constants
 
-pub static LANGUAGE: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_ms::LANGUAGE.into());
+pub static LANGUAGE_OMN: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_ms::LANGUAGE.into());
+pub static LANGUAGE_OFN: LazyLock<Language> =
+    LazyLock::new(|| tree_sitter_owl_functional::LANGUAGE.into());
 
 // Model
 
