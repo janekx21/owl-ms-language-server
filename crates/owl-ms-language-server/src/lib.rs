@@ -1180,7 +1180,7 @@ fn highlights_to_semantic_tokens(
 
         let delta_line = start.line - last_line;
         let delta_start = if delta_line == 0 {
-            start.character - last_character
+            start.character.saturating_sub(last_character)
         } else {
             start.character
         };

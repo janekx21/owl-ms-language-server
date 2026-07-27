@@ -287,7 +287,7 @@ pub fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) ->
     match str {
         "keyword" => 15, // SemanticTokenType::KEYWORD,
         "operator" | "punctuation.delimiter" | "punctuation.bracket" | "punctuation.special" => 21, // SemanticTokenType::OPERATOR,
-        "variable.buildin" | "constant.builtin" | "variable" => 8, // SemanticTokenType::VARIABLE,
+        "variable.builtin" | "constant.builtin" | "variable" => 8, // SemanticTokenType::VARIABLE,
         "string" | "string.special" => 18,                         // SemanticTokenType::STRING,
         "number" => 19,                                            // SemanticTokenType::NUMBER,
         "comment" => 17,                                           // SemanticTokenType::COMMENT,

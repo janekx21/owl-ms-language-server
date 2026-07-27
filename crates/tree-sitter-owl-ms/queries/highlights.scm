@@ -81,7 +81,7 @@
 "max" @operator
 "exactly" @operator
 
-(keyword_self) @variable.buildin
+(keyword_self) @variable.builtin
 
 (string_literal_no_language) @string
 (string_literal_with_language) @string

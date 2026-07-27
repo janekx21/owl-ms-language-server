@@ -227,6 +227,7 @@ pub trait OntologyDocument {
 
             debug!("ref {:#?}", self.references());
             // TODO this could be more accurate by including the iri range of the definition in the IriDefinition struct
+            // TODO drops intra frame references
             self.references()
                 .into_iter()
                 .filter(|rb| rb.value() == full_iri)
@@ -681,6 +682,15 @@ impl Workspace {
                 );
                 Ok(Document::Internal(document.into()))
             }
+            "ofn" => {
+                let document = InternalOfnDocument::new_with_path(
+                    original_url,
+                    -1,
+                    document_text,
+                    path.to_path_buf(),
+                );
+                Ok(Document::Internal(document.into()))
+            }
             "owl" | "owx" => {
                 let document = ExternalDocument::new(document_text, path_url)?;
                 Ok(Document::External(document))
@@ -727,8 +737,8 @@ fn read_cached_doc(workspace: &Workspace, url: &Url) -> Result<Option<Document>>
         }
     }
     if !cache_valid {
-        fs::remove_file(&file_name)?;
-        return Ok(None);
+        fs::remove_file(web_cache.join(&file_name))?;
+        return Ok(None); // No error, just refetch
     }
 
     if let Ok(some) = fs::read(web_cache.join(file_name)) {

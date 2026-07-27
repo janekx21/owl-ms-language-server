@@ -53,6 +53,7 @@ pub struct InternalOfnDocument {
 
 impl InternalOfnDocument {
     pub fn new(uri: Url, version: i32, text: String) -> Self {
+        // TODO what should happen with non local files?
         let path = uri.to_file_path().expect("URL should be a file path");
         Self::new_with_path(uri, version, text, path)
     }
