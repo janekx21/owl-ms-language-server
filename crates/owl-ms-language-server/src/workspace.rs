@@ -4,7 +4,7 @@ use crate::consts::{
     INTEGER_IRI, LABEL_IRI, STRING_IRI,
 };
 use crate::error::{Error, Result, ResultExt, ResultIterator};
-use crate::functional::InternalFnDocument;
+use crate::functional::InternalOfnDocument;
 use crate::pos::Position;
 use crate::queries::{
     self, treesitter_highlight_capture_into_semantic_token_type_index, NODE_TYPES,
@@ -118,7 +118,7 @@ pub struct Workspace {
 #[derive(Debug, PartialEq, Eq)]
 pub enum InternalDocument {
     InternalOmn(InternalOmnDocument),
-    InternalOfn(InternalFnDocument),
+    InternalOfn(InternalOfnDocument),
 }
 
 /// The read/write internal document trait.
@@ -306,7 +306,7 @@ impl InternalDocument {
             Lang::Omn => {
                 InternalDocument::InternalOmn(InternalOmnDocument::new(url, version, text))
             }
-            Lang::Ofn => InternalDocument::InternalOfn(InternalFnDocument::new(url, version, text)),
+            Lang::Ofn => InternalDocument::InternalOfn(InternalOfnDocument::new(url, version, text)),
         }
     }
 
@@ -319,9 +319,9 @@ impl InternalDocument {
             InternalDocument::InternalOmn(doc) => doc
                 .edit_inner(params, encoding)
                 .map(InternalDocument::InternalOmn),
-            InternalDocument::InternalOfn(internal_ofn_document) => {
-                Ok(InternalDocument::InternalOfn(internal_ofn_document))
-            } // TODO
+            InternalDocument::InternalOfn(doc) => doc
+                .edit_inner(params, encoding)
+                .map(InternalDocument::InternalOfn),
         }
     }
 }
@@ -1696,7 +1696,9 @@ impl InternalOmnDocument {
             debug!("Updating changed range (pre edit) {change:?}");
         }
 
-        let (parsed_document, old_tree) = parsed_document.edit_parsed_document(changes.iter())?;
+        let mut parser = lock_global_omn_parser();
+
+        let (parsed_document, old_tree) = parsed_document.edit_parsed_document(changes.iter(), &mut parser)?;
 
         // Increment ID
         let id = DocumentId {
@@ -1906,7 +1908,7 @@ fn reachable_docs_recursive_helper(
 const RANGE_GROW: u32 = 1;
 
 /// This is a combination of syntax and text changes
-fn post_change_ranges(
+pub fn post_change_ranges(
     changes: &[Change],
     parsed_document: &ParsedDocument,
     old_tree: &Tree,
@@ -1923,7 +1925,7 @@ fn post_change_ranges(
         .collect_vec()
 }
 
-fn changes_from_lsp(
+pub fn changes_from_lsp(
     params: DidChangeTextDocumentParams,
     encoding: &PositionEncodingKind,
     rope: &Rope,
@@ -1940,9 +1942,10 @@ fn changes_from_lsp(
 }
 
 impl ParsedDocument {
-    fn edit_parsed_document<'a>(
+    pub fn edit_parsed_document<'a>(
         self,
         changes: impl Iterator<Item = &'a Change>,
+        parser: &mut Parser,
     ) -> Result<(Self, Tree)> {
         let ParsedDocument { tree, rope, .. } = self;
         let mut old_tree = tree;
@@ -1953,19 +1956,18 @@ impl ParsedDocument {
         }
 
         let rope_provider = RopeProvider::new(&new_rope);
-        let new_tree = {
-            let mut parser_guard = lock_global_omn_parser();
-            // This takes a long time 190ms/16k
+        let new_tree = 
+            // This takes a long time 190ms/16k lines
             timeit("document.edit / parsing", || {
-                parser_guard
+                parser
                     .parse_with_options(
                         &mut |byte_idx, _| rope_provider.chunk_callback(byte_idx),
                         Some(&old_tree),
                         None,
                     )
                     .expect("language to be set, no timeout to be used, no cancellation flag")
-            })
-        };
+            });
+        
         let parsed_document = ParsedDocument {
             tree: new_tree,
             rope: new_rope,

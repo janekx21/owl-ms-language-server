@@ -6,22 +6,22 @@ use std::{
 };
 
 use itertools::Itertools;
-use log::trace;
+use log::{debug, trace};
 use ropey::Rope;
-use tower_lsp::lsp_types::Url;
+use tower_lsp::lsp_types::{DidChangeTextDocumentParams, PositionEncodingKind, Url};
 use tree_sitter_c2rust::{Language, Parser, Query, QueryCursor, StreamingIterator};
 
 use crate::{
     debugging::timeit,
-    error::Result,
+    error::{Error, Result},
     pos::Position,
     queries::treesitter_highlight_capture_into_semantic_token_type_index,
     range::{Range, RangeBox},
     rope_provider::RopeProvider,
     workspace::{
-        lock_global_omn_parser, Diagnostic, DocumentId, FormattingSettings, FrameInfo, Highlights,
-        HoverResult, Iri, IriAtPosition, IriDefinition, KeywordAction, OntologyDocument,
-        ParsedDocument, RenameInfo, Workspace,
+        changes_from_lsp, lock_global_omn_parser, post_change_ranges, Diagnostic, DocumentId,
+        FormattingSettings, FrameInfo, Highlights, HoverResult, Iri, IriAtPosition, IriDefinition,
+        KeywordAction, OntologyDocument, ParsedDocument, RenameInfo, Workspace,
     },
 };
 
@@ -43,7 +43,7 @@ thread_local! {
 }
 
 #[derive(Debug)]
-pub struct InternalFnDocument {
+pub struct InternalOfnDocument {
     id: DocumentId,
     parsed_document: ParsedDocument,
     // TODO
@@ -51,7 +51,7 @@ pub struct InternalFnDocument {
     // pub stage2: Stage2Document,
 }
 
-impl InternalFnDocument {
+impl InternalOfnDocument {
     pub fn new(uri: Url, version: i32, text: String) -> Self {
         let path = uri.to_file_path().expect("URL should be a file path");
         Self::new_with_path(uri, version, text, path)
@@ -86,17 +86,106 @@ impl InternalFnDocument {
             // stage2,
         }
     }
+
+    pub fn edit_inner(
+        self, // TODO #30 do a mut instead so the analytics do not get dropped
+        params: DidChangeTextDocumentParams,
+        encoding: &PositionEncodingKind,
+    ) -> Result<Self> {
+        let new_version = params.text_document.version;
+        if self.version() >= new_version {
+            return Ok(self); // no change needed
+        }
+
+        if params
+            .content_changes
+            .iter()
+            .any(|change| change.range.is_none())
+        {
+            // Change the whole file
+            return Err(Error::LspFeatureNotSupported(
+                "Whole file (null range) change event",
+            ));
+        }
+
+        debug!("content changes {:#?}", params.content_changes);
+
+        let InternalOfnDocument {
+            id,
+            parsed_document,
+        } = self;
+
+        let changes = changes_from_lsp(params, encoding, parsed_document.rope());
+
+        // Note that these ranges are in the pre edit form
+        for change in &changes {
+            debug!("Updating changed range (pre edit) {change:?}");
+        }
+
+        let (parsed_document, old_tree) = GLOBAL_OFN_PARSER.with(|parser| {
+            parsed_document.edit_parsed_document(changes.iter(), &mut parser.borrow_mut())
+        })?;
+
+        // Increment ID
+        let id = DocumentId {
+            version: new_version,
+            ..id
+        };
+
+        // This is a combination of syntax and text changes
+        // let mut post_change_ranges: &[Range] =
+        //     &post_change_ranges(&changes, &parsed_document, &old_tree);
+
+        // debug!("Post change ranges: {post_change_ranges:#?}");
+
+        // let dirty_prefix = timeit("document.edit / queries", || {
+        //     queried_document.update(&changes, post_change_ranges, &parsed_document)
+        // });
+
+        // // The problem is that the references and definitions (and other stuff) depends on
+        // // prefixes. So the change in a prefix can change a lot of references that are not
+        // // located at the prefix.
+        // // Solution 1: Remove the dependency and move the resolution of abbriv iri -> full iri
+        // // into a later step.
+        // // Solution 2: Mark all references dirty when ever a prefix changes, which is not often.
+        // // ==========
+        // // I Chose Solution 2
+        // // Do a whole new analysis when the prefixes change!
+        // if dirty_prefix {
+        //     info!("document.edit Dirty prefix. New post change range is the max range.");
+        //     post_change_ranges = &[Range::FULL_RANGE];
+        // }
+
+        // timeit("document.edit / analyze", || {
+        //     stage2.update(
+        //         &changes,
+        //         post_change_ranges,
+        //         &parsed_document,
+        //         &queried_document,
+        //         &id,
+        //     );
+        // });
+
+        let doc = Self {
+            id,
+            parsed_document,
+            // queried_document,
+            // stage2,
+        };
+
+        Ok(doc)
+    }
 }
 
-impl PartialEq for InternalFnDocument {
+impl PartialEq for InternalOfnDocument {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
 
-impl Eq for InternalFnDocument {}
+impl Eq for InternalOfnDocument {}
 
-impl OntologyDocument for InternalFnDocument {
+impl OntologyDocument for InternalOfnDocument {
     #[doc = " The file path of this text file"]
     fn path(&self) -> &Path {
         self.id.path.as_path()
