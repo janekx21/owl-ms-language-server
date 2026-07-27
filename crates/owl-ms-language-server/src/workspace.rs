@@ -1,15 +1,12 @@
 use crate::catalog::CatalogUri;
 use crate::consts::{
-    child_keywords_for_kind, get_fixed_infos, keyword_hover_info, DECIMAL_IRI, FLOAT_IRI,
-    INTEGER_IRI, LABEL_IRI, STRING_IRI,
+    get_fixed_infos, keyword_hover_info, LABEL_IRI, STRING_IRI,
 };
 use crate::error::{Error, Result, ResultExt, ResultIterator};
 use crate::functional::InternalOfnDocument;
 use crate::manchester::InternalOmnDocument;
 use crate::pos::Position;
-use crate::queries::{
-    self, treesitter_highlight_capture_into_semantic_token_type_index, NODE_TYPES,
-};
+use crate::queries::NODE_TYPES;
 use crate::range::{Change, RangeBox};
 use crate::web::{url_to_filename, HttpClient};
 use crate::{
@@ -27,9 +24,7 @@ use horned_owl::model::{
 use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
-use pretty::RcDoc;
-use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
-use rayon::slice::ParallelSliceMut;
+use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use ropey::Rope;
 use sophia::api::graph::{Graph, MutableGraph};
 use sophia::api::ns::Namespace;
@@ -284,7 +279,7 @@ pub enum Lang {
 }
 
 impl InternalDocument {
-    pub fn new(url: Url, version: i32, text: String, lang: Lang) -> InternalDocument {
+    pub fn new(url: Url, version: i32, text: String, lang: &Lang) -> InternalDocument {
         match lang {
             Lang::Omn => {
                 InternalDocument::InternalOmn(InternalOmnDocument::new(url, version, text))
@@ -2306,7 +2301,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
         }
 
         if let Some(vec) = doc.iri_locations().get(diff) {
-            for ele in vec.iter() {
+            for ele in *vec {
                 diagnostics.push(Diagnostic {
                     range: *ele.range(),
                     kind: DiagnosticKind::MissingIri(diff.clone()),

@@ -1,16 +1,10 @@
-use crate::catalog::CatalogUri;
 use crate::consts::{
-    child_keywords_for_kind, get_fixed_infos, keyword_hover_info, DECIMAL_IRI, FLOAT_IRI,
-    INTEGER_IRI, LABEL_IRI, STRING_IRI,
+    child_keywords_for_kind, keyword_hover_info, DECIMAL_IRI, FLOAT_IRI, INTEGER_IRI, STRING_IRI,
 };
-use crate::error::{Error, Result, ResultExt, ResultIterator};
-use crate::functional::InternalOfnDocument;
+use crate::error::{Error, Result, ResultIterator};
 use crate::pos::Position;
-use crate::queries::{
-    self, treesitter_highlight_capture_into_semantic_token_type_index, NODE_TYPES,
-};
+use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type_index};
 use crate::range::{Change, RangeBox};
-use crate::web::{url_to_filename, HttpClient};
 use crate::workspace::{
     build_iri_locations, capture_by_name, changes_from_lsp, edit_vec_rb, extend_vec_rb,
     iri_to_parent_url, node_by_id, node_text, post_change_ranges, retain_vec_rb,
@@ -20,52 +14,23 @@ use crate::workspace::{
     ParsedDocument, RenameInfo, UnwrappedQueryMatch, Workspace,
 };
 use crate::{
-    catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
-    rope_provider::RopeProvider, LANGUAGE_OMN,
+    debugging::timeit, queries::ALL_QUERIES, range::Range, rope_provider::RopeProvider,
+    LANGUAGE_OMN,
 };
-use cached::{cached, Cached};
-use enum_dispatch::enum_dispatch;
-use horned_owl::model::Component::{self, AnnotationAssertion};
-use horned_owl::model::{
-    AnnotationProperty, AnnotationSubject, AnnotationValue, ArcStr, Build, DataProperty, Datatype,
-    DeclareAnnotationProperty, DeclareClass, DeclareDataProperty, DeclareDatatype,
-    DeclareNamedIndividual, DeclareObjectProperty, Literal, NamedIndividual, ObjectProperty,
-};
-use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, info, trace};
 use pretty::RcDoc;
 use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
 use ropey::Rope;
-use sophia::api::graph::{Graph, MutableGraph};
-use sophia::api::ns::Namespace;
-use sophia::api::prelude::Any;
-use sophia::api::source::TripleSource;
-use sophia::api::term::{BnodeId, LanguageTag, SimpleTerm, Term};
-use sophia::api::MownStr;
-use sophia::inmem::graph::LightGraph;
-use sophia::iri::resolve::Oxiri;
-use sophia::iri::IriRef;
 use std::fmt::Debug;
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::iter::once;
+use std::hash::Hash;
 use std::path::Path;
 use std::string::ToString;
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
-use std::time::{Duration, SystemTime};
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Display,
-    fs,
-    path::PathBuf,
-};
-use tokio::task::JoinHandle;
-use tower_lsp::lsp_types::{
-    self, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
-    PositionEncodingKind, SymbolKind, TextDocumentContentChangeEvent, Url, WorkspaceFolder,
-};
-use tree_sitter_c2rust::{InputEdit, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
+use std::sync::{LazyLock, Mutex, MutexGuard};
+use std::{collections::HashMap, fmt::Display, path::PathBuf};
+use tower_lsp::lsp_types::{DidChangeTextDocumentParams, PositionEncodingKind, Url};
+use tree_sitter_c2rust::{Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
 static GLOBAL_OMN_PARSER: LazyLock<Mutex<Parser>> = LazyLock::new(|| {
     let mut parser = Parser::new();
@@ -134,7 +99,7 @@ impl OntologyDocument for InternalOmnDocument {
     }
 
     fn rope(&self) -> &Rope {
-        &self.parsed_document.rope()
+        self.parsed_document.rope()
     }
 
     fn frame_infos(&self) -> Vec<&FrameInfo> {
@@ -410,7 +375,7 @@ impl OntologyDocument for InternalOmnDocument {
             let kwds = child_keywords_for_kind(node.kind());
             for (parent_name, new_text) in kwds {
                 actions.push(KeywordAction {
-                    parent_name: parent_name.to_string(),
+                    parent_name: (*parent_name).to_string(),
                     new_text: format!("\n{new_text}"),
                     range: node.range().into(),
                 });
@@ -643,7 +608,7 @@ impl OntologyDocument for InternalOmnDocument {
 impl InternalOmnDocument {
     // TODO inline all callers
     pub fn tree(&self) -> &Tree {
-        &self.parsed_document.tree()
+        self.parsed_document.tree()
     }
 
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
@@ -725,7 +690,7 @@ impl InternalOmnDocument {
             mut stage2,
         } = self;
 
-        let changes = changes_from_lsp(params, encoding, &parsed_document.rope());
+        let changes = changes_from_lsp(params, encoding, parsed_document.rope());
 
         // Note that these ranges are in the pre edit form
         for change in &changes {

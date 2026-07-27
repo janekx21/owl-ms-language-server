@@ -445,7 +445,7 @@ impl LanguageServer for Backend {
                     file_url.clone(),
                     params.text_document.version,
                     params.text_document.text,
-                    lang,
+                    &lang,
                 );
 
                 let doc = workspace.insert_internal_document(internal_document);
