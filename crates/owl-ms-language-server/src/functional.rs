@@ -19,16 +19,16 @@ use crate::{
     range::{Range, RangeBox},
     rope_provider::RopeProvider,
     workspace::{
-        changes_from_lsp, lock_global_omn_parser, post_change_ranges, Diagnostic, DocumentId,
-        FormattingSettings, FrameInfo, Highlights, HoverResult, Iri, IriAtPosition, IriDefinition,
-        KeywordAction, OntologyDocument, ParsedDocument, RenameInfo, Workspace,
+        changes_from_lsp, Diagnostic, DocumentId, FormattingSettings, FrameInfo, Highlights,
+        HoverResult, Iri, IriAtPosition, IriDefinition, KeywordAction, OntologyDocument,
+        ParsedDocument, RenameInfo, Workspace,
     },
 };
 
 pub static LANGUAGE_OFN: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_fn::LANGUAGE.into());
 
 thread_local! {
-    static GLOBAL_OFN_PARSER: LazyLock<RefCell<Parser>> = LazyLock::new(|| {
+    static OFN_PARSER: LazyLock<RefCell<Parser>> = LazyLock::new(|| {
         let mut parser = Parser::new();
         parser
             .set_language(&LANGUAGE_OFN)
@@ -61,7 +61,7 @@ impl InternalOfnDocument {
         let id = DocumentId { path, uri, version };
 
         let tree = timeit("create_document (ofn) / parse", || {
-            GLOBAL_OFN_PARSER.with(|parser| {
+            OFN_PARSER.with(|parser| {
                 parser
                     .borrow_mut() // This shoud exit scope after the with
                     .parse(&text, None)
@@ -122,7 +122,7 @@ impl InternalOfnDocument {
             debug!("Updating changed range (pre edit) {change:?}");
         }
 
-        let (parsed_document, old_tree) = GLOBAL_OFN_PARSER.with(|parser| {
+        let (parsed_document, old_tree) = OFN_PARSER.with(|parser| {
             parsed_document.edit_parsed_document(changes.iter(), &mut parser.borrow_mut())
         })?;
 

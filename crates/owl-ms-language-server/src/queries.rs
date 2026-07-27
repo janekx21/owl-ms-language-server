@@ -298,7 +298,7 @@ pub fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workspace::lock_global_omn_parser;
+    use crate::manchester::lock_global_omn_parser;
     use pretty_assertions::assert_eq;
     use test_log::test;
     use tree_sitter_c2rust::{QueryCursor, StreamingIterator};

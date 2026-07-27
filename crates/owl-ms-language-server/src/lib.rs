@@ -3,6 +3,7 @@ mod consts;
 pub mod debugging;
 mod error;
 mod functional;
+mod manchester;
 mod pos;
 mod queries;
 mod range;
