@@ -28,7 +28,7 @@
  */
 
 module.exports = grammar({
-  name: 'owl_functional',
+  name: 'owl_fn',
 
   extras: $ => [/[ \t\r\n]/, $.comment],
 

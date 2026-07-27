@@ -1,5 +1,5 @@
 [package]
-name = "tree-sitter-owl-functional"
+name = "tree-sitter-owl-fn"
 description = "owl-functional grammar for the tree-sitter parsing library"
 readme = "README.md"
 keywords = ["incremental", "parsing", "tree-sitter", "owl-functional", "ofn"]

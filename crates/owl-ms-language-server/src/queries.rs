@@ -286,9 +286,9 @@ pub struct SymbolRule {
 pub fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) -> u32 {
     match str {
         "keyword" => 15, // SemanticTokenType::KEYWORD,
-        "operator" | "punctuation.delimiter" | "punctuation.bracket" => 21, // SemanticTokenType::OPERATOR,
+        "operator" | "punctuation.delimiter" | "punctuation.bracket" | "punctuation.special" => 21, // SemanticTokenType::OPERATOR,
         "variable.buildin" | "constant.builtin" | "variable" => 8, // SemanticTokenType::VARIABLE,
-        "string" => 18,                                            // SemanticTokenType::STRING,
+        "string" | "string.special" => 18,                         // SemanticTokenType::STRING,
         "number" => 19,                                            // SemanticTokenType::NUMBER,
         "comment" => 17,                                           // SemanticTokenType::COMMENT,
         _ => todo!("highlight capture {} not implemented", str),
@@ -298,7 +298,7 @@ pub fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workspace::lock_global_parser;
+    use crate::workspace::lock_global_omn_parser;
     use pretty_assertions::assert_eq;
     use test_log::test;
     use tree_sitter_c2rust::{QueryCursor, StreamingIterator};
@@ -314,7 +314,7 @@ mod tests {
 
                         SubClassOf: class-in-other-file
         "#;
-        let mut parser_guard = lock_global_parser();
+        let mut parser_guard = lock_global_omn_parser();
         let tree = parser_guard.parse(text, None).expect("valid query");
         let mut query_cursor = QueryCursor::new();
 
@@ -332,7 +332,7 @@ mod tests {
         let text = "
             Ontology: OntologyID
         ";
-        let mut parser_guard = lock_global_parser();
+        let mut parser_guard = lock_global_omn_parser();
         let tree = parser_guard.parse(text, None).expect("valid query");
         let mut query_cursor = QueryCursor::new();
 

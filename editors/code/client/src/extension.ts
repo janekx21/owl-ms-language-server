@@ -46,7 +46,10 @@ async function startClient(context: ExtensionContext): Promise<void> {
 	// Options to control the language client
 	const clientOptions: LanguageClientOptions = {
 		// Register the server for plain text documents
-		documentSelector: [{ scheme: 'file', language: 'owl-ms', }], // dont use pattern. this would break everything.
+		documentSelector: [
+			{ scheme: 'file', language: 'owl-ms', },
+			{ scheme: 'file', language: 'owl-fn', }
+		], // dont use pattern. this would break everything.
 		synchronize: {
 			// Notify the server about file changes to '.clientrc files contained in the workspace
 			// TODO replace with useful

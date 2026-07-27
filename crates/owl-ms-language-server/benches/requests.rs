@@ -398,7 +398,7 @@ async fn setup_backend_with_ontology(ontology: String) -> (LspService<Backend>, 
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology,
             },

@@ -1,8 +1,8 @@
 {
   "grammars": [
     {
-      "name": "owl-functional",
-      "camelcase": "OwlFunctional",
+      "name": "owl-fn",
+      "camelcase": "OwlFn",
       "scope": "source.ofn",
       "path": ".",
       "file-types": [

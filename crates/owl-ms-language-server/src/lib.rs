@@ -2,6 +2,7 @@ mod catalog;
 mod consts;
 pub mod debugging;
 mod error;
+mod functional;
 mod pos;
 mod queries;
 mod range;
@@ -41,7 +42,7 @@ use crate::web::HttpClient;
 use crate::workspace::{
     inlay_hint as document_inlay_hint, publish_lsp_diagnostics, reachable_docs_recursive, Document,
     DocumentReference, FormattingSettings, Highlights, HoverResult, InternalDocument,
-    IriAtPosition, KeywordAction, OntologyDocument,
+    IriAtPosition, KeywordAction, Lang, OntologyDocument,
 };
 
 // Re-export for benchmarks
@@ -50,8 +51,6 @@ pub use crate::workspace::clear_caches;
 // Constants
 
 pub static LANGUAGE_OMN: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_ms::LANGUAGE.into());
-pub static LANGUAGE_OFN: LazyLock<Language> =
-    LazyLock::new(|| tree_sitter_owl_functional::LANGUAGE.into());
 
 // Model
 
@@ -98,7 +97,7 @@ impl Backend {
 
                 // Create diagnostics for files that depend on this file
                 for other_internal_doc in workspace.internal_documents() {
-                    let depends_on_me = other_internal_doc.directly_imports().any(|u| {
+                    let depends_on_me = other_internal_doc.directly_imports().iter().any(|u| {
                         workspace.document_by_url(u) == Some(DocumentReference::Internal(document))
                     });
 
@@ -352,6 +351,7 @@ async fn build_todo_list(
     let document = workspace.get_internal_document(path).unwrap();
     document
         .directly_references_doc()
+        .into_iter()
         .map(|u| (u.clone(), 1))
         .collect()
 }
@@ -427,38 +427,50 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         async {
             let file_url = params.text_document.uri;
-            info!("Did open {file_url} ...",);
+            let language_id = params.text_document.language_id;
+            info!("Did open {file_url} {language_id} ...",);
 
-            let mut sync = self.write_sync().await;
+            let lang = match &language_id[..] {
+                "owl-ms" => Some(Lang::Omn),
+                "owl-fn" => Some(Lang::Ofn),
+                _ => None,
+            };
 
-            let workspace = sync.get_or_insert_workspace_mut(&file_url);
-            let internal_document = InternalDocument::new(
-                file_url.clone(),
-                params.text_document.version,
-                params.text_document.text,
-            );
+            if let Some(lang) = lang {
+                let mut sync = self.write_sync().await;
 
-            let doc = workspace.insert_internal_document(internal_document);
-            let path = doc.path().to_path_buf();
+                let workspace = sync.get_or_insert_workspace_mut(&file_url);
+                let internal_document = InternalDocument::new(
+                    file_url.clone(),
+                    params.text_document.version,
+                    params.text_document.text,
+                    lang,
+                );
 
-            let handle = self.load_dependencies(&path);
+                let doc = workspace.insert_internal_document(internal_document);
+                let path = doc.path().to_path_buf();
 
-            #[cfg(test)]
-            {
-                // This is just for tests, so that they dont produce a race condition
-                drop(sync);
-                handle.await.unwrap();
+                let handle = self.load_dependencies(&path);
+
+                #[cfg(test)]
+                {
+                    // This is just for tests, so that they dont produce a race condition
+                    drop(sync);
+                    handle.await.unwrap();
+                }
+                #[cfg(not(test))]
+                {
+                    workspace.index_handles.push(handle);
+                }
+
+                self.update_diagnostics_for_url_and_dependent(file_url);
+
+                debug!("Did open!");
+
+                Ok(())
+            } else {
+                Err(Error::DocumentNotSupported(language_id))
             }
-            #[cfg(not(test))]
-            {
-                workspace.index_handles.push(handle);
-            }
-
-            self.update_diagnostics_for_url_and_dependent(file_url);
-
-            debug!("Did open!");
-
-            Ok(())
         }
         .await
         .log_if_error();
@@ -789,6 +801,7 @@ impl LanguageServer for Backend {
         let infos = doc.frame_infos();
         return Ok(Some(DocumentSymbolResponse::Flat(
             infos
+                .iter()
                 .flat_map(|info| {
                     let name = info.label(workspace).unwrap_or_else(|| {
                         doc.full_iri_to_abbreviated_iri(&info.iri)

@@ -1,5 +1,5 @@
 {
-  "name": "tree-sitter-owl-functional",
+  "name": "tree-sitter-owl-fn",
   "version": "1.0.0",
   "description": "Parser for owl2 functional syntex based on tree sitter",
   "main": "bindings/node",

@@ -4,6 +4,7 @@ use crate::consts::{
     INTEGER_IRI, LABEL_IRI, STRING_IRI,
 };
 use crate::error::{Error, Result, ResultExt, ResultIterator};
+use crate::functional::InternalFnDocument;
 use crate::pos::Position;
 use crate::queries::{
     self, treesitter_highlight_capture_into_semantic_token_type_index, NODE_TYPES,
@@ -58,21 +59,21 @@ use tower_lsp::lsp_types::{
 };
 use tree_sitter_c2rust::{InputEdit, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
-static GLOBAL_PARSER: LazyLock<Mutex<Parser>> = LazyLock::new(|| {
+static GLOBAL_OMN_PARSER: LazyLock<Mutex<Parser>> = LazyLock::new(|| {
     let mut parser = Parser::new();
     parser
         .set_language(&LANGUAGE_OMN)
         .expect("the language to be valid");
     parser.set_logger(Some(Box::new(|type_, str| match type_ {
-        tree_sitter_c2rust::LogType::Parse => trace!(target: "tree-sitter-parse", "{str}"),
-        tree_sitter_c2rust::LogType::Lex => trace!(target: "tree-sitter-lex", "{str}"),
+        tree_sitter_c2rust::LogType::Parse => trace!(target: "omn tree-sitter-parse", "{str}"),
+        tree_sitter_c2rust::LogType::Lex => trace!(target: "omn tree-sitter-lex", "{str}"),
     })));
 
     Mutex::new(parser)
 });
 
-pub fn lock_global_parser() -> MutexGuard<'static, Parser> {
-    (*GLOBAL_PARSER)
+pub fn lock_global_omn_parser() -> MutexGuard<'static, Parser> {
+    (*GLOBAL_OMN_PARSER)
         .lock()
         .expect("the parser should not panic")
 }
@@ -117,6 +118,7 @@ pub struct Workspace {
 #[derive(Debug, PartialEq, Eq)]
 pub enum InternalDocument {
     InternalOmn(InternalOmnDocument),
+    InternalOfn(InternalFnDocument),
 }
 
 /// The read/write internal document trait.
@@ -137,27 +139,27 @@ pub trait OntologyDocument {
     fn rope(&self) -> &Rope;
 
     // Frame infos
-    fn frame_infos(&self) -> impl Iterator<Item = &FrameInfo>;
+    fn frame_infos(&self) -> Vec<&FrameInfo>;
     fn find_frame_info(&self, iri: &Iri) -> Option<FrameInfo>;
 
     // Analytics
     fn ontology_iri(&self) -> Option<Iri>;
     fn version_iri(&self) -> Option<Iri>;
-    fn definitions(&self) -> impl Iterator<Item = &RangeBox<IriDefinition>>;
-    fn references(&self) -> impl Iterator<Item = &RangeBox<Iri>>;
+    fn definitions(&self) -> Vec<&RangeBox<IriDefinition>>;
+    fn references(&self) -> Vec<&RangeBox<Iri>>;
     /// OWL ontolgies that are imported by this ontology.
     /// There are also indirect imports, but they need to be resolved in the workspace,
     /// because a single document has no context of the workspace.
-    fn directly_imports(&self) -> impl Iterator<Item = &Url>;
+    fn directly_imports(&self) -> Vec<&Url>;
     /// This includes prefixes, references and imports
-    fn directly_references_doc(&self) -> impl Iterator<Item = &Url>;
+    fn directly_references_doc(&self) -> Vec<&Url>;
 
     /// Errors/Diagnostics that are created by this document alone. This
     /// includes e.g. syntax errors.
     fn local_diagnostics(&self) -> &[Diagnostic];
 
     /// Map of IRIs and where to find them
-    fn iri_locations(&self) -> &HashMap<Iri, Vec<RangeBox<()>>>;
+    fn iri_locations(&self) -> HashMap<&Iri, &Vec<RangeBox<()>>>;
 
     // IRI conversions
     /// Taking a (relative) abbreviated or simple IRI and resolving the (absolute) full IRI.
@@ -228,14 +230,16 @@ pub trait OntologyDocument {
     fn find_iri_references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range> {
         if include_declaration {
             self.references()
+                .into_iter()
                 .filter(|rb| rb.value() == full_iri)
                 .map(RangeBox::range)
                 .copied()
                 .collect()
         } else {
-            debug!("def {:#?}", self.definitions().collect_vec());
+            debug!("def {:#?}", self.definitions());
             let exclude = self
                 .definitions()
+                .into_iter()
                 .filter(|rb| &rb.value().iri == full_iri)
                 .map(RangeBox::range)
                 .copied()
@@ -243,9 +247,10 @@ pub trait OntologyDocument {
 
             debug!("Exclude {exclude:#?}");
 
-            debug!("ref {:#?}", self.references().collect_vec());
+            debug!("ref {:#?}", self.references());
             // TODO this could be more accurate by including the iri range of the definition in the IriDefinition struct
             self.references()
+                .into_iter()
                 .filter(|rb| rb.value() == full_iri)
                 .map(RangeBox::range)
                 .filter(|r| !exclude.iter().any(|r2| r2.overlaps(r)))
@@ -289,9 +294,20 @@ pub struct KeywordAction {
 
 pub type Highlights = Vec<RangeBox<u32>>;
 
+#[derive(Debug)]
+pub enum Lang {
+    Omn,
+    Ofn,
+}
+
 impl InternalDocument {
-    pub fn new(url: Url, version: i32, text: String) -> InternalDocument {
-        InternalDocument::InternalOmn(InternalOmnDocument::new(url, version, text))
+    pub fn new(url: Url, version: i32, text: String, lang: Lang) -> InternalDocument {
+        match lang {
+            Lang::Omn => {
+                InternalDocument::InternalOmn(InternalOmnDocument::new(url, version, text))
+            }
+            Lang::Ofn => InternalDocument::InternalOfn(InternalFnDocument::new(url, version, text)),
+        }
     }
 
     pub fn edit(
@@ -303,6 +319,9 @@ impl InternalDocument {
             InternalDocument::InternalOmn(doc) => doc
                 .edit_inner(params, encoding)
                 .map(InternalDocument::InternalOmn),
+            InternalDocument::InternalOfn(internal_ofn_document) => {
+                Ok(InternalDocument::InternalOfn(internal_ofn_document))
+            } // TODO
         }
     }
 }
@@ -427,6 +446,7 @@ impl Workspace {
             .values()
             .flat_map(|doc| {
                 doc.frame_infos()
+                    .into_iter()
                     .flat_map(
                         |item| -> Box<dyn Iterator<Item = (String, Iri, FrameInfo)>> {
                             if item.iri.to_lowercase().contains(&partial_lower) {
@@ -786,7 +806,7 @@ pub enum Document {
 /// Internal omn ontologies are OMN files on disk.
 /// Text -> Parsed -> Queried -> Analyzed -> ``InternalDocument``
 #[derive(Debug)]
-struct InternalOmnDocument {
+pub struct InternalOmnDocument {
     id: DocumentId,
     parsed_document: ParsedDocument,
     pub queried_document: QueriedDocument,
@@ -1083,16 +1103,16 @@ impl OntologyDocument for InternalOmnDocument {
         &self.parsed_document.rope
     }
 
-    fn frame_infos(&self) -> impl Iterator<Item = &FrameInfo> {
-        self.stage2.all_frame_infos.values()
+    fn frame_infos(&self) -> Vec<&FrameInfo> {
+        self.stage2.all_frame_infos.values().collect()
     }
 
     fn find_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
         self.stage2.all_frame_infos.get(iri).cloned()
     }
 
-    fn definitions(&self) -> impl Iterator<Item = &RangeBox<IriDefinition>> {
-        self.stage2.definitions.iter()
+    fn definitions(&self) -> Vec<&RangeBox<IriDefinition>> {
+        self.stage2.definitions.iter().collect()
     }
 
     fn ontology_iri(&self) -> Option<Iri> {
@@ -1109,28 +1129,29 @@ impl OntologyDocument for InternalOmnDocument {
             .and_then(|rb| rb.value().1.clone())
     }
 
-    fn references(&self) -> impl Iterator<Item = &RangeBox<Iri>> {
-        self.stage2.references.iter()
+    fn references(&self) -> Vec<&RangeBox<Iri>> {
+        self.stage2.references.iter().collect()
     }
 
-    fn directly_imports(&self) -> impl Iterator<Item = &Url> {
-        self.stage2.directly_reachable_import_urls.iter()
+    fn directly_imports(&self) -> Vec<&Url> {
+        self.stage2.directly_reachable_import_urls.iter().collect()
     }
 
     #[doc = " This includes prefixes, references and imports"]
-    fn directly_references_doc(&self) -> impl Iterator<Item = &Url> {
+    fn directly_references_doc(&self) -> Vec<&Url> {
         self.stage2
             .directly_reachable_import_urls
             .iter()
             .chain(self.stage2.directly_reachable_other_urls.iter())
+            .collect()
     }
 
     fn local_diagnostics(&self) -> &[Diagnostic] {
         &self.stage2.local_diagnostics
     }
 
-    fn iri_locations(&self) -> &HashMap<Iri, Vec<RangeBox<()>>> {
-        &self.stage2.iri_locations
+    fn iri_locations(&self) -> HashMap<&Iri, &Vec<RangeBox<()>>> {
+        self.stage2.iri_locations.iter().collect()
     }
 
     fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<String> {
@@ -1616,7 +1637,7 @@ impl InternalOmnDocument {
         let id = DocumentId { path, uri, version };
 
         let tree = timeit("create_document / parse", || {
-            lock_global_parser()
+            lock_global_omn_parser()
                 .parse(&text, None)
                 .expect("language to be set, no timeout to be used, no cancellation flag")
         });
@@ -1831,13 +1852,14 @@ fn reachable_docs_recursive_helper(
 
     result.insert(doc.uri().clone());
 
-    let urls: Box<dyn Iterator<Item = &Url>> = if include_prefix {
-        Box::new(doc.directly_references_doc())
+    let urls = if include_prefix {
+        doc.directly_references_doc()
     } else {
-        Box::new(doc.directly_imports())
+        doc.directly_imports()
     };
 
     let docs = urls
+        .iter()
         .inspect(|u| trace!("{u}"))
         .filter_map(|url| {
             workspace.document_by_url(url)
@@ -1932,7 +1954,7 @@ impl ParsedDocument {
 
         let rope_provider = RopeProvider::new(&new_rope);
         let new_tree = {
-            let mut parser_guard = lock_global_parser();
+            let mut parser_guard = lock_global_omn_parser();
             // This takes a long time 190ms/16k
             timeit("document.edit / parsing", || {
                 parser_guard
@@ -2164,9 +2186,23 @@ pub struct FormattingSettings {
 
 /// An internal document that has no semantic analysis. Just text and syntax tree.
 #[derive(Debug, Clone)]
-struct ParsedDocument {
+pub struct ParsedDocument {
     tree: Tree,
     rope: Rope,
+}
+
+impl ParsedDocument {
+    pub fn new(tree: Tree, rope: Rope) -> Self {
+        Self { tree, rope }
+    }
+
+    pub fn rope(&self) -> &Rope {
+        &self.rope
+    }
+
+    pub fn tree(&self) -> &Tree {
+        &self.tree
+    }
 }
 
 impl From<ParsedDocument> for QueriedDocument {
@@ -3490,9 +3526,17 @@ pub fn node_text(node: &Node, rope: &Rope) -> String {
 fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    let uses: &HashSet<Iri> = &doc.references().map(|rb| rb.value().clone()).collect();
+    let uses: &HashSet<Iri> = &doc
+        .references()
+        .iter()
+        .map(|rb| rb.value().clone())
+        .collect();
 
-    let mut defines: HashSet<String> = doc.definitions().map(|rb| rb.value().iri.clone()).collect();
+    let mut defines: HashSet<String> = doc
+        .definitions()
+        .iter()
+        .map(|rb| rb.value().iri.clone())
+        .collect();
 
     debug!(
         "semantic_errors / doc {:?} uses {uses:#?} defines {defines:#?}",
@@ -3511,6 +3555,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
                     defines.extend(
                         internal_document
                             .definitions()
+                            .iter()
                             .map(|rb| rb.value().iri.clone()),
                     );
                 }
@@ -3524,7 +3569,11 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
     // TODO this is a quick fix for now. The correct way will be not not include prefixes in the used Iris
     let prefixes = doc.prefixes();
     let prefix_iris: HashSet<&Iri> = prefixes.values().collect();
-    let import_iris: Vec<&str> = doc.directly_imports().map(Url::as_str).collect();
+    let import_iris: Vec<&str> = doc
+        .directly_imports()
+        .into_iter()
+        .map(Url::as_str)
+        .collect();
 
     let ontology_iri = doc.ontology_iri();
     let version_iri = doc.version_iri();
@@ -3547,7 +3596,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
         }
 
         if let Some(vec) = doc.iri_locations().get(diff) {
-            for ele in vec {
+            for ele in vec.iter() {
                 diagnostics.push(Diagnostic {
                     range: *ele.range(),
                     kind: DiagnosticKind::MissingIri(diff.clone()),

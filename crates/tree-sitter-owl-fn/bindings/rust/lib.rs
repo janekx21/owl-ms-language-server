@@ -8,10 +8,10 @@
 //! Ontology(<http://www.example.com/iri> <http://www.example.com/viri>)
 //! "#;
 //! let mut parser = tree_sitter_c2rust::Parser::new();
-//! let language = tree_sitter_owl_functional::LANGUAGE;
+//! let language = tree_sitter_owl_fn::LANGUAGE;
 //! parser
 //!     .set_language(&language.into())
-//!     .expect("Error loading owl_functional parser");
+//!     .expect("Error loading owl_fn parser");
 //! let tree = parser.parse(code, None).unwrap();
 //! assert!(!tree.root_node().has_error());
 //! ```
@@ -24,13 +24,13 @@
 use tree_sitter_language::LanguageFn;
 
 extern "C" {
-    fn tree_sitter_owl_functional() -> *const ();
+    fn tree_sitter_owl_fn() -> *const ();
 }
 
 /// The tree-sitter [`LanguageFn`][LanguageFn] for this grammar.
 ///
 /// [LanguageFn]: https://docs.rs/tree-sitter-language/*/tree_sitter_language/struct.LanguageFn.html
-pub const LANGUAGE: LanguageFn = unsafe { LanguageFn::from_raw(tree_sitter_owl_functional) };
+pub const LANGUAGE: LanguageFn = unsafe { LanguageFn::from_raw(tree_sitter_owl_fn) };
 
 /// The content of the [`node-types.json`][] file for this grammar.
 ///
@@ -58,6 +58,6 @@ mod tests {
         let mut parser = tree_sitter_c2rust::Parser::new();
         parser
             .set_language(&super::LANGUAGE.into())
-            .expect("Error loading owl_functional language");
+            .expect("Error loading owl_fn language");
     }
 }

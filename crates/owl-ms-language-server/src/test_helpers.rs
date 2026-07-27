@@ -1,5 +1,5 @@
+use crate::functional::LANGUAGE_OFN;
 use crate::workspace::OntologyDocument;
-use crate::LANGUAGE_OFN;
 use crate::{catalog::Catalog, web::HttpClient, workspace, Backend, LANGUAGE_OMN};
 use itertools::Itertools;
 use log::info;
