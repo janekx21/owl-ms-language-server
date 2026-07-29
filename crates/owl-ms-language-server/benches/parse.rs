@@ -2,7 +2,7 @@ use std::{hint::black_box, time::Duration};
 
 // use crate::Backend;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use owl_ms_language_server::{rope_provider::RopeProvider, LANGUAGE};
+use owl_ms_language_server::{rope_provider::RopeProvider, LANGUAGE_OMN};
 use ropey::Rope;
 use tree_sitter_c2rust::{InputEdit, Parser, Point, Query, QueryCursor, StreamingIterator, Tree};
 
@@ -35,7 +35,7 @@ Ontology: <http://foo.bar>
 ";
 
                 let mut parser = Parser::new();
-                parser.set_language(&LANGUAGE).unwrap();
+                parser.set_language(&LANGUAGE_OMN).unwrap();
                 (source_code.to_string(), parser)
             },
             |(source, parser)| parse_helper(source, parser),
@@ -59,7 +59,7 @@ fn ontology_size_bench(c: &mut Criterion) {
                     );
 
                     let mut parser = Parser::new();
-                    parser.set_language(&LANGUAGE).unwrap();
+                    parser.set_language(&LANGUAGE_OMN).unwrap();
                     (source_code.to_string(), parser)
                 },
                 |(source, parser)| parse_helper(source, parser),
@@ -88,7 +88,7 @@ fn ontology_change_bench(c: &mut Criterion) {
                     );
 
                     let mut parser = Parser::new();
-                    parser.set_language(&LANGUAGE).unwrap();
+                    parser.set_language(&LANGUAGE_OMN).unwrap();
                     let mut rope = Rope::from_str(source_code.as_str());
                     let rope_provider = RopeProvider::new(&rope);
                     let mut old_tree = parser
@@ -139,7 +139,7 @@ fn ontology_query_bench(c: &mut Criterion) {
                     );
 
                     let mut parser = Parser::new();
-                    parser.set_language(&LANGUAGE).unwrap();
+                    parser.set_language(&LANGUAGE_OMN).unwrap();
                     let rope = Rope::from_str(source_code.as_str());
                     let rope_provider = RopeProvider::new(&rope);
                     let tree = parser
@@ -148,7 +148,7 @@ fn ontology_query_bench(c: &mut Criterion) {
 
                     let qc = QueryCursor::new();
                     let query =
-                        Query::new(&LANGUAGE, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri")
+                        Query::new(&LANGUAGE_OMN, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri")
                             .unwrap();
                     (rope, tree, query, qc)
                 },

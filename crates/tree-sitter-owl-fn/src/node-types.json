@@ -1,0 +1,2791 @@
+[
+  {
+    "type": "Annotation",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "AnnotationProperty",
+          "named": true
+        },
+        {
+          "type": "AnnotationValue",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "AnnotationAssertion",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "AnnotationProperty",
+          "named": true
+        },
+        {
+          "type": "AnnotationSubject",
+          "named": true
+        },
+        {
+          "type": "AnnotationValue",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "AnnotationAxiom",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "AnnotationAssertion",
+          "named": true
+        },
+        {
+          "type": "AnnotationPropertyDomain",
+          "named": true
+        },
+        {
+          "type": "AnnotationPropertyRange",
+          "named": true
+        },
+        {
+          "type": "SubAnnotationPropertyOf",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "AnnotationProperty",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "IRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "AnnotationPropertyDomain",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "AnnotationProperty",
+          "named": true
+        },
+        {
+          "type": "IRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "AnnotationPropertyRange",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "AnnotationProperty",
+          "named": true
+        },
+        {
+          "type": "IRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "AnnotationSubject",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "AnonymousIndividual",
+          "named": true
+        },
+        {
+          "type": "IRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "AnnotationValue",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "AnonymousIndividual",
+          "named": true
+        },
+        {
+          "type": "IRI",
+          "named": true
+        },
+        {
+          "type": "Literal",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "AnonymousIndividual",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "nodeID",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "Assertion",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "ClassAssertion",
+          "named": true
+        },
+        {
+          "type": "DataPropertyAssertion",
+          "named": true
+        },
+        {
+          "type": "DifferentIndividuals",
+          "named": true
+        },
+        {
+          "type": "NegativeDataPropertyAssertion",
+          "named": true
+        },
+        {
+          "type": "NegativeObjectPropertyAssertion",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyAssertion",
+          "named": true
+        },
+        {
+          "type": "SameIndividual",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "AsymmetricObjectProperty",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "Axiom",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "AnnotationAxiom",
+          "named": true
+        },
+        {
+          "type": "Assertion",
+          "named": true
+        },
+        {
+          "type": "ClassAxiom",
+          "named": true
+        },
+        {
+          "type": "DataPropertyAxiom",
+          "named": true
+        },
+        {
+          "type": "DatatypeDefinition",
+          "named": true
+        },
+        {
+          "type": "Declaration",
+          "named": true
+        },
+        {
+          "type": "HasKey",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyAxiom",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "Class",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "IRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ClassAssertion",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ClassExpression",
+          "named": true
+        },
+        {
+          "type": "Individual",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ClassAxiom",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "DisjointClasses",
+          "named": true
+        },
+        {
+          "type": "DisjointUnion",
+          "named": true
+        },
+        {
+          "type": "EquivalentClasses",
+          "named": true
+        },
+        {
+          "type": "SubClassOf",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ClassExpression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "Class",
+          "named": true
+        },
+        {
+          "type": "DataAllValuesFrom",
+          "named": true
+        },
+        {
+          "type": "DataExactCardinality",
+          "named": true
+        },
+        {
+          "type": "DataHasValue",
+          "named": true
+        },
+        {
+          "type": "DataMaxCardinality",
+          "named": true
+        },
+        {
+          "type": "DataMinCardinality",
+          "named": true
+        },
+        {
+          "type": "DataSomeValuesFrom",
+          "named": true
+        },
+        {
+          "type": "ObjectAllValuesFrom",
+          "named": true
+        },
+        {
+          "type": "ObjectComplementOf",
+          "named": true
+        },
+        {
+          "type": "ObjectExactCardinality",
+          "named": true
+        },
+        {
+          "type": "ObjectHasSelf",
+          "named": true
+        },
+        {
+          "type": "ObjectHasValue",
+          "named": true
+        },
+        {
+          "type": "ObjectIntersectionOf",
+          "named": true
+        },
+        {
+          "type": "ObjectMaxCardinality",
+          "named": true
+        },
+        {
+          "type": "ObjectMinCardinality",
+          "named": true
+        },
+        {
+          "type": "ObjectOneOf",
+          "named": true
+        },
+        {
+          "type": "ObjectSomeValuesFrom",
+          "named": true
+        },
+        {
+          "type": "ObjectUnionOf",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataAllValuesFrom",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "DataPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "DataRange",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataComplementOf",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "DataRange",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataExactCardinality",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "DataPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "DataRange",
+          "named": true
+        },
+        {
+          "type": "nonNegativeInteger",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataHasValue",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "DataPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "Literal",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataIntersectionOf",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "DataRange",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataMaxCardinality",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "DataPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "DataRange",
+          "named": true
+        },
+        {
+          "type": "nonNegativeInteger",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataMinCardinality",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "DataPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "DataRange",
+          "named": true
+        },
+        {
+          "type": "nonNegativeInteger",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataOneOf",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Literal",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataProperty",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "IRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataPropertyAssertion",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "DataPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "sourceIndividual",
+          "named": true
+        },
+        {
+          "type": "targetValue",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataPropertyAxiom",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "DataPropertyDomain",
+          "named": true
+        },
+        {
+          "type": "DataPropertyRange",
+          "named": true
+        },
+        {
+          "type": "DisjointDataProperties",
+          "named": true
+        },
+        {
+          "type": "EquivalentDataProperties",
+          "named": true
+        },
+        {
+          "type": "FunctionalDataProperty",
+          "named": true
+        },
+        {
+          "type": "SubDataPropertyOf",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataPropertyDomain",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ClassExpression",
+          "named": true
+        },
+        {
+          "type": "DataPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataPropertyExpression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "DataProperty",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataPropertyRange",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "DataPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "DataRange",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataRange",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "DataComplementOf",
+          "named": true
+        },
+        {
+          "type": "DataIntersectionOf",
+          "named": true
+        },
+        {
+          "type": "DataOneOf",
+          "named": true
+        },
+        {
+          "type": "DataUnionOf",
+          "named": true
+        },
+        {
+          "type": "Datatype",
+          "named": true
+        },
+        {
+          "type": "DatatypeRestriction",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataSomeValuesFrom",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "DataPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "DataRange",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DataUnionOf",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "DataRange",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "Datatype",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "IRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DatatypeDefinition",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "DataRange",
+          "named": true
+        },
+        {
+          "type": "Datatype",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DatatypeRestriction",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Datatype",
+          "named": true
+        },
+        {
+          "type": "constrainingFacet",
+          "named": true
+        },
+        {
+          "type": "restrictionValue",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "Declaration",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "Entity",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DifferentIndividuals",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "Individual",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DisjointClasses",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ClassExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DisjointDataProperties",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "DataPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DisjointObjectProperties",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "DisjointUnion",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "Class",
+          "named": true
+        },
+        {
+          "type": "disjointClassExpressions",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "Entity",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "AnnotationProperty",
+          "named": true
+        },
+        {
+          "type": "Class",
+          "named": true
+        },
+        {
+          "type": "DataProperty",
+          "named": true
+        },
+        {
+          "type": "Datatype",
+          "named": true
+        },
+        {
+          "type": "NamedIndividual",
+          "named": true
+        },
+        {
+          "type": "ObjectProperty",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "EquivalentClasses",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ClassExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "EquivalentDataProperties",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "DataPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "EquivalentObjectProperties",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "FunctionalDataProperty",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "DataPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "FunctionalObjectProperty",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "HasKey",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ClassExpression",
+          "named": true
+        },
+        {
+          "type": "DataPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "IRI",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "abbreviatedIRI",
+          "named": true
+        },
+        {
+          "type": "fullIRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "Import",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "IRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "Individual",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "AnonymousIndividual",
+          "named": true
+        },
+        {
+          "type": "NamedIndividual",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "InverseFunctionalObjectProperty",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "InverseObjectProperties",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "InverseObjectProperty",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "ObjectProperty",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "IrreflexiveObjectProperty",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "Literal",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "stringLiteralNoLanguage",
+          "named": true
+        },
+        {
+          "type": "stringLiteralWithLanguage",
+          "named": true
+        },
+        {
+          "type": "typedLiteral",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "NamedIndividual",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "IRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "NegativeDataPropertyAssertion",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "DataPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "sourceIndividual",
+          "named": true
+        },
+        {
+          "type": "targetValue",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "NegativeObjectPropertyAssertion",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "sourceIndividual",
+          "named": true
+        },
+        {
+          "type": "targetIndividual",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectAllValuesFrom",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "ClassExpression",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectComplementOf",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "ClassExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectExactCardinality",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "ClassExpression",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "nonNegativeInteger",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectHasSelf",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectHasValue",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Individual",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectIntersectionOf",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "ClassExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectMaxCardinality",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "ClassExpression",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "nonNegativeInteger",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectMinCardinality",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "ClassExpression",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "nonNegativeInteger",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectOneOf",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Individual",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectProperty",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "IRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectPropertyAssertion",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "sourceIndividual",
+          "named": true
+        },
+        {
+          "type": "targetIndividual",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectPropertyAxiom",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "AsymmetricObjectProperty",
+          "named": true
+        },
+        {
+          "type": "DisjointObjectProperties",
+          "named": true
+        },
+        {
+          "type": "EquivalentObjectProperties",
+          "named": true
+        },
+        {
+          "type": "FunctionalObjectProperty",
+          "named": true
+        },
+        {
+          "type": "InverseFunctionalObjectProperty",
+          "named": true
+        },
+        {
+          "type": "InverseObjectProperties",
+          "named": true
+        },
+        {
+          "type": "IrreflexiveObjectProperty",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyDomain",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyRange",
+          "named": true
+        },
+        {
+          "type": "ReflexiveObjectProperty",
+          "named": true
+        },
+        {
+          "type": "SubObjectPropertyOf",
+          "named": true
+        },
+        {
+          "type": "SymmetricObjectProperty",
+          "named": true
+        },
+        {
+          "type": "TransitiveObjectProperty",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectPropertyDomain",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ClassExpression",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectPropertyExpression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "InverseObjectProperty",
+          "named": true
+        },
+        {
+          "type": "ObjectProperty",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectPropertyRange",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ClassExpression",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectSomeValuesFrom",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "ClassExpression",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ObjectUnionOf",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "ClassExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "Ontology",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "Axiom",
+          "named": true
+        },
+        {
+          "type": "Import",
+          "named": true
+        },
+        {
+          "type": "ontologyIRI",
+          "named": true
+        },
+        {
+          "type": "versionIRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ReflexiveObjectProperty",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "SameIndividual",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "Individual",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "SubAnnotationPropertyOf",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "subAnnotationProperty",
+          "named": true
+        },
+        {
+          "type": "superAnnotationProperty",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "SubClassOf",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "subClassExpression",
+          "named": true
+        },
+        {
+          "type": "superClassExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "SubDataPropertyOf",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "subDataPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "superDataPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "SubObjectPropertyOf",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "subObjectPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "superObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "SymmetricObjectProperty",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "TransitiveObjectProperty",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Annotation",
+          "named": true
+        },
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "constrainingFacet",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "IRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "disjointClassExpressions",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "ClassExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "lexicalForm",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "quotedString",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ontologyDocument",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Ontology",
+          "named": true
+        },
+        {
+          "type": "prefixDeclaration",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ontologyIRI",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "abbreviatedIRI",
+          "named": true
+        },
+        {
+          "type": "fullIRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "prefixDeclaration",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "fullIRI",
+          "named": true
+        },
+        {
+          "type": "prefixName",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "propertyExpressionChain",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "restrictionValue",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "Literal",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "sourceIndividual",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "AnonymousIndividual",
+          "named": true
+        },
+        {
+          "type": "NamedIndividual",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "stringLiteralNoLanguage",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "quotedString",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "stringLiteralWithLanguage",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "languageTag",
+          "named": true
+        },
+        {
+          "type": "quotedString",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "subAnnotationProperty",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "IRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "subClassExpression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "Class",
+          "named": true
+        },
+        {
+          "type": "DataAllValuesFrom",
+          "named": true
+        },
+        {
+          "type": "DataExactCardinality",
+          "named": true
+        },
+        {
+          "type": "DataHasValue",
+          "named": true
+        },
+        {
+          "type": "DataMaxCardinality",
+          "named": true
+        },
+        {
+          "type": "DataMinCardinality",
+          "named": true
+        },
+        {
+          "type": "DataSomeValuesFrom",
+          "named": true
+        },
+        {
+          "type": "ObjectAllValuesFrom",
+          "named": true
+        },
+        {
+          "type": "ObjectComplementOf",
+          "named": true
+        },
+        {
+          "type": "ObjectExactCardinality",
+          "named": true
+        },
+        {
+          "type": "ObjectHasSelf",
+          "named": true
+        },
+        {
+          "type": "ObjectHasValue",
+          "named": true
+        },
+        {
+          "type": "ObjectIntersectionOf",
+          "named": true
+        },
+        {
+          "type": "ObjectMaxCardinality",
+          "named": true
+        },
+        {
+          "type": "ObjectMinCardinality",
+          "named": true
+        },
+        {
+          "type": "ObjectOneOf",
+          "named": true
+        },
+        {
+          "type": "ObjectSomeValuesFrom",
+          "named": true
+        },
+        {
+          "type": "ObjectUnionOf",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "subDataPropertyExpression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "DataProperty",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "subObjectPropertyExpression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "ObjectPropertyExpression",
+          "named": true
+        },
+        {
+          "type": "propertyExpressionChain",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "superAnnotationProperty",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "IRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "superClassExpression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "Class",
+          "named": true
+        },
+        {
+          "type": "DataAllValuesFrom",
+          "named": true
+        },
+        {
+          "type": "DataExactCardinality",
+          "named": true
+        },
+        {
+          "type": "DataHasValue",
+          "named": true
+        },
+        {
+          "type": "DataMaxCardinality",
+          "named": true
+        },
+        {
+          "type": "DataMinCardinality",
+          "named": true
+        },
+        {
+          "type": "DataSomeValuesFrom",
+          "named": true
+        },
+        {
+          "type": "ObjectAllValuesFrom",
+          "named": true
+        },
+        {
+          "type": "ObjectComplementOf",
+          "named": true
+        },
+        {
+          "type": "ObjectExactCardinality",
+          "named": true
+        },
+        {
+          "type": "ObjectHasSelf",
+          "named": true
+        },
+        {
+          "type": "ObjectHasValue",
+          "named": true
+        },
+        {
+          "type": "ObjectIntersectionOf",
+          "named": true
+        },
+        {
+          "type": "ObjectMaxCardinality",
+          "named": true
+        },
+        {
+          "type": "ObjectMinCardinality",
+          "named": true
+        },
+        {
+          "type": "ObjectOneOf",
+          "named": true
+        },
+        {
+          "type": "ObjectSomeValuesFrom",
+          "named": true
+        },
+        {
+          "type": "ObjectUnionOf",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "superDataPropertyExpression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "DataProperty",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "superObjectPropertyExpression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "InverseObjectProperty",
+          "named": true
+        },
+        {
+          "type": "ObjectProperty",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "targetIndividual",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "AnonymousIndividual",
+          "named": true
+        },
+        {
+          "type": "NamedIndividual",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "targetValue",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "stringLiteralNoLanguage",
+          "named": true
+        },
+        {
+          "type": "stringLiteralWithLanguage",
+          "named": true
+        },
+        {
+          "type": "typedLiteral",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "typedLiteral",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "Datatype",
+          "named": true
+        },
+        {
+          "type": "lexicalForm",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "versionIRI",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "abbreviatedIRI",
+          "named": true
+        },
+        {
+          "type": "fullIRI",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "(",
+    "named": false
+  },
+  {
+    "type": ")",
+    "named": false
+  },
+  {
+    "type": "=",
+    "named": false
+  },
+  {
+    "type": "Annotation",
+    "named": false
+  },
+  {
+    "type": "AnnotationAssertion",
+    "named": false
+  },
+  {
+    "type": "AnnotationProperty",
+    "named": false
+  },
+  {
+    "type": "AnnotationPropertyDomain",
+    "named": false
+  },
+  {
+    "type": "AnnotationPropertyRange",
+    "named": false
+  },
+  {
+    "type": "AsymmetricObjectProperty",
+    "named": false
+  },
+  {
+    "type": "Class",
+    "named": false
+  },
+  {
+    "type": "ClassAssertion",
+    "named": false
+  },
+  {
+    "type": "DataAllValuesFrom",
+    "named": false
+  },
+  {
+    "type": "DataComplementOf",
+    "named": false
+  },
+  {
+    "type": "DataExactCardinality",
+    "named": false
+  },
+  {
+    "type": "DataHasValue",
+    "named": false
+  },
+  {
+    "type": "DataIntersectionOf",
+    "named": false
+  },
+  {
+    "type": "DataMaxCardinality",
+    "named": false
+  },
+  {
+    "type": "DataMinCardinality",
+    "named": false
+  },
+  {
+    "type": "DataOneOf",
+    "named": false
+  },
+  {
+    "type": "DataProperty",
+    "named": false
+  },
+  {
+    "type": "DataPropertyAssertion",
+    "named": false
+  },
+  {
+    "type": "DataPropertyDomain",
+    "named": false
+  },
+  {
+    "type": "DataPropertyRange",
+    "named": false
+  },
+  {
+    "type": "DataSomeValuesFrom",
+    "named": false
+  },
+  {
+    "type": "DataUnionOf",
+    "named": false
+  },
+  {
+    "type": "Datatype",
+    "named": false
+  },
+  {
+    "type": "DatatypeDefinition",
+    "named": false
+  },
+  {
+    "type": "DatatypeRestriction",
+    "named": false
+  },
+  {
+    "type": "Declaration",
+    "named": false
+  },
+  {
+    "type": "DifferentIndividuals",
+    "named": false
+  },
+  {
+    "type": "DisjointClasses",
+    "named": false
+  },
+  {
+    "type": "DisjointDataProperties",
+    "named": false
+  },
+  {
+    "type": "DisjointObjectProperties",
+    "named": false
+  },
+  {
+    "type": "DisjointUnion",
+    "named": false
+  },
+  {
+    "type": "EquivalentClasses",
+    "named": false
+  },
+  {
+    "type": "EquivalentDataProperties",
+    "named": false
+  },
+  {
+    "type": "EquivalentObjectProperties",
+    "named": false
+  },
+  {
+    "type": "FunctionalDataProperty",
+    "named": false
+  },
+  {
+    "type": "FunctionalObjectProperty",
+    "named": false
+  },
+  {
+    "type": "HasKey",
+    "named": false
+  },
+  {
+    "type": "Import",
+    "named": false
+  },
+  {
+    "type": "InverseFunctionalObjectProperty",
+    "named": false
+  },
+  {
+    "type": "InverseObjectProperties",
+    "named": false
+  },
+  {
+    "type": "IrreflexiveObjectProperty",
+    "named": false
+  },
+  {
+    "type": "NamedIndividual",
+    "named": false
+  },
+  {
+    "type": "NegativeDataPropertyAssertion",
+    "named": false
+  },
+  {
+    "type": "NegativeObjectPropertyAssertion",
+    "named": false
+  },
+  {
+    "type": "ObjectAllValuesFrom",
+    "named": false
+  },
+  {
+    "type": "ObjectComplementOf",
+    "named": false
+  },
+  {
+    "type": "ObjectExactCardinality",
+    "named": false
+  },
+  {
+    "type": "ObjectHasSelf",
+    "named": false
+  },
+  {
+    "type": "ObjectHasValue",
+    "named": false
+  },
+  {
+    "type": "ObjectIntersectionOf",
+    "named": false
+  },
+  {
+    "type": "ObjectInverseOf",
+    "named": false
+  },
+  {
+    "type": "ObjectMaxCardinality",
+    "named": false
+  },
+  {
+    "type": "ObjectMinCardinality",
+    "named": false
+  },
+  {
+    "type": "ObjectOneOf",
+    "named": false
+  },
+  {
+    "type": "ObjectProperty",
+    "named": false
+  },
+  {
+    "type": "ObjectPropertyAssertion",
+    "named": false
+  },
+  {
+    "type": "ObjectPropertyChain",
+    "named": false
+  },
+  {
+    "type": "ObjectPropertyDomain",
+    "named": false
+  },
+  {
+    "type": "ObjectPropertyRange",
+    "named": false
+  },
+  {
+    "type": "ObjectSomeValuesFrom",
+    "named": false
+  },
+  {
+    "type": "ObjectUnionOf",
+    "named": false
+  },
+  {
+    "type": "Ontology",
+    "named": false
+  },
+  {
+    "type": "Prefix",
+    "named": false
+  },
+  {
+    "type": "ReflexiveObjectProperty",
+    "named": false
+  },
+  {
+    "type": "SameIndividual",
+    "named": false
+  },
+  {
+    "type": "SubAnnotationPropertyOf",
+    "named": false
+  },
+  {
+    "type": "SubClassOf",
+    "named": false
+  },
+  {
+    "type": "SubDataPropertyOf",
+    "named": false
+  },
+  {
+    "type": "SubObjectPropertyOf",
+    "named": false
+  },
+  {
+    "type": "SymmetricObjectProperty",
+    "named": false
+  },
+  {
+    "type": "TransitiveObjectProperty",
+    "named": false
+  },
+  {
+    "type": "^^",
+    "named": false
+  },
+  {
+    "type": "abbreviatedIRI",
+    "named": true
+  },
+  {
+    "type": "comment",
+    "named": true,
+    "extra": true
+  },
+  {
+    "type": "fullIRI",
+    "named": true
+  },
+  {
+    "type": "languageTag",
+    "named": true
+  },
+  {
+    "type": "nodeID",
+    "named": true
+  },
+  {
+    "type": "nonNegativeInteger",
+    "named": true
+  },
+  {
+    "type": "prefixName",
+    "named": true
+  },
+  {
+    "type": "quotedString",
+    "named": true
+  }
+]

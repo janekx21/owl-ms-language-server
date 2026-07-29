@@ -1,0 +1,2934 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/grammar.schema.json",
+  "name": "owl_fn",
+  "word": "_bare_word",
+  "rules": {
+    "ontologyDocument": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "prefixDeclaration"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Ontology"
+        }
+      ]
+    },
+    "prefixDeclaration": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "Prefix"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "prefixName"
+        },
+        {
+          "type": "STRING",
+          "value": "="
+        },
+        {
+          "type": "SYMBOL",
+          "name": "fullIRI"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "Ontology": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "Ontology"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "ALIAS",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "IRI"
+                  },
+                  "named": true,
+                  "value": "ontologyIRI"
+                },
+                {
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "ALIAS",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "IRI"
+                      },
+                      "named": true,
+                      "value": "versionIRI"
+                    },
+                    {
+                      "type": "BLANK"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Import"
+          }
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Axiom"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "Import": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "Import"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "IRI"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "nonNegativeInteger": {
+      "type": "PATTERN",
+      "value": "[0-9]+"
+    },
+    "quotedString": {
+      "type": "PATTERN",
+      "value": "\"([^\"\\\\]|\\\\.)*\""
+    },
+    "languageTag": {
+      "type": "PATTERN",
+      "value": "@[A-Za-z]+(-[A-Za-z0-9]+)*"
+    },
+    "nodeID": {
+      "type": "PATTERN",
+      "value": "_:[A-Za-z0-9_\\u00C0-\\uFFFF][A-Za-z0-9_.\\-\\u00C0-\\uFFFF]*"
+    },
+    "fullIRI": {
+      "type": "PATTERN",
+      "value": "<[^\\s<>\"{}|\\^`\\\\]*>"
+    },
+    "prefixName": {
+      "type": "PATTERN",
+      "value": "([A-Za-z_][A-Za-z0-9_.\\-]*)?:"
+    },
+    "abbreviatedIRI": {
+      "type": "PATTERN",
+      "value": "([A-Za-z_][A-Za-z0-9_.\\-]*)?:[A-Za-z_][A-Za-z0-9_.\\-]*"
+    },
+    "IRI": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "fullIRI"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "abbreviatedIRI"
+        }
+      ]
+    },
+    "_bare_word": {
+      "type": "PATTERN",
+      "value": "[A-Za-z][A-Za-z0-9]*"
+    },
+    "comment": {
+      "type": "PATTERN",
+      "value": "#[^\\n\\r]*"
+    },
+    "Declaration": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "Declaration"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Entity"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "Entity": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "Class"
+            },
+            {
+              "type": "STRING",
+              "value": "("
+            },
+            {
+              "type": "SYMBOL",
+              "name": "Class"
+            },
+            {
+              "type": "STRING",
+              "value": ")"
+            }
+          ]
+        },
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "Datatype"
+            },
+            {
+              "type": "STRING",
+              "value": "("
+            },
+            {
+              "type": "SYMBOL",
+              "name": "Datatype"
+            },
+            {
+              "type": "STRING",
+              "value": ")"
+            }
+          ]
+        },
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "ObjectProperty"
+            },
+            {
+              "type": "STRING",
+              "value": "("
+            },
+            {
+              "type": "SYMBOL",
+              "name": "ObjectProperty"
+            },
+            {
+              "type": "STRING",
+              "value": ")"
+            }
+          ]
+        },
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "DataProperty"
+            },
+            {
+              "type": "STRING",
+              "value": "("
+            },
+            {
+              "type": "SYMBOL",
+              "name": "DataProperty"
+            },
+            {
+              "type": "STRING",
+              "value": ")"
+            }
+          ]
+        },
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "AnnotationProperty"
+            },
+            {
+              "type": "STRING",
+              "value": "("
+            },
+            {
+              "type": "SYMBOL",
+              "name": "AnnotationProperty"
+            },
+            {
+              "type": "STRING",
+              "value": ")"
+            }
+          ]
+        },
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "NamedIndividual"
+            },
+            {
+              "type": "STRING",
+              "value": "("
+            },
+            {
+              "type": "SYMBOL",
+              "name": "NamedIndividual"
+            },
+            {
+              "type": "STRING",
+              "value": ")"
+            }
+          ]
+        }
+      ]
+    },
+    "AnnotationSubject": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "IRI"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "AnonymousIndividual"
+        }
+      ]
+    },
+    "AnnotationValue": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "AnonymousIndividual"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "IRI"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Literal"
+        }
+      ]
+    },
+    "Annotation": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "Annotation"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "AnnotationProperty"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "AnnotationValue"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "AnnotationAxiom": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "AnnotationAssertion"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "SubAnnotationPropertyOf"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "AnnotationPropertyDomain"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "AnnotationPropertyRange"
+        }
+      ]
+    },
+    "AnnotationAssertion": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "AnnotationAssertion"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "AnnotationProperty"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "AnnotationSubject"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "AnnotationValue"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "SubAnnotationPropertyOf": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "SubAnnotationPropertyOf"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "AnnotationProperty"
+          },
+          "named": true,
+          "value": "subAnnotationProperty"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "AnnotationProperty"
+          },
+          "named": true,
+          "value": "superAnnotationProperty"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "AnnotationPropertyDomain": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "AnnotationPropertyDomain"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "AnnotationProperty"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "IRI"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "AnnotationPropertyRange": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "AnnotationPropertyRange"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "AnnotationProperty"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "IRI"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "Class": {
+      "type": "SYMBOL",
+      "name": "IRI"
+    },
+    "Datatype": {
+      "type": "SYMBOL",
+      "name": "IRI"
+    },
+    "ObjectProperty": {
+      "type": "SYMBOL",
+      "name": "IRI"
+    },
+    "DataProperty": {
+      "type": "SYMBOL",
+      "name": "IRI"
+    },
+    "AnnotationProperty": {
+      "type": "SYMBOL",
+      "name": "IRI"
+    },
+    "Individual": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "NamedIndividual"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "AnonymousIndividual"
+        }
+      ]
+    },
+    "NamedIndividual": {
+      "type": "SYMBOL",
+      "name": "IRI"
+    },
+    "AnonymousIndividual": {
+      "type": "SYMBOL",
+      "name": "nodeID"
+    },
+    "Literal": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "typedLiteral"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "stringLiteralWithLanguage"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "stringLiteralNoLanguage"
+        }
+      ]
+    },
+    "typedLiteral": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "lexicalForm"
+        },
+        {
+          "type": "STRING",
+          "value": "^^"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Datatype"
+        }
+      ]
+    },
+    "lexicalForm": {
+      "type": "SYMBOL",
+      "name": "quotedString"
+    },
+    "stringLiteralNoLanguage": {
+      "type": "SYMBOL",
+      "name": "quotedString"
+    },
+    "stringLiteralWithLanguage": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "quotedString"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "languageTag"
+        }
+      ]
+    },
+    "ObjectPropertyExpression": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "ObjectProperty"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "InverseObjectProperty"
+        }
+      ]
+    },
+    "InverseObjectProperty": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectInverseOf"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectProperty"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DataPropertyExpression": {
+      "type": "SYMBOL",
+      "name": "DataProperty"
+    },
+    "DataRange": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "Datatype"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataIntersectionOf"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataUnionOf"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataComplementOf"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataOneOf"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DatatypeRestriction"
+        }
+      ]
+    },
+    "DataIntersectionOf": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DataIntersectionOf"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataRange"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataRange"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "DataRange"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DataUnionOf": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DataUnionOf"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataRange"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataRange"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "DataRange"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DataComplementOf": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DataComplementOf"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataRange"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DataOneOf": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DataOneOf"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Literal"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Literal"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DatatypeRestriction": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DatatypeRestriction"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Datatype"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "constrainingFacet"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "restrictionValue"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "constrainingFacet"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "restrictionValue"
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "constrainingFacet": {
+      "type": "SYMBOL",
+      "name": "IRI"
+    },
+    "restrictionValue": {
+      "type": "SYMBOL",
+      "name": "Literal"
+    },
+    "ClassExpression": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "Class"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectIntersectionOf"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectUnionOf"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectComplementOf"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectOneOf"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectSomeValuesFrom"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectAllValuesFrom"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectHasValue"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectHasSelf"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectMinCardinality"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectMaxCardinality"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectExactCardinality"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataSomeValuesFrom"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataAllValuesFrom"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataHasValue"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataMinCardinality"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataMaxCardinality"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataExactCardinality"
+        }
+      ]
+    },
+    "ObjectIntersectionOf": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectIntersectionOf"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ClassExpression"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ObjectUnionOf": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectUnionOf"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ClassExpression"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ObjectComplementOf": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectComplementOf"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ObjectOneOf": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectOneOf"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Individual"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Individual"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ObjectSomeValuesFrom": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectSomeValuesFrom"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ObjectAllValuesFrom": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectAllValuesFrom"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ObjectHasValue": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectHasValue"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Individual"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ObjectHasSelf": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectHasSelf"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ObjectMinCardinality": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectMinCardinality"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "nonNegativeInteger"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "ClassExpression"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ObjectMaxCardinality": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectMaxCardinality"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "nonNegativeInteger"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "ClassExpression"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ObjectExactCardinality": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectExactCardinality"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "nonNegativeInteger"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "ClassExpression"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DataSomeValuesFrom": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DataSomeValuesFrom"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "DataPropertyExpression"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataRange"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DataAllValuesFrom": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DataAllValuesFrom"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "DataPropertyExpression"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataRange"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DataHasValue": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DataHasValue"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Literal"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DataMinCardinality": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DataMinCardinality"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "nonNegativeInteger"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "DataRange"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DataMaxCardinality": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DataMaxCardinality"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "nonNegativeInteger"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "DataRange"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DataExactCardinality": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DataExactCardinality"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "nonNegativeInteger"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "DataRange"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "Axiom": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "Declaration"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassAxiom"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyAxiom"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyAxiom"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DatatypeDefinition"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "HasKey"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Assertion"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "AnnotationAxiom"
+        }
+      ]
+    },
+    "ClassAxiom": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "SubClassOf"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "EquivalentClasses"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DisjointClasses"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DisjointUnion"
+        }
+      ]
+    },
+    "SubClassOf": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "SubClassOf"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ClassExpression"
+          },
+          "named": true,
+          "value": "subClassExpression"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ClassExpression"
+          },
+          "named": true,
+          "value": "superClassExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "EquivalentClasses": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "EquivalentClasses"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ClassExpression"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DisjointClasses": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DisjointClasses"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ClassExpression"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DisjointUnion": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DisjointUnion"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Class"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "disjointClassExpressions"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "disjointClassExpressions": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ClassExpression"
+          }
+        }
+      ]
+    },
+    "ObjectPropertyAxiom": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "SubObjectPropertyOf"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "EquivalentObjectProperties"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DisjointObjectProperties"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "InverseObjectProperties"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyDomain"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyRange"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "FunctionalObjectProperty"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "InverseFunctionalObjectProperty"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ReflexiveObjectProperty"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "IrreflexiveObjectProperty"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "SymmetricObjectProperty"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "AsymmetricObjectProperty"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "TransitiveObjectProperty"
+        }
+      ]
+    },
+    "SubObjectPropertyOf": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "SubObjectPropertyOf"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "subObjectPropertyExpression"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ObjectPropertyExpression"
+          },
+          "named": true,
+          "value": "superObjectPropertyExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "subObjectPropertyExpression": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "propertyExpressionChain"
+        }
+      ]
+    },
+    "propertyExpressionChain": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectPropertyChain"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ObjectPropertyExpression"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "EquivalentObjectProperties": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "EquivalentObjectProperties"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ObjectPropertyExpression"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DisjointObjectProperties": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DisjointObjectProperties"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ObjectPropertyExpression"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ObjectPropertyDomain": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectPropertyDomain"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ObjectPropertyRange": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectPropertyRange"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "InverseObjectProperties": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "InverseObjectProperties"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "FunctionalObjectProperty": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "FunctionalObjectProperty"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "InverseFunctionalObjectProperty": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "InverseFunctionalObjectProperty"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ReflexiveObjectProperty": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ReflexiveObjectProperty"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "IrreflexiveObjectProperty": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "IrreflexiveObjectProperty"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "SymmetricObjectProperty": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "SymmetricObjectProperty"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "AsymmetricObjectProperty": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "AsymmetricObjectProperty"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "TransitiveObjectProperty": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "TransitiveObjectProperty"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DataPropertyAxiom": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "SubDataPropertyOf"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "EquivalentDataProperties"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DisjointDataProperties"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyDomain"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyRange"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "FunctionalDataProperty"
+        }
+      ]
+    },
+    "SubDataPropertyOf": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "SubDataPropertyOf"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "DataPropertyExpression"
+          },
+          "named": true,
+          "value": "subDataPropertyExpression"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "DataPropertyExpression"
+          },
+          "named": true,
+          "value": "superDataPropertyExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "EquivalentDataProperties": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "EquivalentDataProperties"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "DataPropertyExpression"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DisjointDataProperties": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DisjointDataProperties"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "DataPropertyExpression"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DataPropertyDomain": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DataPropertyDomain"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DataPropertyRange": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DataPropertyRange"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataRange"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "FunctionalDataProperty": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "FunctionalDataProperty"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DatatypeDefinition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DatatypeDefinition"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Datatype"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataRange"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "HasKey": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "HasKey"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ObjectPropertyExpression"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "DataPropertyExpression"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "Assertion": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "SameIndividual"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DifferentIndividuals"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassAssertion"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyAssertion"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "NegativeObjectPropertyAssertion"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyAssertion"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "NegativeDataPropertyAssertion"
+        }
+      ]
+    },
+    "sourceIndividual": {
+      "type": "SYMBOL",
+      "name": "Individual"
+    },
+    "targetIndividual": {
+      "type": "SYMBOL",
+      "name": "Individual"
+    },
+    "targetValue": {
+      "type": "SYMBOL",
+      "name": "Literal"
+    },
+    "SameIndividual": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "SameIndividual"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Individual"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Individual"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Individual"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DifferentIndividuals": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DifferentIndividuals"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Individual"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Individual"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Individual"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ClassAssertion": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ClassAssertion"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ClassExpression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "Individual"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "ObjectPropertyAssertion": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "ObjectPropertyAssertion"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Individual"
+          },
+          "named": true,
+          "value": "sourceIndividual"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Individual"
+          },
+          "named": true,
+          "value": "targetIndividual"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "NegativeObjectPropertyAssertion": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "NegativeObjectPropertyAssertion"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ObjectPropertyExpression"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Individual"
+          },
+          "named": true,
+          "value": "sourceIndividual"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Individual"
+          },
+          "named": true,
+          "value": "targetIndividual"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "DataPropertyAssertion": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "DataPropertyAssertion"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Individual"
+          },
+          "named": true,
+          "value": "sourceIndividual"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Literal"
+          },
+          "named": true,
+          "value": "targetValue"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "NegativeDataPropertyAssertion": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "NegativeDataPropertyAssertion"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Annotation"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "DataPropertyExpression"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Individual"
+          },
+          "named": true,
+          "value": "sourceIndividual"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "Literal"
+          },
+          "named": true,
+          "value": "targetValue"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    }
+  },
+  "extras": [
+    {
+      "type": "PATTERN",
+      "value": "[ \\t\\r\\n]"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "comment"
+    }
+  ],
+  "conflicts": [],
+  "precedences": [],
+  "externals": [],
+  "inline": [],
+  "supertypes": [],
+  "reserved": {}
+}

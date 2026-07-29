@@ -23,7 +23,8 @@
 	},
 	"activationEvents": [
 		"onLanguage:plaintext",
-		"onLanguage:owl-ms"
+		"onLanguage:owl-ms",
+		"onLanguage:owl-fn"
 	],
 	"icon": "icon.png",
 	"galleryBanner": {
@@ -43,6 +44,16 @@
 					"omn"
 				],
 				"configuration": "./language-configuration.json"
+			},
+			{
+				"id": "owl-fn",
+				"extensions": [
+					".ofn"
+				],
+				"aliases": [
+					"OWL Functional Syntax",
+					"ofn"
+				]
 			}
 		],
 		"configuration": {

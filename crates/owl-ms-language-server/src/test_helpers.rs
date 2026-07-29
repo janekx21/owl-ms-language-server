@@ -1,4 +1,6 @@
-use crate::{catalog::Catalog, web::HttpClient, workspace, Backend, LANGUAGE};
+use crate::functional::LANGUAGE_OFN;
+use crate::workspace::OntologyDocument;
+use crate::{catalog::Catalog, web::HttpClient, workspace, Backend, LANGUAGE_OMN};
 use itertools::Itertools;
 use log::info;
 use std::{collections::HashMap, fs, path::Path};
@@ -87,9 +89,15 @@ fn arrange_workspace_member(member: WorkspaceMember, path: &Path) {
     }
 }
 
-pub fn arrange_parser() -> Parser {
+pub fn arrange_parser_omn() -> Parser {
     let mut parser = Parser::new();
-    parser.set_language(&LANGUAGE).unwrap();
+    parser.set_language(&LANGUAGE_OMN).unwrap();
+    parser
+}
+
+pub fn arrange_parser_ofn() -> Parser {
+    let mut parser = Parser::new();
+    parser.set_language(&LANGUAGE_OFN).unwrap();
     parser
 }
 
@@ -147,8 +155,7 @@ pub async fn assert_empty_diagnostics(service: &LspService<Backend>) {
         for doc in workspace.internal_documents() {
             // TODO change tests to define all used IRIs
             // Filter out the not defined IRIs for now
-            let diagnostics = doc
-                .diagnostics(workspace)
+            let diagnostics = workspace::diagnostics(doc, workspace)
                 .into_iter()
                 // .filter(|d| !d.label.contains("not defined"))
                 .collect_vec();
@@ -166,7 +173,7 @@ pub async fn service_diagnostics(service: &LspService<Backend>) -> Vec<workspace
         .flat_map(|workspace| {
             workspace
                 .internal_documents()
-                .flat_map(|doc| doc.diagnostics(workspace))
+                .flat_map(|doc| workspace::diagnostics(doc, workspace))
         })
         .collect_vec()
 }

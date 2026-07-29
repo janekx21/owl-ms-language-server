@@ -4,7 +4,7 @@ use crate::{
     range::{Change, Range},
     rope_provider::RopeProvider,
     test_helpers::*,
-    workspace::apply_change_to_rope_and_tree,
+    workspace::{apply_change_to_rope_and_tree, diagnostics as ws_diagnostics, OntologyDocument},
     *,
 };
 use horned_owl::{
@@ -29,10 +29,36 @@ use tree_sitter_c2rust::Tree;
 /////////////////////////
 
 #[test]
-fn parse_ontology_should_work() {
+fn parse_ofn_should_work() {
+    let mut parser = arrange_parser_ofn();
+
+    let source_code = "Prefix(:=<http://www.example.com/iri#>)
+Prefix(o:=<http://www.example.com/iri#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://www.example.com/iri>
+<http://www.example.com/viri>
+
+)";
+
+    // Act
+    let tree = parser.parse(source_code, None).unwrap();
+
+    // Assert
+    info!("{tree:?}");
+    assert_eq!(tree.root_node().has_error(), false);
+}
+
+#[test]
+fn parse_omn_should_work() {
     setup();
     // Arrange
-    let mut parser = arrange_parser();
+    let mut parser = arrange_parser_omn();
 
     let source_code = "Ontology: Foobar";
 
@@ -56,7 +82,7 @@ fn reparse_ontology_node_ids() {
     // Just for exploration purposes
     setup();
     // Arrange
-    let mut parser = arrange_parser();
+    let mut parser = arrange_parser_omn();
 
     let source_code = indoc! {"
 Ontology: Foobar
@@ -279,7 +305,7 @@ async fn backend_did_open_should_create_document() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: "abc".to_string(),
             },
@@ -301,7 +327,54 @@ async fn backend_did_open_should_create_document() {
     assert_eq!(doc.uri(), &url);
     assert_eq!(doc.version(), 0);
     assert_eq!(doc.rope().to_string(), "abc");
-    assert!(doc.tree().root_node().is_error());
+    assert!(!doc.local_diagnostics().is_empty());
+}
+
+#[test(tokio::test)]
+async fn backend_did_open_ofn_should_create_document() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let url = Url::from_file_path(dir.path().join("foo.ofn")).unwrap();
+
+    // Act
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl-fn".to_string(),
+                version: 0,
+                text: "abc".to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+
+    let docs = workspace.internal_documents().collect_vec();
+
+    let doc = docs
+        .iter()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Should be exactly one"));
+
+    let ofn = match doc {
+        InternalDocument::InternalOmn(_) => panic!("Should be ofn"),
+        InternalDocument::InternalOfn(internal_fn_document) => internal_fn_document,
+    };
+    // TODO ofn do stuff
+
+    assert_eq!(doc.uri(), &url);
+    assert_eq!(doc.version(), 0);
+    assert_eq!(doc.rope().to_string(), "abc");
+    // assert!(!doc.local_diagnostics().is_empty()); // TODO
 }
 
 /// This tests if the "did_change" feature works on the lsp. It takes the document DEF and adds two changes resolving in ABCDEFGHI.
@@ -319,7 +392,7 @@ async fn backend_did_change_should_update_internal_rope() -> error::Result<()> {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: "DE😊F".to_string(),
             },
@@ -403,7 +476,7 @@ async fn backend_hover_on_class_should_show_class_info() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -467,7 +540,7 @@ async fn backend_hover_on_class_should_show_datatype_label() {
 
     let ontology = r#"
         Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-        Prefix: : <http://invalid/o#>
+        Prefix: : <http://example.com/o#>
         Ontology: HoverOnto
             Class: Janek
                 Annotations:
@@ -483,7 +556,7 @@ async fn backend_hover_on_class_should_show_datatype_label() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -614,7 +687,7 @@ async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -788,7 +861,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -903,7 +976,7 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1014,7 +1087,7 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1284,7 +1357,7 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1374,7 +1447,7 @@ async fn backend_import_resolve_should_load_documents() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: file_url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1411,7 +1484,7 @@ Class: class-in-first-file
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1525,7 +1598,7 @@ async fn backend_workspace_symbols_should_work() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1643,7 +1716,7 @@ async fn backend_did_open_should_load_external_documents_via_http() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1730,7 +1803,7 @@ async fn backend_did_open_should_load_external_rdf_via_http() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1831,7 +1904,7 @@ async fn backend_hover_should_use_external_rdf_info() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1940,7 +2013,7 @@ async fn backend_did_open_should_load_external_documents_via_file() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2083,7 +2156,7 @@ async fn backend_completion_test_helper(partial: &str, full: &str, ontology: &st
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2162,7 +2235,7 @@ async fn backend_completion_should_not_panic() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2216,7 +2289,7 @@ async fn backend_completion_on_empty_doc_should_suggest_ontology() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2288,7 +2361,7 @@ async fn backend_completion_with_iri_should_complete_to_iri() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2364,7 +2437,7 @@ async fn backend_completion_with_iri_should_be_case_insensitive() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2789,7 +2862,7 @@ async fn backend_rename_helper(
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: old_ontology.to_string(),
             },
@@ -2936,7 +3009,7 @@ async fn backend_did_open_should_load_external_documents_recursivly() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.into(),
             },
@@ -3705,7 +3778,7 @@ async fn backend_goto_definition_on_import_iri_not_in_catalog_should_return_none
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -3782,7 +3855,7 @@ async fn backend_goto_definition_on_import_iri_with_nested_catalog_should_work()
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -3848,7 +3921,7 @@ async fn backend_code_action_on_missing_iri_should_create_frame() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -3921,7 +3994,7 @@ async fn backend_code_action_for_keywords_should_work() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -3968,7 +4041,7 @@ async fn backend_did_change_should_update_ontology_id() {
     let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
 
     let ontology = indoc! { r#"
-        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+        Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
             Class: SomeClass
                 Annotations: rdfs:label "Some Class annotation"
     "#};
@@ -3978,7 +4051,7 @@ async fn backend_did_change_should_update_ontology_id() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -3997,8 +4070,8 @@ async fn backend_did_change_should_update_ontology_id() {
             content_changes: vec![TextDocumentContentChangeEvent {
                 text: "othername".into(),
                 range: Some(lsp_types::Range {
-                    start: lsp_types::Position::new(0, 26),
-                    end: lsp_types::Position::new(0, 34),
+                    start: lsp_types::Position::new(0, 30),
+                    end: lsp_types::Position::new(0, 38),
                 }),
                 range_length: None,
             }],
@@ -4018,25 +4091,19 @@ async fn backend_did_change_should_update_ontology_id() {
     assert_eq!(
         document.rope().to_string(),
         indoc! { r#"
-            Ontology: <http://invalid/othername> <http://invalid/ontology/123>
+            Ontology: <http://example.com/othername> <http://example.com/ontology/123>
                 Class: SomeClass
                     Annotations: rdfs:label "Some Class annotation"
         "#}
     );
 
-    let id = document
-        .queried_document
-        .ontology_id
-        .as_ref()
-        .unwrap()
-        .value();
-
     assert_eq!(
-        id,
-        &(
-            "http://invalid/othername".to_string(),
-            Some("http://invalid/ontology/123".to_string())
-        )
+        document.ontology_iri(),
+        Some("http://example.com/othername".to_string())
+    );
+    assert_eq!(
+        document.version_iri(),
+        Some("http://example.com/ontology/123".to_string())
     );
 }
 
@@ -4049,7 +4116,7 @@ async fn backend_did_change_with_syntax_change_should_update_ontology_id() {
     let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
 
     let ontology = indoc! { r#"
-        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+        Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
             Class: SomeClass
                 Annotations: rdfs:label "Some Class annotation"
     "#};
@@ -4059,7 +4126,7 @@ async fn backend_did_change_with_syntax_change_should_update_ontology_id() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4078,8 +4145,8 @@ async fn backend_did_change_with_syntax_change_should_update_ontology_id() {
             content_changes: vec![TextDocumentContentChangeEvent {
                 text: "Class: Foo".into(),
                 range: Some(lsp_types::Range {
-                    start: lsp_types::Position::new(0, 36),
-                    end: lsp_types::Position::new(0, 65),
+                    start: lsp_types::Position::new(0, 40),
+                    end: lsp_types::Position::new(0, 73),
                 }),
                 range_length: None,
             }],
@@ -4099,20 +4166,17 @@ async fn backend_did_change_with_syntax_change_should_update_ontology_id() {
     assert_eq!(
         document.rope().to_string(),
         indoc! { r#"
-            Ontology: <http://invalid/ontology> Class: Foo
+            Ontology: <http://example.com/ontology> Class: Foo
                 Class: SomeClass
                     Annotations: rdfs:label "Some Class annotation"
         "#}
     );
 
-    let id = document
-        .queried_document
-        .ontology_id
-        .as_ref()
-        .unwrap()
-        .value();
-
-    assert_eq!(id, &("http://invalid/ontology".to_string(), None));
+    assert_eq!(
+        document.ontology_iri(),
+        Some("http://example.com/ontology".to_string())
+    );
+    assert_eq!(document.version_iri(), None);
 }
 
 #[test(tokio::test)]
@@ -4124,9 +4188,9 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
     let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
 
     let ontology = indoc! { r#"
-        Prefix: foo: <http://invalid/foo>
-        Prefix: bar: <http://invalid/bar>
-        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+        Prefix: foo: <http://example.com/foo>
+        Prefix: bar: <http://example.com/bar>
+        Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
             Class: SomeClass
                 Annotations: rdfs:label "Some Class annotation"
     "#};
@@ -4136,7 +4200,7 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4154,7 +4218,7 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
             },
             content_changes: vec![
                 TextDocumentContentChangeEvent {
-                    text: "Ontology: <http://invalid/othername> <http://invalid/ontology/321>\n"
+                    text: "Ontology: <http://example.com/othername> <http://example.com/ontology/321>\n"
                         .into(),
                     range: Some(lsp_types::Range {
                         start: lsp_types::Position::new(1, 0),
@@ -4195,28 +4259,22 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
     assert_eq!(
         document.rope().to_string(),
         indoc! { r#"
-            Prefix: foo: <http://invalid/foo>
-            Ontology: <http://invalid/othername> <http://invalid/ontology/321>
-            #Prefix: bar: <http://invalid/bar>
-            #Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            Prefix: foo: <http://example.com/foo>
+            Ontology: <http://example.com/othername> <http://example.com/ontology/321>
+            #Prefix: bar: <http://example.com/bar>
+            #Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
                 Class: SomeClass
                     Annotations: rdfs:label "Some Class annotation"
         "#}
     );
 
-    let id = document
-        .queried_document
-        .ontology_id
-        .as_ref()
-        .unwrap()
-        .value();
-
     assert_eq!(
-        id,
-        &(
-            "http://invalid/othername".to_string(),
-            Some("http://invalid/ontology/321".to_string())
-        )
+        document.ontology_iri(),
+        Some("http://example.com/othername".to_string())
+    );
+    assert_eq!(
+        document.version_iri(),
+        Some("http://example.com/ontology/321".to_string())
     );
 }
 
@@ -4229,8 +4287,8 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports() {
     let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
 
     let ontology = indoc! { r#"
-        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
-            Import: <http://invalid/some-other-ontology>
+        Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
+            Import: <http://example.com/some-other-ontology>
             Class: SomeClass
                 Annotations: rdfs:label "Some Class annotation"
     "#};
@@ -4240,7 +4298,7 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4280,18 +4338,17 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports() {
     assert_eq!(
         document.rope().to_string(),
         indoc! { r#"
-            Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
-            #    Import: <http://invalid/some-other-ontology>
+            Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
+            #    Import: <http://example.com/some-other-ontology>
                 Class: SomeClass
                     Annotations: rdfs:label "Some Class annotation"
         "#}
     );
 
     let imports = document
-        .queried_document
-        .imports
+        .directly_imports()
         .iter()
-        .map(|i| i.value().clone())
+        .map(|url| url.to_string())
         .collect_vec();
 
     assert_eq!(imports, Vec::<String>::new());
@@ -4306,13 +4363,13 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports_2() {
     let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
 
     let ontology = indoc! { r#"
-        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
-        #    Import: <http://invalid/some-other-ontology>
+        Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
+        #    Import: <http://example.com/some-other-ontology>
 
-        #    Import: <http://invalid/some-other-ontology>
-            Import: <http://invalid/A>
-        #    Import: <http://invalid/B>
-        #    Import: <http://invalid/some-other-ontology>
+        #    Import: <http://example.com/some-other-ontology>
+            Import: <http://example.com/A>
+        #    Import: <http://example.com/B>
+        #    Import: <http://example.com/some-other-ontology>
 
             Class: SomeClass
                 Annotations: rdfs:label "Some Class annotation"
@@ -4323,7 +4380,7 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports_2() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4381,13 +4438,13 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports_2() {
     assert_eq!(
         document.rope().to_string(),
         indoc! { r#"
-            Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
-                Import: <http://invalid/some-other-ontology>
+            Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
+                Import: <http://example.com/some-other-ontology>
 
-            #    Import: <http://invalid/some-other-ontology>
-            #    Import: <http://invalid/A>
-                Import: <http://invalid/B>
-            #    Import: <http://invalid/some-other-ontology>
+            #    Import: <http://example.com/some-other-ontology>
+            #    Import: <http://example.com/A>
+                Import: <http://example.com/B>
+            #    Import: <http://example.com/some-other-ontology>
 
                 Class: SomeClass
                     Annotations: rdfs:label "Some Class annotation"
@@ -4395,15 +4452,17 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports_2() {
     );
 
     let imports = document
-        .queried_document
-        .imports
+        .directly_imports()
         .iter()
-        .map(|i| i.value().clone())
+        .map(|url| url.to_string())
         .collect_vec();
 
     assert_eq!(
         imports,
-        vec!["http://invalid/some-other-ontology", "http://invalid/B"]
+        vec![
+            "http://example.com/some-other-ontology",
+            "http://example.com/B"
+        ]
     );
 }
 
@@ -4417,14 +4476,14 @@ async fn backend_did_change_with_large_syntax_change_should_update_prefixes() {
 
     let ontology = indoc! { r#"
         # -----------
-        #    Prefix: c: <http://invalid/some-other-ontology>
+        #    Prefix: c: <http://example.com/some-other-ontology>
 
-        #    Prefix: d: <http://invalid/some-other-ontology>
-            Prefix: a: <http://invalid/A>
-        #    Prefix: b: <http://invalid/B>
-        #    Prefix: e: <http://invalid/some-other-ontology>
+        #    Prefix: d: <http://example.com/some-other-ontology>
+            Prefix: a: <http://example.com/A>
+        #    Prefix: b: <http://example.com/B>
+        #    Prefix: e: <http://example.com/some-other-ontology>
 
-        Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+        Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
             Class: SomeClass
                 Annotations: rdfs:label "Some Class annotation"
     "#};
@@ -4434,7 +4493,7 @@ async fn backend_did_change_with_large_syntax_change_should_update_prefixes() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4493,34 +4552,28 @@ async fn backend_did_change_with_large_syntax_change_should_update_prefixes() {
         document.rope().to_string(),
         indoc! { r#"
             # -----------
-                Prefix: c: <http://invalid/some-other-ontology>
+                Prefix: c: <http://example.com/some-other-ontology>
 
-            #    Prefix: d: <http://invalid/some-other-ontology>
-            #    Prefix: a: <http://invalid/A>
-                Prefix: b: <http://invalid/B>
-            #    Prefix: e: <http://invalid/some-other-ontology>
+            #    Prefix: d: <http://example.com/some-other-ontology>
+            #    Prefix: a: <http://example.com/A>
+                Prefix: b: <http://example.com/B>
+            #    Prefix: e: <http://example.com/some-other-ontology>
 
-            Ontology: <http://invalid/ontology> <http://invalid/ontology/123>
+            Ontology: <http://example.com/ontology> <http://example.com/ontology/123>
                 Class: SomeClass
                     Annotations: rdfs:label "Some Class annotation"
         "#}
     );
 
-    let prefixes = document
-        .queried_document
-        .prefixes
-        .iter()
-        .map(|(k, v)| (k.clone(), v.value().clone()))
-        .sorted() // Hash map entry orders are random. Lets sort them.
-        .collect_vec();
+    let prefixes = document.prefixes().into_iter().sorted().collect_vec();
 
     assert_eq!(
         prefixes,
         vec![
-            ("b".to_string(), "http://invalid/B".to_string()),
+            ("b".to_string(), "http://example.com/B".to_string()),
             (
                 "c".to_string(),
-                "http://invalid/some-other-ontology".to_string()
+                "http://example.com/some-other-ontology".to_string()
             ),
         ]
     );
@@ -4552,7 +4605,7 @@ async fn backend_did_change_with_some_should_prune_diagnostics() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4605,7 +4658,7 @@ async fn backend_did_change_with_some_should_prune_diagnostics() {
         "#}
     );
 
-    let diagnostics = document.diagnostics(workspace);
+    let diagnostics = ws_diagnostics(document, workspace);
 
     assert!(!diagnostics.iter().any(|d| d.label().contains('X')));
 }
@@ -4632,7 +4685,7 @@ async fn backend_diagnostics_with_syntax_error_should_report_nice_message() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl2md".to_string(),
+                language_id: "owl-ms".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4649,7 +4702,7 @@ async fn backend_diagnostics_with_syntax_error_should_report_nice_message() {
         .unwrap_or_else(|_| panic!("Multiple documents"));
 
     // Assert
-    let diagnostics = document.diagnostics(workspace);
+    let diagnostics = ws_diagnostics(document, workspace);
     info!("{:#?}", diagnostics);
     assert!(diagnostics
         .iter()
@@ -4666,7 +4719,7 @@ async fn backend_diagnostics_with_syntax_error_should_report_nice_message() {
 
 mod fuzz {
     use crate::{
-        workspace::{FrameInfo, QueriedDocument},
+        workspace::{diagnostics as ws_diagnostics, FrameInfo, OntologyDocument},
         Backend,
     };
 
@@ -4686,7 +4739,7 @@ mod fuzz {
         Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
         Prefix: oth: <http://invalis/other/>
         Ontology: <http://example.org/fuzz-test>
-            Import: <http://invalid/ontology>
+            Import: <http://example.com/ontology>
         
             Class: Foo
                 Annotations: rdfs:label "Foo Label"
@@ -4746,7 +4799,8 @@ mod fuzz {
         let (doc, ws) = sync.get_internal_document(ontology_url).unwrap();
         let initial_rope = doc.rope().to_string();
         let initial_frame_infos = doc
-            .all_frame_infos()
+            .frame_infos()
+            .iter()
             .map(
                 |FrameInfo {
                      iri,
@@ -4763,24 +4817,30 @@ mod fuzz {
             .sorted()
             .join("\n");
 
-        let diagnostics = doc.diagnostics(ws);
-        let prefixes_ = doc.prefixes().into_iter().sorted().collect_vec();
-        let QueriedDocument {
-            ontology_id,
-            prefixes,
-            imports,
-        } = &doc.queried_document;
-        let prefixes = prefixes.iter().sorted().collect_vec();
-
-        let definitions = &doc
-            .stage2
-            .definitions
+        let diagnostics = ws_diagnostics(doc, ws);
+        let prefixes = doc.prefixes().into_iter().sorted().collect_vec();
+        let ontology_id = (doc.ontology_iri(), doc.version_iri());
+        let imports = doc
+            .directly_imports()
             .iter()
-            .sorted_by_key(|rb| rb.value().iri.clone());
-        let references = &doc.stage2.references.iter().sorted_by_key(|rb| rb.value());
-        let annotations = &doc.stage2.annotations.iter().sorted_by_key(|rb| rb.value());
+            .map(|url| url.to_string())
+            .sorted()
+            .collect_vec();
 
-        format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes_:#?}\n\n# Queried Document\n{ontology_id:#?}{prefixes:#?}{imports:#?}\n\n# Definitions\n{definitions:#?}\n\n# References\n{references:#?}\n\n# Annotations\n{annotations:#?}")
+        let definitions = doc
+            .definitions()
+            .into_iter()
+            .sorted_by_key(|rb| rb.value().iri.clone())
+            .collect_vec();
+        let references = doc
+            .references()
+            .into_iter()
+            .sorted_by_key(|rb| rb.value())
+            .collect_vec();
+
+        // Annotations should be part of the frame infos
+
+        format!("# Internal Document\n{initial_rope}\n\n---\n\n# Frame Infos\n{initial_frame_infos}\n\n# Diagnostics\n{diagnostics:#?}\n\n# Prefixes\n{prefixes:#?}\n\n# Ontology ID\n{ontology_id:#?}\n\n# Imports\n{imports:#?}\n\n# Definitions\n{definitions:#?}\n\n# References\n{references:#?}")
     }
 
     proptest! {
@@ -4814,7 +4874,7 @@ mod fuzz {
                         .did_open(DidOpenTextDocumentParams {
                             text_document: TextDocumentItem {
                                 uri: ontology_url.clone(),
-                                language_id: "owl2md".to_string(),
+                                language_id: "owl-ms".to_string(),
                                 version: 0,
                                 text: ONTOLOGY.to_string(),
                             },
@@ -4925,7 +4985,7 @@ mod fuzz {
                             .did_open(DidOpenTextDocumentParams {
                                 text_document: TextDocumentItem {
                                     uri: ontology_url.clone(),
-                                    language_id: "owl2md".to_string(),
+                                    language_id: "owl-ms".to_string(),
                                     version: 0,
                                     text: ONTOLOGY.to_string(),
                                 },
@@ -4982,7 +5042,7 @@ mod fuzz {
                         .did_open(DidOpenTextDocumentParams {
                             text_document: TextDocumentItem {
                                 uri: ontology_url.clone(),
-                                language_id: "owl2md".to_string(),
+                                language_id: "owl-ms".to_string(),
                                 version: 0,
                                 text: ontology_after_edit,
                             },

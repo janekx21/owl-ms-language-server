@@ -603,6 +603,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
+name = "enum_dispatch"
+version = "0.3.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa18ce2bc66555b3218614519ac839ddb759a7d6720732f979ef8d13be147ecd"
+dependencies = [
+ "once_cell",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "enum_meta"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1369,6 +1381,7 @@ dependencies = [
  "clap",
  "criterion",
  "dirs",
+ "enum_dispatch",
  "horned-owl",
  "indoc",
  "itertools 0.14.0",
@@ -1381,6 +1394,7 @@ dependencies = [
  "proptest",
  "quick-xml 0.37.5",
  "rayon",
+ "rayon-join",
  "ropey",
  "serde",
  "serde_json",
@@ -1392,6 +1406,7 @@ dependencies = [
  "tokio",
  "tower-lsp",
  "tree-sitter-c2rust",
+ "tree-sitter-owl-fn",
  "tree-sitter-owl-ms",
  "ureq 3.1.4",
  "walkdir",
@@ -1804,6 +1819,15 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "rayon-join"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a70b6645c2840dfed6f3dcf5bda8f986cde4e0d973a64d52d88e843d83d7eb20"
+dependencies = [
+ "rayon",
 ]
 
 [[package]]
@@ -2695,6 +2719,15 @@ name = "tree-sitter-language"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4013970217383f67b18aef68f6fb2e8d409bc5755227092d32efb0422ba24b8"
+
+[[package]]
+name = "tree-sitter-owl-fn"
+version = "1.0.0"
+dependencies = [
+ "cc",
+ "tree-sitter-c2rust",
+ "tree-sitter-language",
+]
 
 [[package]]
 name = "tree-sitter-owl-ms"

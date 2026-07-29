@@ -2,6 +2,8 @@ mod catalog;
 mod consts;
 pub mod debugging;
 mod error;
+mod functional;
+mod manchester;
 mod pos;
 mod queries;
 mod range;
@@ -22,6 +24,7 @@ use itertools::Itertools;
 use log::{debug, error, info, warn};
 use pos::Position;
 use range::Range;
+use ropey::Rope;
 use std::collections::{HashMap, HashSet, LinkedList};
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
@@ -33,13 +36,14 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer};
 use tree_sitter_c2rust::Language;
-use workspace::{node_text, trim_full_iri, Workspace};
+use workspace::Workspace;
 
-use crate::consts::child_keywords_for_kind;
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{
-    Document, DocumentReference, FormattingSettings, FrameType, InternalDocument,
+    inlay_hint as document_inlay_hint, publish_lsp_diagnostics, reachable_docs_recursive, Document,
+    DocumentReference, FormattingSettings, Highlights, HoverResult, InternalDocument,
+    IriAtPosition, KeywordAction, Lang, OntologyDocument,
 };
 
 // Re-export for benchmarks
@@ -47,7 +51,7 @@ pub use crate::workspace::clear_caches;
 
 // Constants
 
-pub static LANGUAGE: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_ms::LANGUAGE.into());
+pub static LANGUAGE_OMN: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_ms::LANGUAGE.into());
 
 // Model
 
@@ -90,13 +94,11 @@ impl Backend {
             // So my error type is not send and terefore we need the conversion to ok()
             #[allow(clippy::match_result_ok)]
             if let Some((document, workspace)) = sync.get_internal_document(&file_url).ok() {
-                document
-                    .publish_lsp_diagnostics(workspace, encoding, &mini_backend.client)
-                    .await;
+                publish_lsp_diagnostics(document, workspace, encoding, &mini_backend.client).await;
 
                 // Create diagnostics for files that depend on this file
                 for other_internal_doc in workspace.internal_documents() {
-                    let depends_on_me = other_internal_doc.reachable_urls(false).iter().any(|u| {
+                    let depends_on_me = other_internal_doc.directly_imports().iter().any(|u| {
                         workspace.document_by_url(u) == Some(DocumentReference::Internal(document))
                     });
 
@@ -168,11 +170,11 @@ impl Backend {
 
                 if let Some(doc) = resolved_doc {
                     match doc {
-                        Document::Internal(internal_document) => {
-                            for ele in internal_document.reachable_urls(true) {
+                        Document::Internal(doc_variant) => {
+                            for ele in doc_variant.directly_references_doc() {
                                 todo.push_back((ele.clone(), 1));
                             }
-                            let file_url = Url::from_file_path(internal_document.path())
+                            let file_url = Url::from_file_path(doc_variant.path())
                                 .expect("Path should also be a Url");
                             {
                                 let mut sync = mini_backend.sync.write().await;
@@ -180,7 +182,7 @@ impl Backend {
                                     &Url::from_file_path(&path)
                                         .expect("File path should be convertable to URL"),
                                 );
-                                workspace.insert_internal_document(internal_document);
+                                workspace.insert_internal_document(doc_variant);
                             }
 
                             mini_backend.update_diagnostics_for_url_and_dependent(file_url);
@@ -349,8 +351,8 @@ async fn build_todo_list(
 
     let document = workspace.get_internal_document(path).unwrap();
     document
-        .reachable_urls(true)
-        .iter()
+        .directly_references_doc()
+        .into_iter()
         .map(|u| (u.clone(), 1))
         .collect()
 }
@@ -426,38 +428,50 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         async {
             let file_url = params.text_document.uri;
-            info!("Did open {file_url} ...",);
+            let language_id = params.text_document.language_id;
+            info!("Did open {file_url} {language_id} ...",);
 
-            let mut sync = self.write_sync().await;
+            let lang = match &language_id[..] {
+                "owl-ms" => Some(Lang::Omn),
+                "owl-fn" => Some(Lang::Ofn),
+                _ => None,
+            };
 
-            let workspace = sync.get_or_insert_workspace_mut(&file_url);
-            let internal_document = InternalDocument::new(
-                file_url.clone(),
-                params.text_document.version,
-                params.text_document.text,
-            );
+            if let Some(lang) = lang {
+                let mut sync = self.write_sync().await;
 
-            let doc = workspace.insert_internal_document(internal_document);
-            let path = doc.path().to_path_buf();
+                let workspace = sync.get_or_insert_workspace_mut(&file_url);
+                let internal_document = InternalDocument::new(
+                    file_url.clone(),
+                    params.text_document.version,
+                    params.text_document.text,
+                    &lang,
+                );
 
-            let handle = self.load_dependencies(&path);
+                let doc = workspace.insert_internal_document(internal_document);
+                let path = doc.path().to_path_buf();
 
-            #[cfg(test)]
-            {
-                // This is just for tests, so that they dont produce a race condition
-                drop(sync);
-                handle.await.unwrap();
+                let handle = self.load_dependencies(&path);
+
+                #[cfg(test)]
+                {
+                    // This is just for tests, so that they dont produce a race condition
+                    drop(sync);
+                    handle.await.unwrap();
+                }
+                #[cfg(not(test))]
+                {
+                    workspace.index_handles.push(handle);
+                }
+
+                self.update_diagnostics_for_url_and_dependent(file_url);
+
+                debug!("Did open!");
+
+                Ok(())
+            } else {
+                Err(Error::DocumentNotSupported(language_id))
             }
-            #[cfg(not(test))]
-            {
-                workspace.index_handles.push(handle);
-            }
-
-            self.update_diagnostics_for_url_and_dependent(file_url);
-
-            debug!("Did open!");
-
-            Ok(())
         }
         .await
         .log_if_error();
@@ -539,7 +553,7 @@ impl LanguageServer for Backend {
         // TODO just send the diff
         let text = doc.formatted(&options);
 
-        let range: Range = doc.tree().root_node().range().into();
+        let range = doc.range();
 
         return Ok(Some(vec![TextEdit {
             range: range.into_lsp(doc.rope(), self.encoding())?,
@@ -562,23 +576,27 @@ impl LanguageServer for Backend {
             doc.rope(),
             self.encoding(),
         )?;
-        let node = doc
-            .tree()
-            .root_node()
-            .named_descendant_for_point_range(pos.into(), pos.into())
-            .ok_or(Error::PositionOutOfBounds(pos))?;
 
-        let info = ws.node_info(&node, doc);
-
-        Ok(if info.is_empty() {
-            None
-        } else {
-            // Transitive into
-            let range: Range = node.range().into();
-            Some(Hover {
-                contents: HoverContents::Scalar(MarkedString::String(info)),
+        Ok(match doc.hover(pos) {
+            None => None,
+            Some(HoverResult::Keyword { text, range }) => Some(Hover {
+                contents: HoverContents::Scalar(MarkedString::String(text)),
                 range: Some(range.into_lsp(doc.rope(), self.encoding())?),
-            })
+            }),
+            Some(HoverResult::Iri { iri, range }) => {
+                let info = ws
+                    .get_frame_info(&iri)
+                    .map(|fi| fi.info_display(ws))
+                    .unwrap_or(iri);
+                if info.is_empty() {
+                    None
+                } else {
+                    Some(Hover {
+                        contents: HoverContents::Scalar(MarkedString::String(info)),
+                        range: Some(range.into_lsp(doc.rope(), self.encoding())?),
+                    })
+                }
+            }
         })
     }
 
@@ -599,7 +617,7 @@ impl LanguageServer for Backend {
                 .ok_or(Error::InvalidUrl(url.clone()))?
         );
 
-        let hints = document.inlay_hint(range, self.encoding(), workspace);
+        let hints = document_inlay_hint(document, range, self.encoding(), workspace);
 
         Ok(Some(hints))
     }
@@ -619,29 +637,21 @@ impl LanguageServer for Backend {
             self.encoding(),
         )?;
 
-        let leaf_node = doc
-            .tree()
-            .root_node()
-            .named_descendant_for_point_range(pos.into(), pos.into())
-            .ok_or(Error::PositionOutOfBounds(pos))?;
+        let reachable_docs = reachable_docs_recursive(doc, workspace, true);
 
-        let reachable_docs = doc.reachable_docs_recursive(workspace, true);
-
-        let node_is_iri = ["full_iri", "simple_iri", "abbreviated_iri"].contains(&leaf_node.kind());
-        if node_is_iri {
-            let iri = trim_full_iri(node_text(&leaf_node, doc.rope()));
-            let iri = doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-
+        if let Some(iri_at) = doc
+            .iri_at(pos)
+            .or_else(|| doc.iri_at(pos.moved_left(1, doc.rope())))
+        {
+            let IriAtPosition {
+                full_iri: iri,
+                is_import,
+                ..
+            } = iri_at.value();
             debug!("Try goto definition of {iri}");
 
-            let iri_is_import_iri = leaf_node
-                .parent()
-                .expect("iri node should have parent")
-                .kind()
-                == "import";
-
-            if iri_is_import_iri {
-                let url = Url::parse(&iri).map_err(|_| Error::InvalidUrl(url.clone()))?;
+            if *is_import {
+                let url = Url::parse(iri).map_err(|_| Error::InvalidUrl(url.clone()))?;
                 // This does not work for external documents from prefixes
                 let path = workspace.url_to_path_with_catalog(&url);
                 if let Some(path) = path {
@@ -649,7 +659,7 @@ impl LanguageServer for Backend {
                 }
             } else {
                 let frame_info =
-                    Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs);
+                    Workspace::get_frame_info_recursive(workspace, iri, &reachable_docs);
                 if let Some(frame_info) = frame_info {
                     let locations = frame_info
                         .definitions
@@ -748,12 +758,14 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
-        debug!("semantic_tokens_full at {}", params.text_document.uri);
         let url = params.text_document.uri;
+        debug!("semantic_tokens_full at {url}");
+
         let sync = self.read_sync().await;
         let (doc, _) = sync.get_internal_document(&url)?;
 
-        let tokens = doc.sematic_tokens(None, self.encoding())?;
+        let highlights = doc.highlights(Range::FULL_RANGE);
+        let tokens = highlights_to_semantic_tokens(&highlights, doc.rope(), self.encoding())?;
 
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
@@ -765,12 +777,14 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensRangeParams,
     ) -> Result<Option<SemanticTokensRangeResult>> {
-        debug!("semantic_tokens_range at {}", params.text_document.uri);
         let url = params.text_document.uri;
         let sync = self.read_sync().await;
         let (doc, _) = sync.get_internal_document(&url)?;
         let range = Range::from_lsp(&params.range, doc.rope(), self.encoding())?;
-        let tokens = doc.sematic_tokens(Some(range), self.encoding())?;
+        debug!("semantic_tokens_range at {url}:{range}");
+
+        let highlights = doc.highlights(range);
+        let tokens = highlights_to_semantic_tokens(&highlights, doc.rope(), self.encoding())?;
 
         return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
             result_id: None,
@@ -785,9 +799,10 @@ impl LanguageServer for Backend {
         let url = params.text_document.uri;
         let sync = self.read_sync().await;
         let (doc, workspace) = sync.get_internal_document(&url)?;
-        let infos = doc.all_frame_infos();
+        let infos = doc.frame_infos();
         return Ok(Some(DocumentSymbolResponse::Flat(
             infos
+                .iter()
                 .flat_map(|info| {
                     let name = info.label(workspace).unwrap_or_else(|| {
                         doc.full_iri_to_abbreviated_iri(&info.iri)
@@ -896,47 +911,35 @@ impl LanguageServer for Backend {
             self.encoding(),
         )?;
 
-        let node = doc
-            .tree()
-            .root_node()
-            .named_descendant_for_point_range(pos.into(), pos.into())
-            .ok_or(Error::PositionOutOfBounds(pos))?;
-
-        let full_iri_option = match node.kind() {
-            "full_iri" => Some(trim_full_iri(node_text(&node, doc.rope()))),
-            "simple_iri" | "abbreviated_iri" => {
-                let iri = node_text(&node, doc.rope());
-                Some(
-                    doc.abbreviated_iri_to_full_iri(&iri)
-                        .unwrap_or(iri.to_string()),
-                )
-            }
-            _ => None,
-        };
-
-        Ok(if let Some(full_iri) = full_iri_option {
-            let locations = workspace
-                .internal_documents()
-                .flat_map(|doc| {
-                    doc.references(&full_iri, params.context.include_declaration)
-                        .into_iter()
-                        .filter_map(|range| {
-                            range
-                                .into_lsp(doc.rope(), self.encoding())
-                                .inspect_log()
-                                .ok()
-                        })
-                        .map(|range| Location {
-                            uri: Url::from_file_path(doc.path())
-                                .expect("File path should be a valid URL"),
-                            range,
-                        })
-                })
-                .collect_vec();
-            Some(locations)
-        } else {
-            None
-        })
+        Ok(
+            if let Some(full_iri) = doc
+                .iri_at(pos)
+                .or_else(|| doc.iri_at(pos.moved_left(1, doc.rope())))
+                .map(|rb| rb.value().full_iri.clone())
+            {
+                let locations = workspace
+                    .internal_documents()
+                    .flat_map(|doc| {
+                        doc.find_iri_references(&full_iri, params.context.include_declaration)
+                            .into_iter()
+                            .filter_map(|range| {
+                                range
+                                    .into_lsp(doc.rope(), self.encoding())
+                                    .inspect_log()
+                                    .ok()
+                            })
+                            .map(|range| Location {
+                                uri: Url::from_file_path(doc.path())
+                                    .expect("File path should be a valid URL"),
+                                range,
+                            })
+                    })
+                    .collect_vec();
+                Some(locations)
+            } else {
+                None
+            },
+        )
     }
 
     async fn prepare_rename(
@@ -949,68 +952,12 @@ impl LanguageServer for Backend {
         let (doc, _) = sync.get_internal_document(&url)?;
         let pos: Position = Position::from_lsp(params.position, doc.rope(), self.encoding())?;
 
-        fn node_range(position: Position, doc: &InternalDocument) -> Option<Range> {
-            debug!("prepare_rename try {position:?}");
-            let node = doc
-                .tree()
-                .root_node()
-                .named_descendant_for_point_range(position.into(), position.into())?;
-
-            // This excludes prefix declaration, import and annotation target IRIs
-            match node.parent()?.kind() {
-                "datatype_iri"
-                | "class_iri"
-                | "annotation_property_iri"
-                | "ontology_iri"
-                | "data_property_iri"
-                | "version_iri"
-                | "object_property_iri"
-                | "annotation_property_iri_annotated_list"
-                | "individual_iri" => {}
-                _ => return None,
-            }
-
-            match node.kind() {
-                "full_iri" => {
-                    let range: Range = node.range().into();
-                    let range = Range {
-                        start: range.start.moved_right(1, doc.rope()),
-                        end: range.end.moved_left(1, doc.rope()),
-                    };
-                    Some(range)
-                }
-                "simple_iri" => {
-                    let range: Range = node.range().into();
-                    Some(range)
-                }
-                "abbreviated_iri" => {
-                    let range: Range = node.range().into();
-                    let text = node_text(&node, doc.rope()).to_string();
-                    let col_offset = text
-                        .find(':')
-                        .expect("abbreviated_iri to contain at least one :")
-                        + 1;
-                    let range = Range {
-                        // The column offset will never be that big
-                        #[allow(clippy::cast_possible_truncation)]
-                        start: range.start.moved_right(col_offset as u32, doc.rope()),
-                        ..range
-                    };
-                    Some(range)
-                }
-                _ => None,
-            }
-        }
-
-        let range = node_range(pos, doc)
+        let range = doc
+            .rename_range(pos)
             .or_else(|| {
-                // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
-                // For example: ThisIsSomeIri| other text
-                //                           ^
-                //                       Cursor
+                // check one position left because renames should work when cursor is at end (inclusive) of a word
                 debug!("prepare rename try one position left");
-                let position = pos.moved_left(1, doc.rope());
-                node_range(position, doc)
+                doc.rename_range(pos.moved_left(1, doc.rope()))
             })
             .map(|range| {
                 Ok(PrepareRenameResponse::Range(
@@ -1037,34 +984,31 @@ impl LanguageServer for Backend {
             self.encoding(),
         )?;
 
-        let old_and_new_iri = if let Some(x) = rename_helper(pos, doc, new_name.clone())? {
-            Some(x)
-        } else {
-            // we need to check one position left of the position because renames should work when the cursor is at end (inclusive) of a word
-            // For example: ThisIsSomeIri| other text
-            //                           ^
-            //                       Cursor
+        let rename_info = doc.rename_info_at(pos, &new_name)?.or_else(|| {
+            // check one position left because renames should work when cursor is at end (inclusive) of a word
             debug!("prepare rename try one position left");
-            let position = pos.moved_left(1, doc.rope());
-            rename_helper(position, doc, new_name)?
-        };
+            doc.rename_info_at(pos.moved_left(1, doc.rope()), &new_name)
+                .inspect_err(|e: &Error| error!("{e}"))
+                .ok()
+                .flatten()
+        });
 
-        if let Some((full_iri, new_iri, iri_kind, original)) = old_and_new_iri {
-            debug!("renaming resolved iris from {full_iri:?} to {new_iri:?}");
+        if let Some(rename_info) = rename_info {
+            debug!("renaming resolved iris from {rename_info:?}");
             let changes = workspace
                 .internal_documents()
                 .map(|doc| {
                     let edits = doc
-                        .rename_edits(&full_iri, new_iri.as_ref(), &iri_kind, &original)
+                        .rename_edits(&rename_info)
                         .into_iter()
-                        .filter_map(|(range, str)| {
-                            range
+                        .filter_map(|rb| {
+                            rb.range()
                                 .into_lsp(doc.rope(), self.encoding())
                                 .inspect_log()
                                 .ok()
                                 .map(|range| TextEdit {
                                     range,
-                                    new_text: str,
+                                    new_text: rb.value().clone(),
                                 })
                         })
                         .collect_vec();
@@ -1106,70 +1050,6 @@ fn single_path_response(path: &Path) -> GotoDefinitionResponse {
     })
 }
 
-type IriKindName = Option<(String, Option<String>, String, String)>;
-
-fn rename_helper(
-    position: Position,
-    doc: &InternalDocument,
-    new_name: String,
-) -> Result<IriKindName> {
-    let node = doc
-        .tree()
-        .root_node()
-        .named_descendant_for_point_range(position.into(), position.into())
-        .ok_or(Error::PositionOutOfBounds(position))?;
-
-    match node.kind() {
-        "full_iri" => {
-            let iri_kind = node
-                .parent()
-                .expect("full_iri to have a parent")
-                .kind()
-                .to_string();
-            let iri = trim_full_iri(node_text(&node, doc.rope()));
-            Ok(Some((
-                iri.clone(),
-                Some(new_name.clone()),
-                iri_kind,
-                new_name,
-            )))
-        }
-        "simple_iri" => {
-            let iri = node_text(&node, doc.rope());
-            let iri_kind = node
-                .parent()
-                .expect("simple_iri to have a parent")
-                .kind()
-                .to_string();
-            Ok(Some((
-                doc.abbreviated_iri_to_full_iri(&iri)
-                    .unwrap_or(iri.to_string()),
-                doc.abbreviated_iri_to_full_iri(&new_name),
-                iri_kind,
-                new_name,
-            )))
-        }
-        "abbreviated_iri" => {
-            let iri_kind = node
-                .parent()
-                .expect("abbreviated_iri to have a parent")
-                .kind()
-                .to_string();
-            let iri = node_text(&node, doc.rope()).to_string();
-            let (prefix, _) = iri
-                .split_once(':')
-                .expect("abbreviated_iri to contain at least one :");
-            Ok(Some((
-                doc.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri.clone()),
-                doc.abbreviated_iri_to_full_iri(&format!("{prefix}:{new_name}")),
-                iri_kind,
-                format!("{prefix}:{new_name}"),
-            )))
-        }
-        _ => Ok(None),
-    }
-}
-
 fn missin_iri_actions(
     pos: Position,
     doc: &InternalDocument,
@@ -1180,32 +1060,22 @@ fn missin_iri_actions(
     // to internal one should take place somehow. Not needed now I think.
     // Also I dont know how they are matched
 
-    let node = doc
-        .tree()
-        .root_node()
-        .named_descendant_for_point_range(pos.into(), pos.into())
-        .ok_or(Error::PositionOutOfBounds(pos))?;
+    let frame_type = doc.iri_at(pos).and_then(|rb| rb.value().frame_type);
 
-    let diagnostics = doc.diagnostics(ws);
+    let diagnostics = workspace::diagnostics(doc, ws);
     let diagnostics_under_cursor = diagnostics
         .into_iter()
         .filter(|diagnostic| diagnostic.range.contains(pos));
 
-    let end: Position = doc.tree().root_node().range().end_point.into();
-    let end_lsp = end.into_lsp(doc.rope(), encoding)?;
+    let end_lsp = doc.range().end.into_lsp(doc.rope(), encoding)?;
     let create_missing_iri_actions = diagnostics_under_cursor.filter_map(|d| match &d.kind {
         workspace::DiagnosticKind::MissingIri(full_iri) => {
             let iri = doc.full_iri_to_shorter_iri(full_iri);
-            let iri_kind = node
-                .parent()
-                .expect("Missing IRI node should have parent")
-                .kind();
-
-            let frame_type = FrameType::parse(iri_kind);
-            let definition_str = frame_type.to_definition()?;
+            let ft = frame_type?;
+            let definition_str = ft.to_definition()?;
 
             Some(CodeActionOrCommand::CodeAction(CodeAction {
-                title: format!("Create {frame_type} for {iri}",),
+                title: format!("Create {ft} for {iri}"),
                 edit: Some(WorkspaceEdit {
                     changes: Some(HashMap::from([(
                         doc.uri().clone(),
@@ -1233,44 +1103,35 @@ fn keyword_actions(
     doc: &InternalDocument,
     encoding: &PositionEncodingKind,
 ) -> Result<Vec<CodeActionOrCommand>> {
-    let mut actions = vec![];
-
-    let mut node = doc
-        .tree()
-        .root_node()
-        .named_descendant_for_point_range(pos.into(), pos.into())
-        .ok_or(Error::PositionOutOfBounds(pos))?;
-
-    while let Some(parent) = node.parent() {
-        let kind = node.kind();
-        let kwds = child_keywords_for_kind(kind);
-
-        for (parent_name, new_text) in kwds {
-            let range: Range = node.range().into();
-            let lsp_range = range.into_lsp(doc.rope(), encoding)?;
-            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: format!("In {parent_name} add {}", new_text.trim()),
-                edit: Some(WorkspaceEdit {
-                    changes: Some(HashMap::from([(
-                        doc.uri().clone(),
-                        vec![TextEdit {
-                            range: lsp_types::Range {
-                                start: lsp_range.end,
-                                end: lsp_range.end,
-                            },
-                            new_text: format!("\n{new_text}"),
-                        }],
-                    )])),
+    doc.keyword_actions_at(pos)
+        .into_iter()
+        .map(
+            |KeywordAction {
+                 parent_name,
+                 new_text,
+                 range,
+             }| {
+                let lsp_range = range.into_lsp(doc.rope(), encoding)?;
+                Ok(CodeActionOrCommand::CodeAction(CodeAction {
+                    title: format!("In {parent_name} add {}", new_text.trim()),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(HashMap::from([(
+                            doc.uri().clone(),
+                            vec![TextEdit {
+                                range: lsp_types::Range {
+                                    start: lsp_range.end,
+                                    end: lsp_range.end,
+                                },
+                                new_text,
+                            }],
+                        )])),
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            }));
-        }
-
-        node = parent;
-    }
-
-    Ok(actions)
+                }))
+            },
+        )
+        .collect()
 }
 
 impl Backend {
@@ -1298,3 +1159,42 @@ where
 }
 
 impl USizeextra for usize {}
+
+/// Takes an ordered list of highlights and returns a likst of delta semantic tokens
+fn highlights_to_semantic_tokens(
+    highlights: &Highlights,
+    rope: &Rope,
+    encoding: &PositionEncodingKind,
+) -> Result<Vec<SemanticToken>> {
+    let mut tokens = Vec::new();
+    let mut last_line = 0;
+    let mut last_character = 0;
+    for rb in highlights.iter().sorted_unstable() {
+        let range = rb.range();
+        // This is the index of the semantic token.
+        let token_type = *rb.value();
+        #[allow(clippy::cast_possible_truncation)]
+        let length = range.len_lsp(rope, encoding) as u32;
+        let range = range.into_lsp(rope, encoding)?;
+        let start = range.start;
+
+        let delta_line = start.line - last_line;
+        let delta_start = if delta_line == 0 {
+            start.character.saturating_sub(last_character)
+        } else {
+            start.character
+        };
+
+        tokens.push(SemanticToken {
+            delta_line,
+            delta_start,
+            length,
+            token_type,
+            token_modifiers_bitset: 0,
+        });
+
+        last_line = start.line;
+        last_character = start.character;
+    }
+    Ok(tokens)
+}
