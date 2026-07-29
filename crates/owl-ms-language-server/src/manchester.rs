@@ -7,11 +7,11 @@ use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type
 use crate::range::{Change, RangeBox};
 use crate::workspace::{
     build_iri_locations, capture_by_name, changes_from_lsp, edit_vec_rb, extend_vec_rb,
-    iri_to_parent_url, node_by_id, node_text, post_change_ranges, retain_vec_rb,
-    retain_vec_rb_on_remove, trim_full_iri, trim_string_value, word_before_character, Annotation,
-    Diagnostic, DocumentId, FormattingSettings, FrameInfo, FrameType, Highlights, HoverResult, Iri,
-    IriAtPosition, IriDefinition, KeywordAction, Location, OntologyDocument, OntologyId,
-    ParsedDocument, RenameInfo, UnwrappedQueryMatch, Workspace,
+    iri_to_parent_url, node_text, post_change_ranges, retain_vec_rb, retain_vec_rb_on_remove,
+    trim_full_iri, trim_string_value, word_before_character, Annotation, Diagnostic, DocumentId,
+    FormattingSettings, FrameInfo, FrameType, Highlights, HoverResult, Iri, IriAtPosition,
+    IriDefinition, KeywordAction, Location, OntologyDocument, OntologyId, ParsedDocument,
+    RenameInfo, UnwrappedQueryMatch, Workspace,
 };
 use crate::{
     debugging::timeit, queries::ALL_QUERIES, range::Range, rope_provider::RopeProvider,
@@ -534,11 +534,10 @@ impl OntologyDocument for InternalOmnDocument {
                         },
                         iri_capture.node.range,
                         FrameType::parse(
-                            self.node_by_id(iri_capture.node.id)
-                                .expect("the node id to be valid")
-                                .parent()
-                                .expect("the iri node to have a parent of a specific iri kind")
-                                .kind(),
+                            iri_capture
+                                .node
+                                .parent_kind
+                                .expect("iris should have parents"),
                         ),
                     ),
                     _ => unreachable!(),
@@ -559,50 +558,6 @@ impl OntologyDocument for InternalOmnDocument {
             .flatten()
             .collect_vec()
     }
-
-    // fn find_iri_references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range> {
-    //     self.parsed_document
-    //         .query(&ALL_QUERIES.iri_query_references)
-    //         .into_iter()
-    //         .map(|m| {
-    //             let (iri, range, node_id) = match &m.captures[..] {
-    //                 [iri_capture] => (
-    //                     match iri_capture.node.kind {
-    //                         "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
-    //                         "simple_iri" | "abbreviated_iri" => self
-    //                             .abbreviated_iri_to_full_iri(&iri_capture.node.text)
-    //                             .unwrap_or(iri_capture.node.text.clone()),
-    //                         _ => unreachable!(),
-    //                     },
-    //                     iri_capture.node.range,
-    //                     iri_capture.node.id,
-    //                 ),
-    //                 _ => unreachable!(),
-    //             };
-
-    //             if &iri == full_iri {
-    //                 if !include_declaration {
-    //                     if let Some(node) = self.node_by_id(node_id) {
-    //                         let iri_context_kind = node
-    //                             .parent()
-    //                             .expect("IRIs should have parent nodes")
-    //                             .parent()
-    //                             .expect("IRI supertype should have a parent")
-    //                             .kind();
-    //                         if iri_context_kind.ends_with("frame") {
-    //                             return Ok(None);
-    //                         }
-    //                     }
-    //                 }
-    //                 Ok(Some(range))
-    //             } else {
-    //                 Ok(None)
-    //             }
-    //         })
-    //         .filter_and_log()
-    //         .flatten()
-    //         .collect_vec()
-    // }
 }
 
 impl InternalOmnDocument {
@@ -617,10 +572,6 @@ impl InternalOmnDocument {
 
     pub fn query_range(&self, query: &Query, range: Range) -> Vec<UnwrappedQueryMatch> {
         self.parsed_document.query_range(query, range)
-    }
-
-    pub fn node_by_id(&self, id: usize) -> Option<Node<'_>> {
-        node_by_id(&self.parsed_document, id)
     }
 
     pub fn new(uri: Url, version: i32, text: String) -> InternalOmnDocument {

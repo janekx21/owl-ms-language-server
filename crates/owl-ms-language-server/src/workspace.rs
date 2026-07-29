@@ -1353,25 +1353,6 @@ impl ParsedDocument {
     }
 }
 
-
-pub fn node_by_id(parsed_document: &ParsedDocument, id: usize) -> Option<Node<'_>> {
-    let mut w = parsed_document.tree.walk();
-    loop {
-        if w.node().id() == id {
-            return Some(w.node());
-        }
-
-        // In order traversal
-        if !w.goto_first_child() {
-            while !w.goto_next_sibling() {
-                if !w.goto_parent() {
-                    return None;
-                }
-            }
-        }
-    }
-}
-
 impl ParsedDocument {
     pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
         query_helper(self, query, None)

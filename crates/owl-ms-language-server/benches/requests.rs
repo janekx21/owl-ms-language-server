@@ -56,8 +56,8 @@ impl SeededRng {
     }
 }
 
-const BENCHMARK_SIZES: [usize; 10] = [
-    10, 37, 100, 370, 1_000, 3_700, 10_000, 37_000, 100_000, 370_000,
+const BENCHMARK_SIZES: [usize; 7] = [
+    10, 37, 100, 370, 1_000, 3_700, 10_000, // 37_000, 100_000, 370_000,
 ];
 
 /// Fixed seed for reproducible ontology generation
@@ -442,9 +442,6 @@ fn bench_hover(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        // group.sample_size(sample_size_for(size));
-        group.warm_up_time(Duration::from_millis(100));
-        group.measurement_time(Duration::from_millis(500));
         let ontology = generate_hover_ontology(size);
         let setup = setup_with_onto(ontology);
 
@@ -488,9 +485,6 @@ fn bench_goto_definition(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        // group.sample_size(sample_size_for(size));
-        group.warm_up_time(Duration::from_millis(100));
-        group.measurement_time(Duration::from_millis(500));
         let ontology = generate_goto_definition_ontology(size);
         let setup = setup_with_onto(ontology);
 
@@ -536,9 +530,6 @@ fn bench_completion(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        // group.sample_size(sample_size_for(size));
-        group.warm_up_time(Duration::from_millis(100));
-        group.measurement_time(Duration::from_millis(500));
 
         let ontology = generate_completion_ontology(size);
         let setup = &setup_with_onto(ontology);
@@ -586,11 +577,8 @@ fn bench_completion_keywords(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        // group.sample_size(sample_size_for(size));
-        group.warm_up_time(Duration::from_millis(100));
         let onto = generate_keyword_completion_ontology(size);
         let setup = &setup_with_onto(onto);
-        group.measurement_time(Duration::from_millis(500));
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
@@ -635,9 +623,6 @@ fn bench_references(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        // group.sample_size(sample_size_for(size));
-        group.warm_up_time(Duration::from_millis(100));
-        group.measurement_time(Duration::from_millis(500));
         let ontology = generate_reference_ontology(size);
         let setup = setup_with_onto(ontology);
 
@@ -679,9 +664,6 @@ fn bench_prepare_rename(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        // group.sample_size(sample_size_for(size));
-        group.warm_up_time(Duration::from_millis(100));
-        group.measurement_time(Duration::from_millis(500));
         let ontology = generate_rename_ontology(size);
         let setup = setup_with_onto(ontology);
 
@@ -719,10 +701,7 @@ fn bench_rename(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        group.sample_size(10); // TODO remove
-                               // group.sample_size(sample_size_for(size));
-        group.warm_up_time(Duration::from_millis(100));
-        group.measurement_time(Duration::from_millis(500));
+        group.sample_size(10);
         let ontology = generate_rename_ontology(size);
         let setup = setup_with_onto(ontology);
 
@@ -765,9 +744,6 @@ fn bench_document_symbol(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        // group.sample_size(sample_size_for(size));
-        group.warm_up_time(Duration::from_millis(100));
-        group.measurement_time(Duration::from_millis(500));
         let setup = setup_with_size(size);
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
@@ -802,9 +778,6 @@ fn bench_formatting(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        group.sample_size(sample_size_for(size));
-        group.warm_up_time(Duration::from_millis(100));
-        group.measurement_time(Duration::from_millis(500));
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter_batched(
@@ -848,8 +821,6 @@ fn bench_semantic_tokens_full(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        group.warm_up_time(Duration::from_millis(100));
-        group.measurement_time(Duration::from_millis(500));
         let setup = setup_with_size(size);
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
@@ -884,9 +855,6 @@ fn bench_semantic_tokens_range(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        // group.sample_size(sample_size_for(size));
-        group.warm_up_time(Duration::from_millis(100));
-        group.measurement_time(Duration::from_millis(500));
         let setup = setup_with_size(size);
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
@@ -925,9 +893,6 @@ fn bench_code_action(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        // group.sample_size(sample_size_for(size));
-        // group.warm_up_time(Duration::from_millis(100));
-        // group.measurement_time(Duration::from_millis(500));
         let setup = setup_with_size(size);
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
@@ -972,7 +937,6 @@ fn bench_inlay_hint(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        group.warm_up_time(Duration::from_millis(100));
         // group.measurement_time(Duration::from_millis(500));
         let setup = setup_with_size(size);
 
@@ -1009,8 +973,6 @@ fn bench_symbol(c: &mut Criterion) {
 
     for &size in &BENCHMARK_SIZES {
         group.throughput(Throughput::Elements(size as u64));
-        group.warm_up_time(Duration::from_millis(100));
-        group.measurement_time(Duration::from_millis(500));
         let setup = setup_with_size(size);
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
@@ -1042,9 +1004,11 @@ fn bench_symbol(c: &mut Criterion) {
 
 fn bench_did_change(c: &mut Criterion) {
     let mut group = c.benchmark_group("did_change");
-    group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
+    // group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
 
-    for &size in &BENCHMARK_SIZES {
+    for &size in &[
+        10, 37, 100, 370, 1_000, 3_700, 10_000, 37_000, 100_000, 370_000, 1_000_000,
+    ] {
         group.throughput(Throughput::Elements(size as u64));
         // let setup = setup_with_size(size);
 
@@ -1120,21 +1084,22 @@ fn bench_did_change(c: &mut Criterion) {
 
 criterion_group!(
     name = benches;
-    config = Criterion::default().warm_up_time(Duration::from_millis(100)).measurement_time(Duration::from_millis(500));
+    config = Criterion::default().warm_up_time(Duration::from_millis(100)).measurement_time(Duration::from_millis(500)).sample_size(20);
     targets = bench_hover,
     bench_goto_definition,
     bench_completion,
     bench_completion_keywords,
     bench_references,
     bench_prepare_rename,
-    bench_rename,
+    // bench_rename,
     bench_document_symbol,
     bench_formatting,
     bench_semantic_tokens_full,
     bench_semantic_tokens_range,
     bench_inlay_hint,
     bench_symbol,
-    bench_did_change
+    bench_did_change,
+    bench_code_action
 );
 
 // Profiling benchmarks group
@@ -1142,7 +1107,8 @@ criterion_group!(
 criterion_group!(
     name = profiling;
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
-    targets = bench_code_action
+     targets = bench_rename // write you benchmarks here
 );
-
 criterion_main!(benches, profiling);
+
+// criterion_main!(benches);
