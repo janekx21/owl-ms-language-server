@@ -23,6 +23,8 @@ use pretty::RcDoc;
 use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
 use ropey::Rope;
+use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::path::Path;
@@ -153,11 +155,11 @@ impl OntologyDocument for InternalOmnDocument {
         self.stage2.iri_locations.iter().collect()
     }
 
-    fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<String> {
+    fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<String> {
         self.queried_document.abbreviated_iri_to_full_iri(iri)
     }
 
-    fn full_iri_to_abbreviated_iri(&self, full_iri: &str) -> Option<String> {
+    fn full_iri_to_abbreviated_iri(&self, full_iri: &Iri) -> Option<String> {
         self.queried_document
             .prefixes
             .iter()
@@ -712,6 +714,7 @@ pub struct QueriedDocument {
 }
 
 impl QueriedDocument {
+    // TODO reduce ram usage
     /// Finds flat references to other document URL's in this document
     pub fn reachable_urls(
         &self,
@@ -838,6 +841,7 @@ impl QueriedDocument {
         self.document_annotations_in_range(parsed_document, Range::FULL_RANGE)
     }
 
+    // TODO remove ram usage somehow
     fn document_annotations_in_range(
         &self,
         parsed_document: &ParsedDocument,

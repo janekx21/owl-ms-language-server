@@ -9,6 +9,7 @@ use crate::pos::Position;
 use crate::queries::NODE_TYPES;
 use crate::range::{Change, RangeBox};
 use crate::web::{url_to_filename, HttpClient};
+use crate::Iri;
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
     rope_provider::RopeProvider, LANGUAGE_OMN,
@@ -39,6 +40,7 @@ use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter::once;
 use std::path::Path;
+use std::rc::Rc;
 use std::string::ToString;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
@@ -142,16 +144,16 @@ pub trait OntologyDocument {
     // IRI conversions
     /// Taking a (relative) abbreviated or simple IRI and resolving the (absolute) full IRI.
     /// The reverse of [`full_iri_to_abbreviated_iri`].
-    fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<Iri>;
+    fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<Iri>;
     /// Taking a (absolute) full IRI and by prefixing it making it shorter into a (relative)
     /// abbriviated or simple IRI.
     /// The reverse of [`abbreviated_iri_to_full_iri`].
-    fn full_iri_to_abbreviated_iri(&self, full_iri: &str) -> Option<String>;
+    fn full_iri_to_abbreviated_iri(&self, full_iri: &Iri) -> Option<String>;
 
-    fn full_iri_to_shorter_iri(&self, full_iri: &str) -> String {
+    fn full_iri_to_shorter_iri(&self, full_iri: &Iri) -> String {
         self.full_iri_to_abbreviated_iri(full_iri)
             .unwrap_or_else(|| {
-                if full_iri.contains("://") {
+                if full_iri.as_str().contains("://") {
                     format!("<{full_iri}>")
                 } else {
                     full_iri.to_string()
@@ -428,8 +430,8 @@ impl Workspace {
                     .into_iter()
                     .flat_map(
                         |item| -> Box<dyn Iterator<Item = (String, Iri, FrameInfo)>> {
-                            if item.iri.to_lowercase().contains(&partial_lower) {
-                                Box::new(once((item.iri.clone(), item.iri.clone(), item.clone())))
+                            if item.iri.as_str().to_lowercase().contains(&partial_lower) {
+                                Box::new(once((item.iri.to_string(), item.iri.clone(), item.clone())))
                             } else {
                                 Box::new(
                                     item.annotations
@@ -441,7 +443,7 @@ impl Workspace {
                                                 .starts_with(&partial_lower)
                                         })
                                         .map(|annotation| {
-                                            (annotation.iri.clone(), item.iri.clone(), item.clone())
+                                            (annotation.iri.to_string(), item.iri.clone(), item.clone())
                                         }),
                                 )
                             }
@@ -516,17 +518,17 @@ impl Workspace {
 
                 self.get_frame_info(&iri)
                     .map(|fi| fi.info_display(self))
-                    .unwrap_or(iri)
+                    .unwrap_or(iri.to_string())
             }
             "simple_iri" | "abbreviated_iri" => {
                 let iri = node_text(node, doc.rope());
                 let iri = doc
                     .abbreviated_iri_to_full_iri(&iri)
-                    .unwrap_or(iri.to_string());
+                    .unwrap_or(iri.into());
                 debug!("Getting node info for {iri} at doc {}", doc.uri());
                 self.get_frame_info(&iri)
                     .map(|fi| fi.info_display(self))
-                    .unwrap_or(iri)
+                    .unwrap_or(iri.to_string())
             }
             kind => keyword_hover_info(kind),
         }
@@ -946,7 +948,7 @@ pub fn inlay_hint(
             let end = rb.range().end;
 
             let label = Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs)
-                .ok_or(Error::FrameInfoNotFound(iri.clone()))?
+                .ok_or(Error::FrameInfoNotFound(iri.to_string()))?
                 .label(workspace)
                 .unwrap_or_default();
 
@@ -1399,7 +1401,7 @@ impl ParsedDocument {
     /// Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
     /// Prefix: owl: <http://www.w3.org/2002/07/owl#>
     /// ```
-    pub fn prefixes(&self) -> HashMap<String, RangeBox<String>> {
+    pub fn prefixes(&self) -> HashMap<String, RangeBox<Iri>> {
         self.query(&ALL_QUERIES.prefix)
             .into_iter()
             .map(|m| match &m.captures[..] {
@@ -1422,7 +1424,7 @@ impl ParsedDocument {
             .collect()
     }
 
-    pub fn prefixes_in_range(&self, range: Range) -> HashMap<String, RangeBox<String>> {
+    pub fn prefixes_in_range(&self, range: Range) -> HashMap<String, RangeBox<Iri>> {
         self.query_range(&ALL_QUERIES.prefix, range)
             .into_iter()
             .map(|m| match &m.captures[..] {
@@ -2211,9 +2213,6 @@ pub fn trim_string_value(value: &str) -> String {
         .to_string()
 }
 
-// TODO maybe use Arc<String>
-pub type Iri = String;
-
 pub fn node_text(node: &Node, rope: &Rope) -> String {
     rope.get_byte_slice(node.start_byte()..node.end_byte())
         .map_or(String::new(), |rs| rs.to_string())
@@ -2228,7 +2227,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
         .map(|rb| rb.value().clone())
         .collect();
 
-    let mut defines: HashSet<String> = doc
+    let mut defines: HashSet<Iri> = doc
         .definitions()
         .iter()
         .map(|rb| rb.value().iri.clone())

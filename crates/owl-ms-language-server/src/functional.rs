@@ -20,9 +20,10 @@ use crate::{
     rope_provider::RopeProvider,
     workspace::{
         changes_from_lsp, Diagnostic, DocumentId, FormattingSettings, FrameInfo, Highlights,
-        HoverResult, Iri, IriAtPosition, IriDefinition, KeywordAction, OntologyDocument,
-        ParsedDocument, RenameInfo, Workspace,
+        HoverResult, IriAtPosition, IriDefinition, KeywordAction, OntologyDocument, ParsedDocument,
+        RenameInfo, Workspace,
     },
+    Iri,
 };
 
 pub static LANGUAGE_OFN: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_fn::LANGUAGE.into());
@@ -263,7 +264,7 @@ impl OntologyDocument for InternalOfnDocument {
     #[doc = " Taking a (absolute) full IRI and by prefixing it making it shorter into a (relative)"]
     #[doc = " abbriviated or simple IRI."]
     #[doc = " The reverse of [`abbreviated_iri_to_full_iri`]."]
-    fn full_iri_to_abbreviated_iri(&self, full_iri: &str) -> Option<String> {
+    fn full_iri_to_abbreviated_iri(&self, full_iri: &Iri) -> Option<String> {
         None // TODO
     }
 
