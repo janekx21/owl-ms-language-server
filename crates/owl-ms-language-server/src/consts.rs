@@ -1,4 +1,7 @@
-use crate::workspace::{Annotation, FrameInfo, FrameType, Iri};
+use crate::{
+    iri::{Iri, ToIri},
+    workspace::{Annotation, FrameInfo, FrameType},
+};
 use indoc::indoc;
 
 // Build in xsd datatypes
@@ -10,7 +13,7 @@ pub const FLOAT_IRI: &str = "http://www.w3.org/2001/XMLSchema#float";
 pub const LABEL_IRI: &str = "http://www.w3.org/2000/01/rdf-schema#label";
 
 pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
-    match &iri[..] {
+    match &iri.as_str()[..] {
         LABEL_IRI => vec![FrameInfo {
             iri: LABEL_IRI.to_string(),
             annotations: vec![Annotation {
@@ -28,7 +31,7 @@ pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
         "http://www.w3.org/2000/01/rdf-schema#comment" => vec![FrameInfo {
             iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
             annotations: vec![Annotation {
-                frame_iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
+                frame_iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_iri(),
                 iri: LABEL_IRI.to_string(),
                 string_value: "comment".to_string(),
                 language: None,

@@ -4,16 +4,17 @@ use crate::consts::{
 };
 use crate::error::{Error, Result, ResultExt, ResultIterator};
 use crate::functional::InternalOfnDocument;
+use crate::iri::Iri;
 use crate::manchester::InternalOmnDocument;
 use crate::pos::Position;
 use crate::queries::NODE_TYPES;
 use crate::range::{Change, RangeBox};
 use crate::web::{url_to_filename, HttpClient};
-use crate::Iri;
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
     rope_provider::RopeProvider, LANGUAGE_OMN,
 };
+use crate::iri::*;
 use cached::{cached, Cached};
 use enum_dispatch::enum_dispatch;
 use horned_owl::model::Component::{self, AnnotationAssertion};
@@ -523,7 +524,7 @@ impl Workspace {
             "simple_iri" | "abbreviated_iri" => {
                 let iri = node_text(node, doc.rope());
                 let iri = doc
-                    .abbreviated_iri_to_full_iri(&iri)
+                    .abbreviated_iri_to_full_iri(&iri.to_iri())
                     .unwrap_or(iri.into());
                 debug!("Getting node info for {iri} at doc {}", doc.uri());
                 self.get_frame_info(&iri)
@@ -957,7 +958,7 @@ pub fn inlay_hint(
             let mut label_normalized = label.clone().to_lowercase();
             label_normalized.retain(char::is_alphanumeric);
 
-            let same = iri.to_lowercase().contains(&label_normalized);
+            let same = iri.as_str().to_lowercase().contains(&label_normalized);
 
             if label.is_empty() || same {
                 Ok(None)
@@ -1447,7 +1448,7 @@ impl ParsedDocument {
             .filter_map(|m| match &m.captures[..] {
                 [iri_capture] => Oxiri::parse(trim_full_iri(iri_capture.node.text.clone()))
                     .ok()
-                    .map(|iri_| RangeBox::new(iri_.as_str().to_string(), iri_capture.node.range)),
+                    .map(|iri_| RangeBox::new(iri_.as_str().to_iri(), iri_capture.node.range)),
                 _ => unimplemented!(),
             })
             .collect_vec()
@@ -1459,7 +1460,7 @@ impl ParsedDocument {
             .filter_map(|m| match &m.captures[..] {
                 [iri_capture] => Oxiri::parse(trim_full_iri(iri_capture.node.text.clone()))
                     .ok()
-                    .map(|iri_| RangeBox::new(iri_.as_str().to_string(), iri_capture.node.range)),
+                    .map(|iri_| RangeBox::new(iri_.as_str().to_iri(), iri_capture.node.range)),
                 _ => unimplemented!(),
             })
             .collect_vec()
@@ -2406,7 +2407,7 @@ pub fn trim_full_iri(untrimmed_iri: String) -> Iri {
     let iri = untrimmed_iri;
     iri.trim_end_matches('>')
         .trim_start_matches('<')
-        .to_string()
+        .into()
 }
 
 // Horned owl has no default here. Let's keep it out for now.

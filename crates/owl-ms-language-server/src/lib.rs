@@ -3,6 +3,7 @@ mod consts;
 pub mod debugging;
 mod error;
 mod functional;
+mod iri;
 mod manchester;
 mod pos;
 mod queries;
@@ -25,9 +26,7 @@ use log::{debug, error, info, warn};
 use pos::Position;
 use range::Range;
 use ropey::Rope;
-use std::cell::RefCell;
-use std::collections::{BTreeSet, HashMap, HashSet, LinkedList};
-use std::fmt::Display;
+use std::collections::{HashMap, HashSet, LinkedList};
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::{OnceCell, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -1208,45 +1207,4 @@ fn highlights_to_semantic_tokens(
         last_character = start.character;
     }
     Ok(tokens)
-}
-
-#[derive(Debug, Default)]
-pub struct ReusedIriSet(RefCell<BTreeSet<Iri>>);
-
-impl ReusedIriSet {
-    fn new() -> Self {
-        Self(RefCell::new(BTreeSet::new()))
-    }
-
-    pub fn iri(&self, a: &str) -> Iri {
-        let mut cache = self.0.borrow_mut();
-        let iri = Iri(Arc::from(a));
-        if let Some(rca) = cache.get(&iri) {
-            rca.clone()
-        } else {
-            let rca = iri;
-            cache.insert(rca.clone());
-            rca
-        }
-    }
-}
-
-thread_local! {
-    static REUSE_IRI: RefCell<ReusedIriSet> = RefCell::new(ReusedIriSet::new());
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
-pub struct Iri(Arc<str>);
-// TODO HIER hier add the iri stuff into owl-ms
-
-impl Display for Iri {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl Iri {
-    fn as_str(&self) -> &str {
-        &self.0
-    }
 }

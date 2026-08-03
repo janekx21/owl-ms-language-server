@@ -2,6 +2,7 @@ use crate::consts::{
     child_keywords_for_kind, keyword_hover_info, DECIMAL_IRI, FLOAT_IRI, INTEGER_IRI, STRING_IRI,
 };
 use crate::error::{Error, Result, ResultIterator};
+use crate::iri::{Iri, ToIri};
 use crate::pos::Position;
 use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type_index};
 use crate::range::{Change, RangeBox};
@@ -9,7 +10,7 @@ use crate::workspace::{
     build_iri_locations, capture_by_name, changes_from_lsp, edit_vec_rb, extend_vec_rb,
     iri_to_parent_url, node_text, post_change_ranges, retain_vec_rb, retain_vec_rb_on_remove,
     trim_full_iri, trim_string_value, word_before_character, Annotation, Diagnostic, DocumentId,
-    FormattingSettings, FrameInfo, FrameType, Highlights, HoverResult, Iri, IriAtPosition,
+    FormattingSettings, FrameInfo, FrameType, Highlights, HoverResult, IriAtPosition,
     IriDefinition, KeywordAction, Location, OntologyDocument, OntologyId, ParsedDocument,
     RenameInfo, UnwrappedQueryMatch, Workspace,
 };
@@ -23,8 +24,6 @@ use pretty::RcDoc;
 use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
 use ropey::Rope;
-use std::cell::RefCell;
-use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::path::Path;
@@ -155,7 +154,7 @@ impl OntologyDocument for InternalOmnDocument {
         self.stage2.iri_locations.iter().collect()
     }
 
-    fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<String> {
+    fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<Iri> {
         self.queried_document.abbreviated_iri_to_full_iri(iri)
     }
 
@@ -164,11 +163,13 @@ impl OntologyDocument for InternalOmnDocument {
             .prefixes
             .iter()
             .map(|(k, v)| (k.clone(), v.value().clone()))
-            .filter_map(|(prefix, url)| match full_iri.split_once(&url[..]) {
-                Some(("", post)) if prefix.is_empty() => Some(post.to_string()),
-                Some(("", post)) => Some(prefix + ":" + post),
-                Some(_) | None => None,
-            })
+            .filter_map(
+                |(prefix, url)| match full_iri.as_str().split_once(&url.as_str()[..]) {
+                    Some(("", post)) if prefix.is_empty() => Some(post.to_string()),
+                    Some(("", post)) => Some(prefix + ":" + post),
+                    Some(_) | None => None,
+                },
+            )
             .sorted_by_key(String::len)
             .next()
     }
@@ -201,7 +202,9 @@ impl OntologyDocument for InternalOmnDocument {
             }),
             "simple_iri" | "abbreviated_iri" => {
                 let iri = node_text(&node, self.rope());
-                let full_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                let full_iri = self
+                    .abbreviated_iri_to_full_iri(&iri.to_iri())
+                    .unwrap_or(iri.to_iri());
                 Some(HoverResult::Iri {
                     iri: full_iri,
                     range,
@@ -249,7 +252,9 @@ impl OntologyDocument for InternalOmnDocument {
             )),
             "simple_iri" | "abbreviated_iri" => {
                 let iri = node_text(&node, self.rope());
-                let full_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+                let full_iri = self
+                    .abbreviated_iri_to_full_iri(&iri.to_iri())
+                    .unwrap_or(iri.to_iri());
                 Some(RangeBox::new(
                     IriAtPosition {
                         full_iri,
@@ -331,7 +336,7 @@ impl OntologyDocument for InternalOmnDocument {
                 let full_iri = trim_full_iri(node_text(&node, self.rope()));
                 Some(RenameInfo {
                     full_iri,
-                    new_iri: Some(new_name.to_string()),
+                    new_iri: Some(new_name.to_iri()),
                     frame_type,
                     original: new_name.to_string(),
                 })
@@ -709,7 +714,7 @@ impl InternalOmnDocument {
 #[derive(Debug)]
 pub struct QueriedDocument {
     pub ontology_id: Option<RangeBox<OntologyId>>,
-    pub prefixes: HashMap<String, RangeBox<Iri>>,
+    pub prefixes: HashMap<String, RangeBox<String>>,
     pub imports: Vec<RangeBox<Iri>>,
 }
 
@@ -725,7 +730,7 @@ impl QueriedDocument {
             .imports
             .iter()
             .filter_map(|rb| {
-                Url::parse(rb.value())
+                Url::parse(rb.value().as_str())
                     .inspect_err(|url_err| error!("Import URL invalid {url_err}"))
                     .ok()
             })
@@ -775,18 +780,18 @@ impl QueriedDocument {
         (imports, other_urls)
     }
 
-    pub fn abbreviated_iri_to_full_iri(&self, abbreviated_iri: &str) -> Option<String> {
+    pub fn abbreviated_iri_to_full_iri(&self, abbreviated_iri: &Iri) -> Option<Iri> {
         let prefixes = &self.prefixes;
-        if let Some((prefix, simple_iri)) = abbreviated_iri.split_once(':') {
+        if let Some((prefix, simple_iri)) = abbreviated_iri.as_str().split_once(':') {
             prefixes
                 .get(prefix)
-                .map(|resolved_prefix| resolved_prefix.value().clone() + simple_iri)
+                .map(|resolved_prefix| [resolved_prefix.value().as_str(), simple_iri].join(""))
         } else {
             // Simple IRIs get a free colon prepended
             // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
-            prefixes
-                .get("")
-                .map(|resolved_prefix| resolved_prefix.value().clone() + abbreviated_iri)
+            prefixes.get("").map(|resolved_prefix| {
+                [resolved_prefix.value().as_str(), abbreviated_iri.as_str()].join("")
+            })
         }
     }
 
@@ -894,7 +899,7 @@ impl QueriedDocument {
                         "keyword_float" => FLOAT_IRI.to_string(),
                         "keyword_string" => STRING_IRI.to_string(),
                         _ => self
-                            .abbreviated_iri_to_full_iri(&c.node.text)
+                            .abbreviated_iri_to_full_iri(&c.node.text.into())
                             .unwrap_or(c.node.text.clone()),
                     });
 
@@ -965,7 +970,7 @@ impl QueriedDocument {
             .collect()
     }
 
-    fn document_references(&self, parsed_document: &ParsedDocument) -> Vec<RangeBox<String>> {
+    fn document_references(&self, parsed_document: &ParsedDocument) -> Vec<RangeBox<Iri>> {
         self.document_references_in_range(parsed_document, Range::FULL_RANGE)
     }
 
@@ -973,7 +978,7 @@ impl QueriedDocument {
         &self,
         parsed_document: &ParsedDocument,
         range: Range,
-    ) -> Vec<RangeBox<String>> {
+    ) -> Vec<RangeBox<Iri>> {
         parsed_document
             .query_range(&ALL_QUERIES.iri_query_references, range)
             .iter()

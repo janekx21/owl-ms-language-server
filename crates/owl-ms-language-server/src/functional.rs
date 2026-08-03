@@ -14,6 +14,7 @@ use tree_sitter_c2rust::{Language, Parser, Query, QueryCursor, StreamingIterator
 use crate::{
     debugging::timeit,
     error::{Error, Result},
+    iri::Iri,
     pos::Position,
     queries::treesitter_highlight_capture_into_semantic_token_type_index,
     range::{Range, RangeBox},
@@ -23,7 +24,6 @@ use crate::{
         HoverResult, IriAtPosition, IriDefinition, KeywordAction, OntologyDocument, ParsedDocument,
         RenameInfo, Workspace,
     },
-    Iri,
 };
 
 pub static LANGUAGE_OFN: LazyLock<Language> = LazyLock::new(|| tree_sitter_owl_fn::LANGUAGE.into());
