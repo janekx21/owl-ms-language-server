@@ -297,8 +297,9 @@ pub fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) ->
 
 #[cfg(test)]
 mod tests {
+    use crate::manchester::GLOBAL_OMN_PARSER;
+
     use super::*;
-    use crate::manchester::lock_global_omn_parser;
     use pretty_assertions::assert_eq;
     use test_log::test;
     use tree_sitter_c2rust::{QueryCursor, StreamingIterator};
@@ -314,8 +315,10 @@ mod tests {
 
                         SubClassOf: class-in-other-file
         "#;
-        let mut parser_guard = lock_global_omn_parser();
-        let tree = parser_guard.parse(text, None).expect("valid query");
+
+        let tree = GLOBAL_OMN_PARSER
+            .with(|parser| parser.borrow_mut().parse(text, None).expect("valid query"));
+
         let mut query_cursor = QueryCursor::new();
 
         // Act
@@ -332,8 +335,9 @@ mod tests {
         let text = "
             Ontology: OntologyID
         ";
-        let mut parser_guard = lock_global_omn_parser();
-        let tree = parser_guard.parse(text, None).expect("valid query");
+        let tree = GLOBAL_OMN_PARSER
+            .with(|parser| parser.borrow_mut().parse(text, None).expect("valid query"));
+
         let mut query_cursor = QueryCursor::new();
 
         // Act

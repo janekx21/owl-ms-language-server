@@ -4,7 +4,7 @@ use crate::consts::{
 };
 use crate::error::{Error, Result, ResultExt, ResultIterator};
 use crate::functional::InternalOfnDocument;
-use crate::iri::Iri;
+use crate::iri::{trim_tags, Iri};
 use crate::manchester::InternalOmnDocument;
 use crate::pos::Position;
 use crate::queries::NODE_TYPES;
@@ -27,7 +27,7 @@ use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-use ropey::Rope;
+use ropey::{Rope, RopeSlice};
 use sophia::api::graph::{Graph, MutableGraph};
 use sophia::api::ns::Namespace;
 use sophia::api::prelude::Any;
@@ -514,14 +514,14 @@ impl Workspace {
                 }
             }
             "full_iri" => {
-                let iri = trim_full_iri(&node_text(node, doc.rope()));
+                let iri = trim_full_iri_rope_slice(node_text(node, doc.rope()));
 
-                self.get_frame_info(&iri)
+                self.get_frame_info(&iri.to_iri())
                     .map(|fi| fi.info_display(self))
                     .unwrap_or(iri.to_string())
             }
             "simple_iri" | "abbreviated_iri" => {
-                let iri = node_text(node, doc.rope());
+                let iri = node_text(node, doc.rope()).to_string();
                 let iri = doc
                     .abbreviated_iri_to_full_iri(&iri.to_iri())
                     .unwrap_or(iri.into());
@@ -1356,11 +1356,11 @@ impl ParsedDocument {
 }
 
 impl ParsedDocument {
-    pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
+    pub fn query(&'_ self, query: &Query) -> Vec<UnwrappedQueryMatch<'_>> {
         query_helper(self, query, None)
     }
 
-    pub fn query_range(&self, query: &Query, range: Range) -> Vec<UnwrappedQueryMatch> {
+    pub fn query_range(&'_ self, query: &Query, range: Range) -> Vec<UnwrappedQueryMatch<'_>> {
         query_helper(self, query, Some(range))
     }
 
@@ -1372,13 +1372,13 @@ impl ParsedDocument {
                 [] => None,
                 // This should be a full IRI so lets trim it
                 [iri_capture] => Some(RangeBox::new(
-                    (trim_full_iri(&iri_capture.node.text.clone()), None),
+                    (trim_full_iri_rope_slice(iri_capture.node.text).to_iri(), None),
                     iri_capture.node.range,
                 )),
                 [iri_capture, version_iri_capture] => Some(RangeBox::new(
                     (
-                        trim_full_iri(&iri_capture.node.text.clone()),
-                        Some(trim_full_iri(&version_iri_capture.node.text.clone())),
+                        trim_full_iri_rope_slice(iri_capture.node.text).to_iri(),
+                        Some(trim_full_iri_rope_slice(version_iri_capture.node.text).to_iri()),
                     ),
                     Range::new(
                         iri_capture.node.range.start,
@@ -1406,9 +1406,9 @@ impl ParsedDocument {
             .into_iter()
             .map(|m| match &m.captures[..] {
                 [name_capture, iri_capture] => (
-                    name_capture.node.text.trim_end_matches(':').to_string(),
+                    name_capture.node.text.to_string().trim_end_matches(':').to_string(),
                     RangeBox::new(
-                        trim_tags(&iri_capture.node.text).to_string(),
+                        trim_full_iri_rope_slice(iri_capture.node.text).to_string(),
                         Range::new(name_capture.node.range.start, iri_capture.node.range.end),
                     ),
                 ),
@@ -1429,9 +1429,9 @@ impl ParsedDocument {
             .into_iter()
             .map(|m| match &m.captures[..] {
                 [name_capture, iri_capture] => (
-                    name_capture.node.text.trim_end_matches(':').to_string(),
+                    name_capture.node.text.to_string().trim_end_matches(':').to_string(),
                     RangeBox::new(
-                    trim_tags(&iri_capture.node.text).to_string(),
+                    trim_full_iri_rope_slice(iri_capture.node.text).to_string(),
                         Range::new(name_capture.node.range.start, iri_capture.node.range.end),
                     ),
                 ),
@@ -1445,7 +1445,7 @@ impl ParsedDocument {
         self.query(&ALL_QUERIES.import_query)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri_capture] => Oxiri::parse(trim_full_iri(&iri_capture.node.text.clone()))
+                [iri_capture] => Oxiri::parse(trim_full_iri_rope_slice(iri_capture.node.text).to_string())
                     .ok()
                     .map(|iri_| RangeBox::new(iri_.as_str().to_iri(), iri_capture.node.range)),
                 _ => unimplemented!(),
@@ -1457,7 +1457,7 @@ impl ParsedDocument {
         self.query_range(&ALL_QUERIES.import_query, range)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri_capture] => Oxiri::parse(trim_full_iri(&iri_capture.node.text.clone()))
+                [iri_capture] => Oxiri::parse(trim_full_iri_rope_slice(iri_capture.node.text).to_string())
                     .ok()
                     .map(|iri_| RangeBox::new(iri_.as_str().to_iri(), iri_capture.node.range)),
                 _ => unimplemented!(),
@@ -1466,11 +1466,12 @@ impl ParsedDocument {
     }
 }
 
-fn query_helper(
-    stage1: &ParsedDocument,
+// TODO consumes a lot of memory
+fn query_helper<'a>(
+    stage1: &'a ParsedDocument,
     query: &Query,
     range: Option<Range>,
-) -> Vec<UnwrappedQueryMatch> {
+) -> Vec<UnwrappedQueryMatch<'a>> {
     let mut query_cursor = QueryCursor::new();
     if let Some(range) = range {
         if range != Range::FULL_RANGE {
@@ -1487,11 +1488,11 @@ fn query_helper(
             captures: m
                 .captures
                 .iter()
-                .sorted_by_key(|c| c.index)
+                .sorted_by_cached_key(|c| c.index) // TODO Does this use less memory now?
                 .map(|c| UnwrappedQueryCapture {
                     node: UnwrappedNode {
                         id: c.node.id(),
-                        text: node_text(&c.node, &stage1.rope).to_string(),
+                        text: node_text(&c.node, &stage1.rope),
                         range: c.node.range().into(),
                         kind: c.node.kind(),
                         parent_kind: c.node.parent().map(|p| p.kind()),
@@ -1510,7 +1511,7 @@ pub fn capture_by_name<'a>(
     query: &'a Query,
     captures: &'a [UnwrappedQueryCapture],
     name: &'static str,
-) -> Option<&'a UnwrappedQueryCapture> {
+) -> Option<&'a UnwrappedQueryCapture<'a>> {
     captures.iter().find(|c| {
         c.index
             == query
@@ -1987,27 +1988,27 @@ fn simple_term_literal(simple_term: &SimpleTerm) -> String {
 }
 
 /// This is a version of a query match that has no reference to the tree or cursor
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct UnwrappedQueryMatch {
+#[derive(Debug, PartialEq, Eq)]
+pub struct UnwrappedQueryMatch<'a> {
     pattern_index: usize,
-    pub captures: Vec<UnwrappedQueryCapture>,
     _id: u32,
+    pub captures: Vec<UnwrappedQueryCapture<'a>>,
 }
 
 /// This is a version of a query capture that has no reference to the tree or cursor
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct UnwrappedQueryCapture {
-    pub node: UnwrappedNode,
+#[derive(Debug, PartialEq, Eq)]
+pub struct UnwrappedQueryCapture<'a> {
+    pub node: UnwrappedNode<'a>,
     pub index: u32,
 }
 
 /// This is a version of a node that has no reference to the tree
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct UnwrappedNode {
+#[derive(Debug, PartialEq, Eq)]
+pub struct UnwrappedNode<'a> {
     /// ID's of a changed tree stay the same. So you can search for up-to-date information that way
     pub id: usize,
     /// This information can be outdated
-    pub text: String,
+    pub text: RopeSlice<'a>,
     /// This information can be outdated
     pub range: Range,
     pub kind: &'static str,
@@ -2214,9 +2215,8 @@ pub fn trim_string_value(value: &str) -> String {
         .to_string()
 }
 
-pub fn node_text(node: &Node, rope: &Rope) -> String {
-    rope.get_byte_slice(node.start_byte()..node.end_byte())
-        .map_or(String::new(), |rs| rs.to_string())
+pub fn node_text<'a>(node: &Node, rope: &'a Rope) -> RopeSlice<'a> {
+    rope.get_byte_slice(node.start_byte()..node.end_byte()).expect("tree and rope should be synced")
 }
 
 fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnostic> {
@@ -2404,14 +2404,35 @@ impl Display for FrameType {
 
 /// Takes an IRI in any form and removed the <> symbols
 pub fn trim_full_iri(untrimmed_iri: &str) -> Iri {
-    trim_tags(&untrimmed_iri).into()
+    trim_tags(untrimmed_iri).into()
 }
  
-/// Takes a str in any form and removed the <> symbols
-pub fn trim_tags(untrimmed: &str) -> &str {
-    untrimmed.trim_end_matches('>')
-        .trim_start_matches('<')
+/// Takes an IRI in any form and removed the <> symbols
+pub fn trim_full_iri_rope_slice(slice: RopeSlice<'_>) -> RopeSlice<'_> {
+    if slice.len_chars() == 0 {
+        return slice
+    }
+
+    let slice  = slice.get_char(0).map_or_else(|| slice,|c|
+        if c == '<' {
+           slice.slice(1..) 
+        } else {
+            slice
+        }
+
+    );
+
+    let slice =  slice.get_char(slice.len_chars()-1).map_or_else(|| slice, |c|  {
+        if c == '>' {
+           slice.slice(..slice.len_chars()-1) 
+        } else {
+            slice
+        } } );
+
+
+    slice
 }
+ 
 
 // Horned owl has no default here. Let's keep it out for now.
 // static STANDARD_PREFIX_NAMES: [(&str, &str); 4] = [

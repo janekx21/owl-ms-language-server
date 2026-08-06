@@ -1,4 +1,5 @@
 use lasso::{Spur, ThreadedRodeo};
+use ropey::RopeSlice;
 use std::{borrow::Borrow, fmt::Display, ops::Deref, sync::LazyLock};
 
 #[derive(Debug, Default)]
@@ -54,6 +55,17 @@ impl ToIri for String {
     }
 }
 
+impl ToIri for RopeSlice<'_> {
+    fn to_iri(&self) -> Iri {
+        if let Some(str) = self.as_str() {
+            // Does not allocate a String
+            REUSE_IRI.iri(str)
+        } else {
+            REUSE_IRI.iri(&self.to_string())
+        }
+    }
+}
+
 impl From<String> for Iri {
     fn from(val: String) -> Self {
         REUSE_IRI.iri(&val)
@@ -77,6 +89,11 @@ impl Borrow<str> for Iri {
     fn borrow(&self) -> &str {
         REUSE_IRI.str(self)
     }
+}
+
+/// Takes a str in any form and removed the <> symbols
+pub fn trim_tags(untrimmed: &str) -> &str {
+    untrimmed.trim_end_matches('>').trim_start_matches('<')
 }
 
 #[cfg(test)]
