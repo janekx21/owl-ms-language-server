@@ -783,15 +783,14 @@ impl QueriedDocument {
 
         let referenced_urls = document_references
             .iter()
-            .filter_map(|rb| iri_to_parent_url(rb.value()))
             .unique()
-            .collect_vec();
+            .filter_map(|rb| iri_to_parent_url(rb.value()));
 
-        debug!(
-            "Extending {} with {}",
-            own_uri,
-            referenced_urls.iter().join(", ")
-        );
+        // debug!(
+        //     "Extending {} with {}",
+        //     own_uri,
+        //     referenced_urls.iter().join(", ")
+        // );
 
         other_urls.extend(referenced_urls);
 
