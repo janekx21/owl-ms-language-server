@@ -1,11 +1,10 @@
 use std::{
+    borrow::Borrow,
     collections::BTreeSet,
     fmt::Display,
     ops::Deref,
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock, RwLock},
 };
-
-use tokio::sync::RwLock;
 
 #[derive(Debug, Default)]
 pub struct ReusedIriSet(RwLock<BTreeSet<Iri>>);
@@ -15,17 +14,31 @@ impl ReusedIriSet {
         Self(RwLock::new(BTreeSet::new()))
     }
 
-    pub fn iri(&self, a: &str) -> Iri {
-        let iri = Iri(Arc::from(a));
-        {
-            let cache = self.0.blocking_read();
-            cache.get(&iri).map(|x| x.clone())
+    pub fn iri(&self, s: &str) -> Iri {
+        // Fast path: shared read lock, no allocation if already interned.
+        if let Some(existing) = self.0.read().unwrap().get(s) {
+            return existing.clone();
         }
-        .unwrap_or_else(|| {
-            let mut cache = self.0.blocking_write();
-            cache.insert(iri.clone());
-            iri
-        })
+        // Slow path: exclusive lock, re-check (another thread may have
+        // inserted between our read and here).
+        let mut set = self.0.write().unwrap();
+        if let Some(existing) = set.get(s) {
+            return existing.clone();
+        }
+        let iri = Iri(Arc::from(s));
+        set.insert(iri.clone());
+        iri
+        // todo!("")
+        // let iri = Iri(Arc::from(a));
+        // {
+        //     let cache = self.0.blocking_read();
+        //     cache.get(&iri).map(|x| x.clone())
+        // }
+        // .unwrap_or_else(|| {
+        //     let mut cache = self.0.blocking_write();
+        //     cache.insert(iri.clone());
+        //     iri
+        // })
     }
 }
 
@@ -76,11 +89,22 @@ impl Into<Iri> for String {
     }
 }
 
+impl Into<Iri> for &str {
+    fn into(self) -> Iri {
+        create_iri(&self)
+    }
+}
+
 impl Deref for Iri {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
         self.as_str()
+    }
+}
+impl Borrow<str> for Iri {
+    fn borrow(&self) -> &str {
+        &self.0
     }
 }
 
@@ -95,6 +119,7 @@ mod tests {
         let _iri2 = "http://example.com/onto#132".to_iri();
         let _iri3 = "http://example.com/onto#132".to_iri();
 
-        assert!(iri.ref_count() == 3);
+        // This is 4, because the resuse set holds one of the strong reference counts
+        assert_eq!(iri.ref_count(), 4);
     }
 }

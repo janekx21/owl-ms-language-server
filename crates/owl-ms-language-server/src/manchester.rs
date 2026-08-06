@@ -342,16 +342,16 @@ impl OntologyDocument for InternalOmnDocument {
                 })
             }
             "simple_iri" => {
-                let iri = node_text(&node, self.rope());
+                let iri = node_text(&node, self.rope()).into();
                 Some(RenameInfo {
                     full_iri: self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri),
-                    new_iri: self.abbreviated_iri_to_full_iri(new_name),
+                    new_iri: self.abbreviated_iri_to_full_iri(&new_name.into()),
                     frame_type,
                     original: new_name.to_string(),
                 })
             }
             "abbreviated_iri" => {
-                let annreviated_iri = node_text(&node, self.rope()).to_string();
+                let annreviated_iri: Iri = node_text(&node, self.rope()).into();
                 let (prefix, _) = annreviated_iri
                     .split_once(':')
                     .expect("abbreviated_iri to contain at least one :");
@@ -360,7 +360,7 @@ impl OntologyDocument for InternalOmnDocument {
                     full_iri: self
                         .abbreviated_iri_to_full_iri(&annreviated_iri)
                         .unwrap_or(annreviated_iri),
-                    new_iri: self.abbreviated_iri_to_full_iri(&new_original),
+                    new_iri: self.abbreviated_iri_to_full_iri(&new_original.to_iri()),
                     frame_type,
                     original: new_original,
                 })
@@ -535,8 +535,8 @@ impl OntologyDocument for InternalOmnDocument {
                         match iri_capture.node.kind {
                             "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
                             "simple_iri" | "abbreviated_iri" => self
-                                .abbreviated_iri_to_full_iri(&iri_capture.node.text)
-                                .unwrap_or(iri_capture.node.text.clone()),
+                                .abbreviated_iri_to_full_iri(&iri_capture.node.text.to_iri())
+                                .unwrap_or(iri_capture.node.text.to_iri()),
                             _ => unreachable!(),
                         },
                         iri_capture.node.range,
@@ -783,14 +783,18 @@ impl QueriedDocument {
     pub fn abbreviated_iri_to_full_iri(&self, abbreviated_iri: &Iri) -> Option<Iri> {
         let prefixes = &self.prefixes;
         if let Some((prefix, simple_iri)) = abbreviated_iri.as_str().split_once(':') {
-            prefixes
-                .get(prefix)
-                .map(|resolved_prefix| [resolved_prefix.value().as_str(), simple_iri].join(""))
+            prefixes.get(prefix).map(|resolved_prefix| {
+                [resolved_prefix.value().as_str(), simple_iri]
+                    .join("")
+                    .to_iri()
+            })
         } else {
             // Simple IRIs get a free colon prepended
             // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
             prefixes.get("").map(|resolved_prefix| {
-                [resolved_prefix.value().as_str(), abbreviated_iri.as_str()].join("")
+                [resolved_prefix.value().as_str(), abbreviated_iri.as_str()]
+                    .join("")
+                    .to_iri()
             })
         }
     }
@@ -892,23 +896,22 @@ impl QueriedDocument {
                     .and_then(|tag| language::Language::try_from(tag).ok());
                 // TODO #180 spawn diagnostics about wrong language
 
-                let datatype =
-                    datatype_capture.map_or(STRING_IRI.to_string(), |c| match c.node.kind {
-                        "keyword_integer" => INTEGER_IRI.to_string(),
-                        "keyword_decimal" => DECIMAL_IRI.to_string(),
-                        "keyword_float" => FLOAT_IRI.to_string(),
-                        "keyword_string" => STRING_IRI.to_string(),
-                        _ => self
-                            .abbreviated_iri_to_full_iri(&c.node.text.into())
-                            .unwrap_or(c.node.text.clone()),
-                    });
+                let datatype = datatype_capture.map_or(STRING_IRI.into(), |c| match c.node.kind {
+                    "keyword_integer" => INTEGER_IRI.into(),
+                    "keyword_decimal" => DECIMAL_IRI.into(),
+                    "keyword_float" => FLOAT_IRI.into(),
+                    "keyword_string" => STRING_IRI.into(),
+                    _ => self
+                        .abbreviated_iri_to_full_iri(&c.node.text.to_iri())
+                        .unwrap_or(c.node.text.to_iri()),
+                });
 
                 // The value can decide the type
                 // TODO maybe check with range of annotation property
                 let datatype = match value_capture.node.kind {
-                    "integer_literal" => INTEGER_IRI.to_string(),
-                    "decimal_literal" => DECIMAL_IRI.to_string(),
-                    "floating_point_literal" => FLOAT_IRI.to_string(),
+                    "integer_literal" => INTEGER_IRI.into(),
+                    "decimal_literal" => DECIMAL_IRI.into(),
+                    "floating_point_literal" => FLOAT_IRI.into(),
                     _ => datatype,
                 };
 
@@ -1462,7 +1465,7 @@ impl Stage2Document {
 
                     // Readd the index values
                     for rb in &add {
-                        let ranges = self.iri_locations.entry(rb.value().into()).or_default();
+                        let ranges = self.iri_locations.entry(rb.value().clone()).or_default();
                         ranges.push(RangeBox::new((), *rb.range()));
                     }
 

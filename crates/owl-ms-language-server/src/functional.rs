@@ -257,7 +257,7 @@ impl OntologyDocument for InternalOfnDocument {
 
     #[doc = " Taking a (relative) abbreviated or simple IRI and resolving the (absolute) full IRI."]
     #[doc = " The reverse of [`full_iri_to_abbreviated_iri`]."]
-    fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<Iri> {
+    fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<Iri> {
         None // TODO
     }
 
