@@ -1,69 +1,40 @@
-use std::{
-    borrow::Borrow,
-    collections::BTreeSet,
-    fmt::Display,
-    ops::Deref,
-    sync::{Arc, LazyLock, RwLock},
-};
+use lasso::{Spur, ThreadedRodeo};
+use std::{borrow::Borrow, fmt::Display, ops::Deref, sync::LazyLock};
 
 #[derive(Debug, Default)]
-pub struct ReusedIriSet(RwLock<BTreeSet<Iri>>);
+pub struct ReusedIriSet(ThreadedRodeo<Spur>);
 
 impl ReusedIriSet {
     fn new() -> Self {
-        Self(RwLock::new(BTreeSet::new()))
+        Self(ThreadedRodeo::new())
     }
 
     pub fn iri(&self, s: &str) -> Iri {
-        // Fast path: shared read lock, no allocation if already interned.
-        if let Some(existing) = self.0.read().unwrap().get(s) {
-            return existing.clone();
-        }
-        // Slow path: exclusive lock, re-check (another thread may have
-        // inserted between our read and here).
-        let mut set = self.0.write().unwrap();
-        if let Some(existing) = set.get(s) {
-            return existing.clone();
-        }
-        let iri = Iri(Arc::from(s));
-        set.insert(iri.clone());
-        iri
-        // todo!("")
-        // let iri = Iri(Arc::from(a));
-        // {
-        //     let cache = self.0.blocking_read();
-        //     cache.get(&iri).map(|x| x.clone())
-        // }
-        // .unwrap_or_else(|| {
-        //     let mut cache = self.0.blocking_write();
-        //     cache.insert(iri.clone());
-        //     iri
-        // })
+        let key = self.0.get_or_intern(s);
+        Iri(key)
     }
+
+    pub fn str(&self, i: &Iri) -> &str {
+        self.0.resolve(&i.0)
+    }
+
+    // TODO do this for the url as well
 }
 
-static REUSE_IRI: LazyLock<ReusedIriSet> = LazyLock::new(|| ReusedIriSet::new());
-
-pub fn create_iri(iri_str: &str) -> Iri {
-    REUSE_IRI.iri(iri_str)
-}
+static REUSE_IRI: LazyLock<ReusedIriSet> = LazyLock::new(ReusedIriSet::new);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
-pub struct Iri(Arc<str>);
+pub struct Iri(Spur);
 
 impl Display for Iri {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.as_str())
     }
 }
 
 impl Iri {
     pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn ref_count(&self) -> usize {
-        Arc::strong_count(&self.0)
+        REUSE_IRI.str(self)
     }
 }
 
@@ -73,25 +44,25 @@ pub trait ToIri {
 
 impl ToIri for &str {
     fn to_iri(&self) -> Iri {
-        create_iri(&self.to_string())
+        REUSE_IRI.iri(self)
     }
 }
 
 impl ToIri for String {
     fn to_iri(&self) -> Iri {
-        create_iri(&self)
+        REUSE_IRI.iri(self)
     }
 }
 
-impl Into<Iri> for String {
-    fn into(self) -> Iri {
-        create_iri(&self)
+impl From<String> for Iri {
+    fn from(val: String) -> Self {
+        REUSE_IRI.iri(&val)
     }
 }
 
-impl Into<Iri> for &str {
-    fn into(self) -> Iri {
-        create_iri(&self)
+impl From<&str> for Iri {
+    fn from(val: &str) -> Self {
+        REUSE_IRI.iri(val)
     }
 }
 
@@ -104,7 +75,7 @@ impl Deref for Iri {
 }
 impl Borrow<str> for Iri {
     fn borrow(&self) -> &str {
-        &self.0
+        REUSE_IRI.str(self)
     }
 }
 
@@ -115,11 +86,11 @@ mod tests {
 
     #[test]
     fn reused_iri_set_create_iri_should_work() {
-        let iri = "http://example.com/onto#132".to_iri();
+        let _iri = "http://example.com/onto#132".to_iri();
         let _iri2 = "http://example.com/onto#132".to_iri();
         let _iri3 = "http://example.com/onto#132".to_iri();
 
         // This is 4, because the resuse set holds one of the strong reference counts
-        assert_eq!(iri.ref_count(), 4);
+        assert_eq!(REUSE_IRI.0.len(), 1);
     }
 }

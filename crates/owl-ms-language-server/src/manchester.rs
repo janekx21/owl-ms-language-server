@@ -164,7 +164,7 @@ impl OntologyDocument for InternalOmnDocument {
             .iter()
             .map(|(k, v)| (k.clone(), v.value().clone()))
             .filter_map(
-                |(prefix, url)| match full_iri.as_str().split_once(&url.as_str()[..]) {
+                |(prefix, url)| match full_iri.as_str().split_once(url.as_str()) {
                     Some(("", post)) if prefix.is_empty() => Some(post.to_string()),
                     Some(("", post)) => Some(prefix + ":" + post),
                     Some(_) | None => None,
@@ -197,7 +197,7 @@ impl OntologyDocument for InternalOmnDocument {
         let range: Range = node.range().into();
         match node.kind() {
             "full_iri" => Some(HoverResult::Iri {
-                iri: trim_full_iri(node_text(&node, self.rope())),
+                iri: trim_full_iri(&node_text(&node, self.rope())),
                 range,
             }),
             "simple_iri" | "abbreviated_iri" => {
@@ -244,7 +244,7 @@ impl OntologyDocument for InternalOmnDocument {
         match node.kind() {
             "full_iri" => Some(RangeBox::new(
                 IriAtPosition {
-                    full_iri: trim_full_iri(node_text(&node, self.rope())),
+                    full_iri: trim_full_iri(&node_text(&node, self.rope())),
                     is_import,
                     frame_type,
                 },
@@ -333,7 +333,7 @@ impl OntologyDocument for InternalOmnDocument {
         }
         Ok(match node.kind() {
             "full_iri" => {
-                let full_iri = trim_full_iri(node_text(&node, self.rope()));
+                let full_iri = trim_full_iri(&node_text(&node, self.rope()));
                 Some(RenameInfo {
                     full_iri,
                     new_iri: Some(new_name.to_iri()),
@@ -397,7 +397,7 @@ impl OntologyDocument for InternalOmnDocument {
             .into_iter()
             .flat_map(|match_| match_.captures)
             .map(|capture| {
-                let iri = trim_full_iri(capture.node.text);
+                let iri = trim_full_iri(&capture.node.text);
                 let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
                 RangeBox::new(iri, capture.node.range)
             })
@@ -533,7 +533,7 @@ impl OntologyDocument for InternalOmnDocument {
                 let (iri, range, node_frame_type) = match &m.captures[..] {
                     [iri_capture] => (
                         match iri_capture.node.kind {
-                            "full_iri" => trim_full_iri(iri_capture.node.text.clone()),
+                            "full_iri" => trim_full_iri(&iri_capture.node.text.clone()),
                             "simple_iri" | "abbreviated_iri" => self
                                 .abbreviated_iri_to_full_iri(&iri_capture.node.text.to_iri())
                                 .unwrap_or(iri_capture.node.text.to_iri()),
@@ -879,12 +879,12 @@ impl QueriedDocument {
                 let language_capture =
                     capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "language");
 
-                let frame_iri = trim_full_iri(frame_iri_capture.node.text.clone());
+                let frame_iri = trim_full_iri(&frame_iri_capture.node.text.clone());
                 let frame_iri = self
                     .abbreviated_iri_to_full_iri(&frame_iri)
                     .unwrap_or(frame_iri);
 
-                let annotation_iri = trim_full_iri(annotation_iri_capture.node.text.clone());
+                let annotation_iri = trim_full_iri(&annotation_iri_capture.node.text.clone());
                 let annotation_iri = self
                     .abbreviated_iri_to_full_iri(&annotation_iri)
                     .unwrap_or(annotation_iri);
@@ -955,7 +955,7 @@ impl QueriedDocument {
                         .as_ref()
                         .expect("All frame IRIs should have parents");
 
-                    let frame_iri = trim_full_iri(frame_iri_capture.node.text.clone());
+                    let frame_iri = trim_full_iri(&frame_iri_capture.node.text.clone());
                     let frame_iri = self
                         .abbreviated_iri_to_full_iri(&frame_iri)
                         .unwrap_or(frame_iri);
@@ -987,7 +987,7 @@ impl QueriedDocument {
             .iter()
             .map(|m| match &m.captures[..] {
                 [iri_capture] => {
-                    let iri = trim_full_iri(iri_capture.node.text.clone());
+                    let iri = trim_full_iri(&iri_capture.node.text.clone());
                     let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
                     RangeBox::new(iri, iri_capture.node.range)

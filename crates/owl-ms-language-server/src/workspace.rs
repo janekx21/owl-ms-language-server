@@ -14,7 +14,7 @@ use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
     rope_provider::RopeProvider, LANGUAGE_OMN,
 };
-use crate::iri::*;
+use crate::iri::ToIri;
 use cached::{cached, Cached};
 use enum_dispatch::enum_dispatch;
 use horned_owl::model::Component::{self, AnnotationAssertion};
@@ -514,7 +514,7 @@ impl Workspace {
                 }
             }
             "full_iri" => {
-                let iri = trim_full_iri(node_text(node, doc.rope()));
+                let iri = trim_full_iri(&node_text(node, doc.rope()));
 
                 self.get_frame_info(&iri)
                     .map(|fi| fi.info_display(self))
@@ -1372,13 +1372,13 @@ impl ParsedDocument {
                 [] => None,
                 // This should be a full IRI so lets trim it
                 [iri_capture] => Some(RangeBox::new(
-                    (trim_full_iri(iri_capture.node.text.clone()), None),
+                    (trim_full_iri(&iri_capture.node.text.clone()), None),
                     iri_capture.node.range,
                 )),
                 [iri_capture, version_iri_capture] => Some(RangeBox::new(
                     (
-                        trim_full_iri(iri_capture.node.text.clone()),
-                        Some(trim_full_iri(version_iri_capture.node.text.clone())),
+                        trim_full_iri(&iri_capture.node.text.clone()),
+                        Some(trim_full_iri(&version_iri_capture.node.text.clone())),
                     ),
                     Range::new(
                         iri_capture.node.range.start,
@@ -1445,7 +1445,7 @@ impl ParsedDocument {
         self.query(&ALL_QUERIES.import_query)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri_capture] => Oxiri::parse(trim_full_iri(iri_capture.node.text.clone()))
+                [iri_capture] => Oxiri::parse(trim_full_iri(&iri_capture.node.text.clone()))
                     .ok()
                     .map(|iri_| RangeBox::new(iri_.as_str().to_iri(), iri_capture.node.range)),
                 _ => unimplemented!(),
@@ -1457,7 +1457,7 @@ impl ParsedDocument {
         self.query_range(&ALL_QUERIES.import_query, range)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri_capture] => Oxiri::parse(trim_full_iri(iri_capture.node.text.clone()))
+                [iri_capture] => Oxiri::parse(trim_full_iri(&iri_capture.node.text.clone()))
                     .ok()
                     .map(|iri_| RangeBox::new(iri_.as_str().to_iri(), iri_capture.node.range)),
                 _ => unimplemented!(),
@@ -2264,7 +2264,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
 
     // TODO this is a quick fix for now. The correct way will be not not include prefixes in the used Iris
     let prefixes = doc.prefixes();
-    let prefix_iris: HashSet<&str> = prefixes.values().map(|x| x.as_str()).collect();
+    let prefix_iris: HashSet<&str> = prefixes.values().map(String::as_str).collect();
     let import_iris: Vec<&str> = doc
         .directly_imports()
         .into_iter()
@@ -2403,7 +2403,7 @@ impl Display for FrameType {
 }
 
 /// Takes an IRI in any form and removed the <> symbols
-pub fn trim_full_iri(untrimmed_iri: String) -> Iri {
+pub fn trim_full_iri(untrimmed_iri: &str) -> Iri {
     trim_tags(&untrimmed_iri).into()
 }
  

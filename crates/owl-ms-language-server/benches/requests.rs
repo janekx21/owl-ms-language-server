@@ -1,7 +1,4 @@
-use criterion::{
-    criterion_group, criterion_main, AxisScale, BatchSize, BenchmarkId, Criterion,
-    PlotConfiguration, Throughput,
-};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use owl_ms_language_server::USizeextra;
 use owl_ms_language_server::{clear_caches, web::HttpClient, Backend};
 #[cfg(unix)]
