@@ -374,4 +374,8 @@ impl OntologyDocument for InternalOfnDocument {
     ) -> Vec<(String, String, String)> {
         vec![] // TODO
     }
+
+    fn statistic(&self) -> String {
+        "Not implemented".into()
+    }
 }

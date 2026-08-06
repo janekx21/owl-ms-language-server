@@ -503,6 +503,15 @@ impl LanguageServer for Backend {
 
             let new_document = timeit("document.edit", || document.edit(params, self.encoding()))?;
 
+            info!("Document statistic {}", new_document.statistic());
+
+            info!(
+                "Workspace statistic, index handles len: {}, internal docs: {}, external docs: {}",
+                workspace.index_handles.len(),
+                workspace.internal_documents().len(),
+                workspace.external_documents().len(),
+            );
+
             workspace.insert_internal_document(new_document);
 
             // TODO make this join handle one of a kind maybe. So no two diagnostics threads at the same time.

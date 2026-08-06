@@ -562,6 +562,25 @@ impl OntologyDocument for InternalOmnDocument {
             .flatten()
             .collect_vec()
     }
+
+    fn statistic(&self) -> String {
+        format!(
+            "path: {}, prefix length: {}, imports length: {}, def length: {}, ref length: {}, anno length: {}, all frame infos len: {}, local diagnostic len: {}, iri locations len: {}, dir import urls: {}, other urls: {}, frame annotations sum: {}, frame definitions sum: {}",
+            self.id.path.display(),
+            self.queried_document.prefixes.len(),
+            self.queried_document.imports.len(),
+            self.stage2.definitions.len(),
+            self.stage2.references.len(),
+            self.stage2.annotations.len(),
+            self.stage2.all_frame_infos.len(),
+            self.stage2.local_diagnostics.len(),
+            self.stage2.iri_locations.len(),
+            self.stage2.directly_reachable_import_urls.len(),
+            self.stage2.directly_reachable_other_urls.len(),
+            self.stage2.all_frame_infos.values().map(|a| a.annotations.len()).sum::<usize>(),
+            self.stage2.all_frame_infos.values().map(|a| a.definitions.len()).sum::<usize>(),
+        )
+    }
 }
 
 impl InternalOmnDocument {

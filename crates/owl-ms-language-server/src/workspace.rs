@@ -239,6 +239,8 @@ pub trait OntologyDocument {
                 .collect()
         }
     }
+
+    fn statistic(&self) -> String;
 }
 
 pub(crate) enum HoverResult {
@@ -376,7 +378,7 @@ impl Workspace {
             .expect("external document should exist")
     }
 
-    #[cfg(test)]
+    // #[cfg(test)]
     pub fn external_documents(
         &self,
     ) -> std::collections::hash_map::Values<'_, Url, ExternalDocument> {
