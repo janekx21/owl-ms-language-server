@@ -18,3 +18,7 @@ editors/code/server/owl-ms-language-server.exe
 **/*.owl/
 
 profile.json.gz
+/tarpaulin-report.html
+/heaptrack.*.zst
+/stdio.txt
+/stdout.txt

@@ -14,14 +14,15 @@ use tree_sitter_c2rust::{Language, Parser, Query, QueryCursor, StreamingIterator
 use crate::{
     debugging::timeit,
     error::{Error, Result},
+    iri::Iri,
     pos::Position,
     queries::treesitter_highlight_capture_into_semantic_token_type_index,
     range::{Range, RangeBox},
     rope_provider::RopeProvider,
     workspace::{
         changes_from_lsp, Diagnostic, DocumentId, FormattingSettings, FrameInfo, Highlights,
-        HoverResult, Iri, IriAtPosition, IriDefinition, KeywordAction, OntologyDocument,
-        ParsedDocument, RenameInfo, Workspace,
+        HoverResult, IriAtPosition, IriDefinition, KeywordAction, OntologyDocument, ParsedDocument,
+        RenameInfo, Workspace,
     },
 };
 
@@ -256,14 +257,14 @@ impl OntologyDocument for InternalOfnDocument {
 
     #[doc = " Taking a (relative) abbreviated or simple IRI and resolving the (absolute) full IRI."]
     #[doc = " The reverse of [`full_iri_to_abbreviated_iri`]."]
-    fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<Iri> {
+    fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<Iri> {
         None // TODO
     }
 
     #[doc = " Taking a (absolute) full IRI and by prefixing it making it shorter into a (relative)"]
     #[doc = " abbriviated or simple IRI."]
     #[doc = " The reverse of [`abbreviated_iri_to_full_iri`]."]
-    fn full_iri_to_abbreviated_iri(&self, full_iri: &str) -> Option<String> {
+    fn full_iri_to_abbreviated_iri(&self, full_iri: &Iri) -> Option<String> {
         None // TODO
     }
 
@@ -372,5 +373,9 @@ impl OntologyDocument for InternalOfnDocument {
         workspace: &Workspace,
     ) -> Vec<(String, String, String)> {
         vec![] // TODO
+    }
+
+    fn statistic(&self) -> String {
+        "Not implemented".into()
     }
 }

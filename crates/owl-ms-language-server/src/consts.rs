@@ -1,6 +1,10 @@
-use crate::workspace::{Annotation, FrameInfo, FrameType, Iri};
+use crate::{
+    iri::{Iri, ToIri},
+    workspace::{Annotation, FrameInfo, FrameType},
+};
 use indoc::indoc;
 
+// TODO these constants should be of type Iri, because the amount of into() calls at runtime can be ommited and maybe even a faster eq comparison
 // Build in xsd datatypes
 pub const STRING_IRI: &str = "http://www.w3.org/2001/XMLSchema#string";
 pub const INTEGER_IRI: &str = "http://www.w3.org/2001/XMLSchema#integer";
@@ -10,15 +14,15 @@ pub const FLOAT_IRI: &str = "http://www.w3.org/2001/XMLSchema#float";
 pub const LABEL_IRI: &str = "http://www.w3.org/2000/01/rdf-schema#label";
 
 pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
-    match &iri[..] {
+    match iri.as_str() {
         LABEL_IRI => vec![FrameInfo {
-            iri: LABEL_IRI.to_string(),
+            iri: LABEL_IRI.into(),
             annotations: vec![Annotation {
-                frame_iri: LABEL_IRI.to_string(),
-                iri: LABEL_IRI.to_string(),
+                frame_iri: LABEL_IRI.into(),
+                iri: LABEL_IRI.into(),
                 string_value: "label".to_string(),
                 language: None,
-                datatype: STRING_IRI.to_string(),
+                datatype: STRING_IRI.into(),
             }]
             .into_iter()
             .collect(),
@@ -26,13 +30,13 @@ pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
             definitions: vec![],
         }],
         "http://www.w3.org/2000/01/rdf-schema#comment" => vec![FrameInfo {
-            iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
+            iri: "http://www.w3.org/2000/01/rdf-schema#comment".into(),
             annotations: vec![Annotation {
-                frame_iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_string(),
-                iri: LABEL_IRI.to_string(),
+                frame_iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_iri(),
+                iri: LABEL_IRI.into(),
                 string_value: "comment".to_string(),
                 language: None,
-                datatype: STRING_IRI.to_string(),
+                datatype: STRING_IRI.into(),
             }]
             .into_iter()
             .collect(),

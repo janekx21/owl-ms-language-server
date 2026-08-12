@@ -4099,11 +4099,11 @@ async fn backend_did_change_should_update_ontology_id() {
 
     assert_eq!(
         document.ontology_iri(),
-        Some("http://example.com/othername".to_string())
+        Some("http://example.com/othername".into())
     );
     assert_eq!(
         document.version_iri(),
-        Some("http://example.com/ontology/123".to_string())
+        Some("http://example.com/ontology/123".into())
     );
 }
 
@@ -4174,7 +4174,7 @@ async fn backend_did_change_with_syntax_change_should_update_ontology_id() {
 
     assert_eq!(
         document.ontology_iri(),
-        Some("http://example.com/ontology".to_string())
+        Some("http://example.com/ontology".into())
     );
     assert_eq!(document.version_iri(), None);
 }
@@ -4270,11 +4270,11 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
 
     assert_eq!(
         document.ontology_iri(),
-        Some("http://example.com/othername".to_string())
+        Some("http://example.com/othername".into())
     );
     assert_eq!(
         document.version_iri(),
-        Some("http://example.com/ontology/321".to_string())
+        Some("http://example.com/ontology/321".into())
     );
 }
 
