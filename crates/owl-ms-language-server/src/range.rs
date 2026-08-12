@@ -248,20 +248,26 @@ impl Change {
     }
 }
 
-fn post_end_of_change(change: &Change) -> Position {
-    let lines: Vec<&str> = change.text.split('\n').collect();
-    let added_lines = (lines.len() - 1).to_u32();
+// (1, 3) + "hallo" => (1, 3 + 5)
+// (1, 3) + "hallo\n" => (1 + 1, 0)
 
-    if added_lines == 0 {
+/// Takes a change (start, end, text) and returns the start + what the text would add
+fn post_end_of_change(change: &Change) -> Position {
+    let lines_count = change.text.chars().filter(|c| *c == '\n').count();
+
+    if lines_count == 0 {
         // insertion on same line
         Position::new(
             change.range.start.line(),
             change.range.start.character_byte() + change.text.len().to_u32(),
         )
     } else {
+        let last_new_line_idx = change.text.rfind('\n').expect("should have multiple lines");
+        let last_line_len = change.text.len() - last_new_line_idx - 1;
+
         Position::new(
-            change.range.start.line() + added_lines,
-            lines.last().map_or(0, |l| l.len()).to_u32(),
+            change.range.start.line() + lines_count.to_u32(),
+            last_line_len.to_u32(),
         )
     }
 }

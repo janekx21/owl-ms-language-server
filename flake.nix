@@ -32,6 +32,9 @@
 
         owl-ms-language-server = pkgs.writeShellScriptBin "owl-ms-language-server" ''
           $__OWL_MS_LSP_SERVER_DEBUG --stdio --offline
+          # Use this for heaptracking
+          # export MALLOC_ARENA_MAX=1
+          # tee stdio.txt | heaptrack $__OWL_MS_LSP_SERVER_DEBUG --stdio --offline | tee stdout.txt
         '';
 
         # Add this to test offline
@@ -68,6 +71,8 @@
               ];
               targets = [ "x86_64-unknown-linux-musl" ];
             })
+            heaptrack
+            pv
             # clang
           ];
           RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";

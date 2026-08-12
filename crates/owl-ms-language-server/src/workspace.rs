@@ -4,6 +4,7 @@ use crate::consts::{
 };
 use crate::error::{Error, Result, ResultExt, ResultIterator};
 use crate::functional::InternalOfnDocument;
+use crate::iri::{trim_tags, Iri};
 use crate::manchester::InternalOmnDocument;
 use crate::pos::Position;
 use crate::queries::NODE_TYPES;
@@ -13,6 +14,7 @@ use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
     rope_provider::RopeProvider, LANGUAGE_OMN,
 };
+use crate::iri::ToIri;
 use cached::{cached, Cached};
 use enum_dispatch::enum_dispatch;
 use horned_owl::model::Component::{self, AnnotationAssertion};
@@ -25,7 +27,7 @@ use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn};
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-use ropey::Rope;
+use ropey::{Rope, RopeSlice};
 use sophia::api::graph::{Graph, MutableGraph};
 use sophia::api::ns::Namespace;
 use sophia::api::prelude::Any;
@@ -77,6 +79,11 @@ pub fn clear_caches() {
     if let Ok(mut gab) = GLOBAL_BUILD_ARC.lock() {
         *gab = Build::new_arc();
     }
+}
+
+pub fn cache_used() -> usize{
+    let c = GET_FRAME_INFO_HELPER_EX.read();
+    c.cache_size()
 }
 
 /// Document container
@@ -142,16 +149,16 @@ pub trait OntologyDocument {
     // IRI conversions
     /// Taking a (relative) abbreviated or simple IRI and resolving the (absolute) full IRI.
     /// The reverse of [`full_iri_to_abbreviated_iri`].
-    fn abbreviated_iri_to_full_iri(&self, iri: &str) -> Option<Iri>;
+    fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<Iri>;
     /// Taking a (absolute) full IRI and by prefixing it making it shorter into a (relative)
     /// abbriviated or simple IRI.
     /// The reverse of [`abbreviated_iri_to_full_iri`].
-    fn full_iri_to_abbreviated_iri(&self, full_iri: &str) -> Option<String>;
+    fn full_iri_to_abbreviated_iri(&self, full_iri: &Iri) -> Option<String>;
 
-    fn full_iri_to_shorter_iri(&self, full_iri: &str) -> String {
+    fn full_iri_to_shorter_iri(&self, full_iri: &Iri) -> String {
         self.full_iri_to_abbreviated_iri(full_iri)
             .unwrap_or_else(|| {
-                if full_iri.contains("://") {
+                if full_iri.as_str().contains("://") {
                     format!("<{full_iri}>")
                 } else {
                     full_iri.to_string()
@@ -237,6 +244,8 @@ pub trait OntologyDocument {
                 .collect()
         }
     }
+
+    fn statistic(&self) -> String;
 }
 
 pub(crate) enum HoverResult {
@@ -374,7 +383,7 @@ impl Workspace {
             .expect("external document should exist")
     }
 
-    #[cfg(test)]
+    // #[cfg(test)]
     pub fn external_documents(
         &self,
     ) -> std::collections::hash_map::Values<'_, Url, ExternalDocument> {
@@ -428,8 +437,8 @@ impl Workspace {
                     .into_iter()
                     .flat_map(
                         |item| -> Box<dyn Iterator<Item = (String, Iri, FrameInfo)>> {
-                            if item.iri.to_lowercase().contains(&partial_lower) {
-                                Box::new(once((item.iri.clone(), item.iri.clone(), item.clone())))
+                            if item.iri.as_str().to_lowercase().contains(&partial_lower) {
+                                Box::new(once((item.iri.to_string(), item.iri.clone(), item.clone())))
                             } else {
                                 Box::new(
                                     item.annotations
@@ -441,7 +450,7 @@ impl Workspace {
                                                 .starts_with(&partial_lower)
                                         })
                                         .map(|annotation| {
-                                            (annotation.iri.clone(), item.iri.clone(), item.clone())
+                                            (annotation.iri.to_string(), item.iri.clone(), item.clone())
                                         }),
                                 )
                             }
@@ -512,21 +521,21 @@ impl Workspace {
                 }
             }
             "full_iri" => {
-                let iri = trim_full_iri(node_text(node, doc.rope()));
+                let iri = trim_full_iri_rope_slice(node_text(node, doc.rope()));
 
-                self.get_frame_info(&iri)
+                self.get_frame_info(&iri.to_iri())
                     .map(|fi| fi.info_display(self))
-                    .unwrap_or(iri)
+                    .unwrap_or(iri.to_string())
             }
             "simple_iri" | "abbreviated_iri" => {
-                let iri = node_text(node, doc.rope());
+                let iri = node_text(node, doc.rope()).to_string();
                 let iri = doc
-                    .abbreviated_iri_to_full_iri(&iri)
-                    .unwrap_or(iri.to_string());
+                    .abbreviated_iri_to_full_iri(&iri.to_iri())
+                    .unwrap_or(iri.into());
                 debug!("Getting node info for {iri} at doc {}", doc.uri());
                 self.get_frame_info(&iri)
                     .map(|fi| fi.info_display(self))
-                    .unwrap_or(iri)
+                    .unwrap_or(iri.to_string())
             }
             kind => keyword_hover_info(kind),
         }
@@ -715,6 +724,7 @@ fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
     ))
 }
 
+// TODO this leaks 1mb?
 fn read_cached_doc(workspace: &Workspace, url: &Url) -> Result<Option<Document>> {
     if cfg!(test) {
         // Do not cache in tests
@@ -946,7 +956,7 @@ pub fn inlay_hint(
             let end = rb.range().end;
 
             let label = Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs)
-                .ok_or(Error::FrameInfoNotFound(iri.clone()))?
+                .ok_or(Error::FrameInfoNotFound(iri.to_string()))?
                 .label(workspace)
                 .unwrap_or_default();
 
@@ -955,7 +965,7 @@ pub fn inlay_hint(
             let mut label_normalized = label.clone().to_lowercase();
             label_normalized.retain(char::is_alphanumeric);
 
-            let same = iri.to_lowercase().contains(&label_normalized);
+            let same = iri.as_str().to_lowercase().contains(&label_normalized);
 
             if label.is_empty() || same {
                 Ok(None)
@@ -1353,31 +1363,12 @@ impl ParsedDocument {
     }
 }
 
-
-pub fn node_by_id(parsed_document: &ParsedDocument, id: usize) -> Option<Node<'_>> {
-    let mut w = parsed_document.tree.walk();
-    loop {
-        if w.node().id() == id {
-            return Some(w.node());
-        }
-
-        // In order traversal
-        if !w.goto_first_child() {
-            while !w.goto_next_sibling() {
-                if !w.goto_parent() {
-                    return None;
-                }
-            }
-        }
-    }
-}
-
 impl ParsedDocument {
-    pub fn query(&self, query: &Query) -> Vec<UnwrappedQueryMatch> {
+    pub fn query(&'_ self, query: &Query) -> Vec<UnwrappedQueryMatch<'_>> {
         query_helper(self, query, None)
     }
 
-    pub fn query_range(&self, query: &Query, range: Range) -> Vec<UnwrappedQueryMatch> {
+    pub fn query_range(&'_ self, query: &Query, range: Range) -> Vec<UnwrappedQueryMatch<'_>> {
         query_helper(self, query, Some(range))
     }
 
@@ -1389,13 +1380,13 @@ impl ParsedDocument {
                 [] => None,
                 // This should be a full IRI so lets trim it
                 [iri_capture] => Some(RangeBox::new(
-                    (trim_full_iri(iri_capture.node.text.clone()), None),
+                    (trim_full_iri_rope_slice(iri_capture.node.text).to_iri(), None),
                     iri_capture.node.range,
                 )),
                 [iri_capture, version_iri_capture] => Some(RangeBox::new(
                     (
-                        trim_full_iri(iri_capture.node.text.clone()),
-                        Some(trim_full_iri(version_iri_capture.node.text.clone())),
+                        trim_full_iri_rope_slice(iri_capture.node.text).to_iri(),
+                        Some(trim_full_iri_rope_slice(version_iri_capture.node.text).to_iri()),
                     ),
                     Range::new(
                         iri_capture.node.range.start,
@@ -1423,9 +1414,9 @@ impl ParsedDocument {
             .into_iter()
             .map(|m| match &m.captures[..] {
                 [name_capture, iri_capture] => (
-                    name_capture.node.text.trim_end_matches(':').to_string(),
+                    name_capture.node.text.to_string().trim_end_matches(':').to_string(),
                     RangeBox::new(
-                        trim_full_iri(iri_capture.node.text.clone()),
+                        trim_full_iri_rope_slice(iri_capture.node.text).to_string(),
                         Range::new(name_capture.node.range.start, iri_capture.node.range.end),
                     ),
                 ),
@@ -1446,9 +1437,9 @@ impl ParsedDocument {
             .into_iter()
             .map(|m| match &m.captures[..] {
                 [name_capture, iri_capture] => (
-                    name_capture.node.text.trim_end_matches(':').to_string(),
+                    name_capture.node.text.to_string().trim_end_matches(':').to_string(),
                     RangeBox::new(
-                        trim_full_iri(iri_capture.node.text.clone()),
+                    trim_full_iri_rope_slice(iri_capture.node.text).to_string(),
                         Range::new(name_capture.node.range.start, iri_capture.node.range.end),
                     ),
                 ),
@@ -1462,9 +1453,9 @@ impl ParsedDocument {
         self.query(&ALL_QUERIES.import_query)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri_capture] => Oxiri::parse(trim_full_iri(iri_capture.node.text.clone()))
+                [iri_capture] => Oxiri::parse(trim_full_iri_rope_slice(iri_capture.node.text).to_string())
                     .ok()
-                    .map(|iri_| RangeBox::new(iri_.as_str().to_string(), iri_capture.node.range)),
+                    .map(|iri_| RangeBox::new(iri_.as_str().to_iri(), iri_capture.node.range)),
                 _ => unimplemented!(),
             })
             .collect_vec()
@@ -1474,20 +1465,21 @@ impl ParsedDocument {
         self.query_range(&ALL_QUERIES.import_query, range)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri_capture] => Oxiri::parse(trim_full_iri(iri_capture.node.text.clone()))
+                [iri_capture] => Oxiri::parse(trim_full_iri_rope_slice(iri_capture.node.text).to_string())
                     .ok()
-                    .map(|iri_| RangeBox::new(iri_.as_str().to_string(), iri_capture.node.range)),
+                    .map(|iri_| RangeBox::new(iri_.as_str().to_iri(), iri_capture.node.range)),
                 _ => unimplemented!(),
             })
             .collect_vec()
     }
 }
 
-fn query_helper(
-    stage1: &ParsedDocument,
+// TODO consumes a lot of memory
+fn query_helper<'a>(
+    stage1: &'a ParsedDocument,
     query: &Query,
     range: Option<Range>,
-) -> Vec<UnwrappedQueryMatch> {
+) -> Vec<UnwrappedQueryMatch<'a>> {
     let mut query_cursor = QueryCursor::new();
     if let Some(range) = range {
         if range != Range::FULL_RANGE {
@@ -1504,11 +1496,11 @@ fn query_helper(
             captures: m
                 .captures
                 .iter()
-                .sorted_by_key(|c| c.index)
+                .sorted_by_cached_key(|c| c.index) // TODO Does this use less memory now?
                 .map(|c| UnwrappedQueryCapture {
                     node: UnwrappedNode {
                         id: c.node.id(),
-                        text: node_text(&c.node, &stage1.rope).to_string(),
+                        text: node_text(&c.node, &stage1.rope),
                         range: c.node.range().into(),
                         kind: c.node.kind(),
                         parent_kind: c.node.parent().map(|p| p.kind()),
@@ -1527,7 +1519,7 @@ pub fn capture_by_name<'a>(
     query: &'a Query,
     captures: &'a [UnwrappedQueryCapture],
     name: &'static str,
-) -> Option<&'a UnwrappedQueryCapture> {
+) -> Option<&'a UnwrappedQueryCapture<'a>> {
     captures.iter().find(|c| {
         c.index
             == query
@@ -1536,8 +1528,8 @@ pub fn capture_by_name<'a>(
     })
 }
 
-pub fn build_iri_locations(references: &Vec<RangeBox<String>>) -> HashMap<String, Vec<RangeBox<()>>> {
-    let mut iri_locations: HashMap<String, Vec<RangeBox<()>>> =
+pub fn build_iri_locations(references: &Vec<RangeBox<Iri>>) -> HashMap<Iri, Vec<RangeBox<()>>> {
+    let mut iri_locations: HashMap<Iri, Vec<RangeBox<()>>> =
         HashMap::with_capacity(references.len());
     for rb in references {
         iri_locations
@@ -1807,7 +1799,7 @@ impl ExternalDocument {
                     debug!("{s:?} {iri:?} {o:?}");
                     if let Some(subject_iri) = s.iri() {
                         if iri.as_str() == IRI_RDF_TYPE {
-                            hash_set.insert(subject_iri.as_str().to_string());
+                            hash_set.insert(subject_iri.as_str().to_iri());
                         }
                     }
                 })
@@ -1913,6 +1905,13 @@ pub fn iri_to_parent_url(iri: &Iri) -> Option<Url> {
     Some(iri_to_onology_url(url))
 }
 
+/// Should do the same as [`iri_to_parent_url`] but without parsing the url and therefore without allocation
+pub fn iri_to_parent_url_str(iri: &str) -> Option<&str> {
+    iri.rsplit_once('#').map(|(l,_)| l).or_else(||
+        iri.rsplit_once('/').map(|(l, _)| l)
+    )
+}
+
 /// Convert some IRI (here in URL type) into a URL where the IRI can be fetched from
 pub fn iri_to_onology_url(mut url: Url) -> Url {
     if url.fragment().is_some() {
@@ -1941,7 +1940,8 @@ fn get_frame_info_helper_ex(doc: &ExternalDocument, iri: &Iri) -> Option<FrameIn
 
     graph
         .triples_matching(
-            |s: SimpleTerm| s.iri().is_some_and(|subject| subject.as_str() == iri),
+            // TODO maybe convert the other way around(as_str)?
+            |s: SimpleTerm| s.iri().is_some_and(|subject| subject.as_str() == iri.as_str()),
             Any,
             Any,
         )
@@ -1951,11 +1951,11 @@ fn get_frame_info_helper_ex(doc: &ExternalDocument, iri: &Iri) -> Option<FrameIn
             FrameInfo {
                 iri: iri.clone(),
                 annotations: vec![Annotation {
-                    frame_iri: simple_term_literal(s),
-                    iri: simple_term_literal(p),
+                    frame_iri: simple_term_literal(s).into(),
+                    iri: simple_term_literal(p).into(),
                     string_value: ann.0,
                     language: ann.2,
-                    datatype: ann.1,
+                    datatype: ann.1.into(),
                 }],
                 frame_type: FrameType::Unknown,
                 definitions: vec![Location {
@@ -2003,27 +2003,27 @@ fn simple_term_literal(simple_term: &SimpleTerm) -> String {
 }
 
 /// This is a version of a query match that has no reference to the tree or cursor
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct UnwrappedQueryMatch {
+#[derive(Debug, PartialEq, Eq)]
+pub struct UnwrappedQueryMatch<'a> {
     pattern_index: usize,
-    pub captures: Vec<UnwrappedQueryCapture>,
     _id: u32,
+    pub captures: Vec<UnwrappedQueryCapture<'a>>,
 }
 
 /// This is a version of a query capture that has no reference to the tree or cursor
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct UnwrappedQueryCapture {
-    pub node: UnwrappedNode,
+#[derive(Debug, PartialEq, Eq)]
+pub struct UnwrappedQueryCapture<'a> {
+    pub node: UnwrappedNode<'a>,
     pub index: u32,
 }
 
 /// This is a version of a node that has no reference to the tree
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct UnwrappedNode {
+#[derive(Debug, PartialEq, Eq)]
+pub struct UnwrappedNode<'a> {
     /// ID's of a changed tree stay the same. So you can search for up-to-date information that way
     pub id: usize,
     /// This information can be outdated
-    pub text: String,
+    pub text: RopeSlice<'a>,
     /// This information can be outdated
     pub range: Range,
     pub kind: &'static str,
@@ -2096,18 +2096,18 @@ impl FrameInfo {
     }
 
     pub fn label(&self, workspace: &Workspace) -> Option<String> {
-        self.annotation_display(LABEL_IRI, workspace)
+        self.annotation_display(&LABEL_IRI.into(), workspace)
     }
 
-    pub fn annotation_display(&self, iri: &str, workspace: &Workspace) -> Option<String> {
+    pub fn annotation_display(&self, iri: &Iri, workspace: &Workspace) -> Option<String> {
         let joined = self
             .annotations
             .iter()
-            .filter(|annotation| annotation.iri == iri)
+            .filter(|annotation| &annotation.iri == iri)
             .map(|annotation| {
                 if let Some(language) = &annotation.language {
                     format!("{} @ {}", &annotation.string_value, &language.name())
-                } else if annotation.datatype != STRING_IRI && iri != LABEL_IRI
+                } else if annotation.datatype != STRING_IRI.into() && iri != &LABEL_IRI.into()
                 // Endless recursion if label is a valid iri
                 {
                     let datatype_label = workspace
@@ -2116,7 +2116,7 @@ impl FrameInfo {
                             fi.label(workspace)
                                 .unwrap_or_else(|| trim_url_before_last(&fi.iri).to_string())
                         })
-                        .unwrap_or(annotation.datatype.clone());
+                        .unwrap_or(annotation.datatype.to_string());
 
                     format!("{} ^^ {}", annotation.string_value, datatype_label)
                 } else {
@@ -2152,11 +2152,11 @@ impl FrameInfo {
                         fi.label(workspace)
                             .unwrap_or_else(|| trim_url_before_last(&fi.iri).to_string())
                     })
-                    .unwrap_or(annotation.iri.clone());
+                    .unwrap_or(annotation.iri.to_string());
                 // TODO #28 use values directly
                 let mut annotation_display = self
                     .annotation_display(&annotation.iri, workspace)
-                    .unwrap_or(annotation.iri.clone());
+                    .unwrap_or(annotation.iri.to_string());
 
                 // If this is a multiline string then give it some space to work with
                 if annotation_display.contains('\n') {
@@ -2181,7 +2181,7 @@ impl FrameInfo {
         }
         for annotation in &self.annotations {
             if annotation.string_value.contains(query) {
-                if annotation.iri == LABEL_IRI {
+                if annotation.iri == LABEL_IRI.into() {
                     sum += 1000;
 
                     if let Some((l, r)) = annotation.string_value.split_once(query) {
@@ -2217,6 +2217,7 @@ fn trim_url_before_last(iri: &str) -> &str {
     iri.rsplit_once(['/', '#']).map_or(iri, |(_, b)| b)
 }
 
+// TODO remove allocation parts
 pub fn trim_string_value(value: &str) -> String {
     value
         .trim_start_matches('"')
@@ -2230,12 +2231,8 @@ pub fn trim_string_value(value: &str) -> String {
         .to_string()
 }
 
-// TODO maybe use Arc<String>
-pub type Iri = String;
-
-pub fn node_text(node: &Node, rope: &Rope) -> String {
-    rope.get_byte_slice(node.start_byte()..node.end_byte())
-        .map_or(String::new(), |rs| rs.to_string())
+pub fn node_text<'a>(node: &Node, rope: &'a Rope) -> RopeSlice<'a> {
+    rope.get_byte_slice(node.start_byte()..node.end_byte()).expect("tree and rope should be synced")
 }
 
 fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnostic> {
@@ -2247,7 +2244,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
         .map(|rb| rb.value().clone())
         .collect();
 
-    let mut defines: HashSet<String> = doc
+    let mut defines: HashSet<Iri> = doc
         .definitions()
         .iter()
         .map(|rb| rb.value().iri.clone())
@@ -2283,7 +2280,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
 
     // TODO this is a quick fix for now. The correct way will be not not include prefixes in the used Iris
     let prefixes = doc.prefixes();
-    let prefix_iris: HashSet<&Iri> = prefixes.values().collect();
+    let prefix_iris: HashSet<&str> = prefixes.values().map(String::as_str).collect();
     let import_iris: Vec<&str> = doc
         .directly_imports()
         .into_iter()
@@ -2295,7 +2292,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
 
     for diff in uses
         .difference(&defines)
-        .filter(|iri| !prefix_iris.contains(*iri))
+        .filter(|iri| !prefix_iris.contains(&iri.as_str()))
         .filter(|iri| !import_iris.contains(&iri.as_str()))
     {
         // Skip ontology and version IRIs
@@ -2422,12 +2419,36 @@ impl Display for FrameType {
 }
 
 /// Takes an IRI in any form and removed the <> symbols
-pub fn trim_full_iri(untrimmed_iri: String) -> Iri {
-    let iri = untrimmed_iri;
-    iri.trim_end_matches('>')
-        .trim_start_matches('<')
-        .to_string()
+pub fn trim_full_iri(untrimmed_iri: &str) -> Iri {
+    trim_tags(untrimmed_iri).into()
 }
+ 
+/// Takes an IRI in any form and removed the <> symbols
+pub fn trim_full_iri_rope_slice(slice: RopeSlice<'_>) -> RopeSlice<'_> {
+    if slice.len_chars() == 0 {
+        return slice
+    }
+
+    let slice  = slice.get_char(0).map_or_else(|| slice,|c|
+        if c == '<' {
+           slice.slice(1..) 
+        } else {
+            slice
+        }
+
+    );
+
+    let slice =  slice.get_char(slice.len_chars()-1).map_or_else(|| slice, |c|  {
+        if c == '>' {
+           slice.slice(..slice.len_chars()-1) 
+        } else {
+            slice
+        } } );
+
+
+    slice
+}
+ 
 
 // Horned owl has no default here. Let's keep it out for now.
 // static STANDARD_PREFIX_NAMES: [(&str, &str); 4] = [
@@ -2628,18 +2649,18 @@ mod tests {
             .into(),
         );
 
-        let full_iri = doc.abbreviated_iri_to_full_iri("owl:Nothing");
-        let full_iri_2 = doc.abbreviated_iri_to_full_iri("ja:Janek");
+        let full_iri = doc.abbreviated_iri_to_full_iri(&"owl:Nothing".into());
+        let full_iri_2 = doc.abbreviated_iri_to_full_iri(&"ja:Janek".into());
 
         assert_eq!(
             full_iri,
-            Some("http://www.w3.org/2002/07/owl#Nothing".to_string())
+            Some("http://www.w3.org/2002/07/owl#Nothing".into())
         );
         assert_eq!(
             full_iri_2,
             Some(
                 "http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3/Janek"
-                    .to_string()
+                    .into()
             )
         );
     }
@@ -2656,16 +2677,16 @@ mod tests {
             .into(),
         );
 
-        let full_iri = doc.abbreviated_iri_to_full_iri(":Nothing");
-        let full_iri_2 = doc.abbreviated_iri_to_full_iri("Nothing");
+        let full_iri = doc.abbreviated_iri_to_full_iri(&":Nothing".into());
+        let full_iri_2 = doc.abbreviated_iri_to_full_iri(&"Nothing".into());
 
         assert_eq!(
             full_iri,
-            Some("http://www.w3.org/2002/07/owl#Nothing".to_string())
+            Some("http://www.w3.org/2002/07/owl#Nothing".into())
         );
         assert_eq!(
             full_iri_2,
-            Some("http://www.w3.org/2002/07/owl#Nothing".to_string())
+            Some("http://www.w3.org/2002/07/owl#Nothing".into())
         );
     }
 
@@ -2736,13 +2757,13 @@ mod tests {
         );
 
         // Act
-        let info = doc.find_frame_info(&"A".to_string());
+        let info = doc.find_frame_info(&"A".into());
 
         // Assert
         info!("{doc:#?}");
         let info = info.unwrap();
 
-        assert_eq!(info.iri, "A".to_string());
+        assert_eq!(info.iri, "A".into());
         assert_eq!(
             info.definitions,
             vec![Location {
@@ -2829,7 +2850,7 @@ mod tests {
             .into(),
         );
 
-        let abbr_iri = doc.full_iri_to_abbreviated_iri("http://www.w3.org/2002/07/owl#Thing");
+        let abbr_iri = doc.full_iri_to_abbreviated_iri(&"http://www.w3.org/2002/07/owl#Thing".into());
 
         assert_eq!(abbr_iri, Some("owl:Thing".to_string()));
     }
@@ -2846,7 +2867,7 @@ mod tests {
             .into(),
         );
 
-        let abbr_iri = doc.full_iri_to_abbreviated_iri("http://www.w3.org/2002/07/owl#Thing");
+        let abbr_iri = doc.full_iri_to_abbreviated_iri(&"http://www.w3.org/2002/07/owl#Thing".into());
 
         assert_eq!(abbr_iri, Some("Thing".to_string()));
     }

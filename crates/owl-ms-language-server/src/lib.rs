@@ -3,6 +3,7 @@ mod consts;
 pub mod debugging;
 mod error;
 mod functional;
+mod iri;
 mod manchester;
 mod pos;
 mod queries;
@@ -38,12 +39,13 @@ use tower_lsp::{Client, LanguageServer};
 use tree_sitter_c2rust::Language;
 use workspace::Workspace;
 
+use crate::iri::REUSE_IRI;
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{
-    inlay_hint as document_inlay_hint, publish_lsp_diagnostics, reachable_docs_recursive, Document,
-    DocumentReference, FormattingSettings, Highlights, HoverResult, InternalDocument,
-    IriAtPosition, KeywordAction, Lang, OntologyDocument,
+    cache_used, inlay_hint as document_inlay_hint, publish_lsp_diagnostics,
+    reachable_docs_recursive, Document, DocumentReference, FormattingSettings, Highlights,
+    HoverResult, InternalDocument, IriAtPosition, KeywordAction, Lang, OntologyDocument,
 };
 
 // Re-export for benchmarks
@@ -310,6 +312,7 @@ fn parse_options(options: Option<serde_json::Value>) -> Options {
         let mut is_order_frames = false;
         if let Some(o) = options {
             if let Some(root) = o.as_object() {
+                // TODO test this case
                 if let Some(omn) = root.get("omn") {
                     if let Some(omn) = omn.as_object() {
                         if let Some(order_frames) = omn.get("orderFrames") {
@@ -386,6 +389,7 @@ impl LanguageServer for Backend {
             .set(if encodings.contains(&PositionEncodingKind::UTF8) {
                 PositionEncodingKind::UTF8
             } else {
+                // TODO test this case
                 PositionEncodingKind::UTF16
             })
             .expect("the encoding to be unset");
@@ -434,6 +438,7 @@ impl LanguageServer for Backend {
             let lang = match &language_id[..] {
                 "owl-ms" => Some(Lang::Omn),
                 "owl-fn" => Some(Lang::Ofn),
+                // TODO test this case
                 _ => None,
             };
 
@@ -498,6 +503,21 @@ impl LanguageServer for Backend {
             let (document, workspace) = sync.take_internal_document(&url)?;
 
             let new_document = timeit("document.edit", || document.edit(params, self.encoding()))?;
+
+            debug!("Document statistic {}", new_document.statistic());
+
+            debug!(
+                "Workspace statistic, index handles len: {}, internal docs: {}, external docs: {}",
+                workspace.index_handles.len(),
+                workspace.internal_documents().len(),
+                workspace.external_documents().len(),
+            );
+
+            debug!(
+                "Language server statistic, interned strings {}, cache {}",
+                REUSE_IRI.used(),
+                cache_used()
+            );
 
             workspace.insert_internal_document(new_document);
 
@@ -579,6 +599,7 @@ impl LanguageServer for Backend {
 
         Ok(match doc.hover(pos) {
             None => None,
+            // TODO test this case
             Some(HoverResult::Keyword { text, range }) => Some(Hover {
                 contents: HoverContents::Scalar(MarkedString::String(text)),
                 range: Some(range.into_lsp(doc.rope(), self.encoding())?),
@@ -587,8 +608,9 @@ impl LanguageServer for Backend {
                 let info = ws
                     .get_frame_info(&iri)
                     .map(|fi| fi.info_display(ws))
-                    .unwrap_or(iri);
+                    .unwrap_or(iri.to_string());
                 if info.is_empty() {
+                    // TODO test this case
                     None
                 } else {
                     Some(Hover {
@@ -651,7 +673,7 @@ impl LanguageServer for Backend {
             debug!("Try goto definition of {iri}");
 
             if *is_import {
-                let url = Url::parse(iri).map_err(|_| Error::InvalidUrl(url.clone()))?;
+                let url = Url::parse(iri.as_str()).map_err(|_| Error::InvalidUrl(url.clone()))?;
                 // This does not work for external documents from prefixes
                 let path = workspace.url_to_path_with_catalog(&url);
                 if let Some(path) = path {
@@ -666,6 +688,7 @@ impl LanguageServer for Backend {
                         .iter()
                         .sorted_by_key(|l| {
                             if l.range == Range::ZERO {
+                                // TODO test this case
                                 u32::MAX // No range? Then put this at the end
                             } else {
                                 l.range.start.line()
@@ -754,6 +777,7 @@ impl LanguageServer for Backend {
         Ok(Some(CompletionResponse::Array(items)))
     }
 
+    // TODO test this request
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
@@ -773,6 +797,7 @@ impl LanguageServer for Backend {
         })))
     }
 
+    // TODO test this request
     async fn semantic_tokens_range(
         &self,
         params: SemanticTokensRangeParams,
@@ -806,7 +831,7 @@ impl LanguageServer for Backend {
                 .flat_map(|info| {
                     let name = info.label(workspace).unwrap_or_else(|| {
                         doc.full_iri_to_abbreviated_iri(&info.iri)
-                            .unwrap_or(info.iri.clone())
+                            .unwrap_or(info.iri.to_string())
                     });
                     let kind: SymbolKind = info.frame_type.into();
                     let url = url.clone();
@@ -857,7 +882,7 @@ impl LanguageServer for Backend {
                     .sorted_by_key(|(score, _)| *score)
                     .rev()
                     .flat_map(|(_, fi)| {
-                        let name = fi.label(ws).unwrap_or(fi.iri.clone());
+                        let name = fi.label(ws).unwrap_or(fi.iri.to_string());
 
                         #[allow(deprecated)] // All fields need to be specified
                         fi.definitions
@@ -942,6 +967,7 @@ impl LanguageServer for Backend {
         )
     }
 
+    // TODO test this request
     async fn prepare_rename(
         &self,
         params: TextDocumentPositionParams,
