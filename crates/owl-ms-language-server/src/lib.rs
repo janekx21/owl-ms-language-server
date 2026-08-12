@@ -39,12 +39,13 @@ use tower_lsp::{Client, LanguageServer};
 use tree_sitter_c2rust::Language;
 use workspace::Workspace;
 
+use crate::iri::REUSE_IRI;
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{
-    inlay_hint as document_inlay_hint, publish_lsp_diagnostics, reachable_docs_recursive, Document,
-    DocumentReference, FormattingSettings, Highlights, HoverResult, InternalDocument,
-    IriAtPosition, KeywordAction, Lang, OntologyDocument,
+    cache_used, inlay_hint as document_inlay_hint, publish_lsp_diagnostics,
+    reachable_docs_recursive, Document, DocumentReference, FormattingSettings, Highlights,
+    HoverResult, InternalDocument, IriAtPosition, KeywordAction, Lang, OntologyDocument,
 };
 
 // Re-export for benchmarks
@@ -503,13 +504,19 @@ impl LanguageServer for Backend {
 
             let new_document = timeit("document.edit", || document.edit(params, self.encoding()))?;
 
-            info!("Document statistic {}", new_document.statistic());
+            debug!("Document statistic {}", new_document.statistic());
 
-            info!(
+            debug!(
                 "Workspace statistic, index handles len: {}, internal docs: {}, external docs: {}",
                 workspace.index_handles.len(),
                 workspace.internal_documents().len(),
                 workspace.external_documents().len(),
+            );
+
+            debug!(
+                "Language server statistic, interned strings {}, cache {}",
+                REUSE_IRI.used(),
+                cache_used()
             );
 
             workspace.insert_internal_document(new_document);

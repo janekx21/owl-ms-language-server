@@ -19,10 +19,14 @@ impl ReusedIriSet {
         self.0.resolve(&i.0)
     }
 
+    pub fn used(&self) -> usize {
+        self.0.len()
+    }
+
     // TODO do this for the url as well
 }
 
-static REUSE_IRI: LazyLock<ReusedIriSet> = LazyLock::new(ReusedIriSet::new);
+pub static REUSE_IRI: LazyLock<ReusedIriSet> = LazyLock::new(ReusedIriSet::new);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 pub struct Iri(Spur);

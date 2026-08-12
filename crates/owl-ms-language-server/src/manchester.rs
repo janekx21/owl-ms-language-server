@@ -8,11 +8,11 @@ use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type
 use crate::range::{Change, RangeBox};
 use crate::workspace::{
     build_iri_locations, capture_by_name, changes_from_lsp, edit_vec_rb, extend_vec_rb,
-    iri_to_parent_url, node_text, post_change_ranges, retain_vec_rb, retain_vec_rb_on_remove,
-    trim_full_iri_rope_slice, trim_string_value, word_before_character, Annotation, Diagnostic,
-    DocumentId, FormattingSettings, FrameInfo, FrameType, Highlights, HoverResult, IriAtPosition,
-    IriDefinition, KeywordAction, Location, OntologyDocument, OntologyId, ParsedDocument,
-    RenameInfo, UnwrappedQueryMatch, Workspace,
+    iri_to_parent_url, iri_to_parent_url_str, node_text, post_change_ranges, retain_vec_rb,
+    retain_vec_rb_on_remove, trim_full_iri_rope_slice, trim_string_value, word_before_character,
+    Annotation, Diagnostic, DocumentId, FormattingSettings, FrameInfo, FrameType, Highlights,
+    HoverResult, IriAtPosition, IriDefinition, KeywordAction, Location, OntologyDocument,
+    OntologyId, ParsedDocument, RenameInfo, UnwrappedQueryMatch, Workspace,
 };
 use crate::{
     debugging::timeit, queries::ALL_QUERIES, range::Range, rope_provider::RopeProvider,
@@ -737,7 +737,6 @@ pub struct QueriedDocument {
 }
 
 impl QueriedDocument {
-    // TODO reduce ram usage
     /// Finds flat references to other document URL's in this document
     pub fn reachable_urls(
         &self,
@@ -783,8 +782,9 @@ impl QueriedDocument {
 
         let referenced_urls = document_references
             .iter()
+            .filter_map(|iri| iri_to_parent_url_str(iri.value()))
             .unique()
-            .filter_map(|rb| iri_to_parent_url(rb.value()));
+            .flat_map(str::parse);
 
         // debug!(
         //     "Extending {} with {}",
@@ -816,6 +816,7 @@ impl QueriedDocument {
         }
     }
 
+    // TODO this is still slow (50ms on oeo-full)
     fn document_all_frame_infos(
         definitions: &[RangeBox<IriDefinition>],
         annotations: &[RangeBox<Annotation>],

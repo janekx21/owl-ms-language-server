@@ -81,6 +81,11 @@ pub fn clear_caches() {
     }
 }
 
+pub fn cache_used() -> usize{
+    let c = GET_FRAME_INFO_HELPER_EX.read();
+    c.cache_size()
+}
+
 /// Document container
 #[derive(Debug)]
 pub struct Workspace {
@@ -719,6 +724,7 @@ fn load_file_from_disk(path: PathBuf) -> Result<(String, Url)> {
     ))
 }
 
+// TODO this leaks 1mb?
 fn read_cached_doc(workspace: &Workspace, url: &Url) -> Result<Option<Document>> {
     if cfg!(test) {
         // Do not cache in tests
@@ -1899,6 +1905,13 @@ pub fn iri_to_parent_url(iri: &Iri) -> Option<Url> {
     Some(iri_to_onology_url(url))
 }
 
+/// Should do the same as [`iri_to_parent_url`] but without parsing the url and therefore without allocation
+pub fn iri_to_parent_url_str(iri: &str) -> Option<&str> {
+    iri.rsplit_once('#').map(|(l,_)| l).or_else(||
+        iri.rsplit_once('/').map(|(l, _)| l)
+    )
+}
+
 /// Convert some IRI (here in URL type) into a URL where the IRI can be fetched from
 pub fn iri_to_onology_url(mut url: Url) -> Url {
     if url.fragment().is_some() {
@@ -2204,6 +2217,7 @@ fn trim_url_before_last(iri: &str) -> &str {
     iri.rsplit_once(['/', '#']).map_or(iri, |(_, b)| b)
 }
 
+// TODO remove allocation parts
 pub fn trim_string_value(value: &str) -> String {
     value
         .trim_start_matches('"')
