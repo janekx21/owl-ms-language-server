@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.0.0...v1.1.0) (2026-08-13)
+
+
+### Features
+
+* [#183](https://github.com/janekx21/owl-ms-language-server/issues/183) add (experimental) functional syntax support ([#184](https://github.com/janekx21/owl-ms-language-server/issues/184)) ([9b5428a](https://github.com/janekx21/owl-ms-language-server/commit/9b5428aeac2c550b18aecfc292dec8f0844b3ef3))
+* [#28](https://github.com/janekx21/owl-ms-language-server/issues/28) opimize borrows ([#185](https://github.com/janekx21/owl-ms-language-server/issues/185)) ([ffac3dd](https://github.com/janekx21/owl-ms-language-server/commit/ffac3ddf8791696dba6911968fd8499f059f1d8e))
+* [#51](https://github.com/janekx21/owl-ms-language-server/issues/51) datatype and language info on annotation literals ([#181](https://github.com/janekx21/owl-ms-language-server/issues/181)) ([7bca91e](https://github.com/janekx21/owl-ms-language-server/commit/7bca91eba83e37b0b627790702a44634e5b28209))
+
 ## [1.0.0](https://github.com/janekx21/owl-ms-language-server/compare/v0.13.2...v1.0.0) (2026-06-29)
 
 
