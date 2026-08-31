@@ -1,8 +1,9 @@
 use crate::{
-    iri::{Iri, ToIri},
+    iri::Iri,
     workspace::{Annotation, FrameInfo, FrameType},
 };
 use indoc::indoc;
+use language::Language;
 
 // TODO these constants should be of type Iri, because the amount of into() calls at runtime can be ommited and maybe even a faster eq comparison
 // Build in xsd datatypes
@@ -12,39 +13,239 @@ pub const DECIMAL_IRI: &str = "http://www.w3.org/2001/XMLSchema#decimal";
 pub const FLOAT_IRI: &str = "http://www.w3.org/2001/XMLSchema#float";
 
 pub const LABEL_IRI: &str = "http://www.w3.org/2000/01/rdf-schema#label";
+pub const COMMENT_IRI: &str = "http://www.w3.org/2000/01/rdf-schema#comment";
 
-pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
-    match iri.as_str() {
-        LABEL_IRI => vec![FrameInfo {
-            iri: LABEL_IRI.into(),
-            annotations: vec![Annotation {
-                frame_iri: LABEL_IRI.into(),
-                iri: LABEL_IRI.into(),
-                string_value: "label".to_string(),
-                language: None,
-                datatype: STRING_IRI.into(),
-            }]
-            .into_iter()
-            .collect(),
-            frame_type: FrameType::AnnotationProperty,
-            definitions: vec![],
-        }],
-        "http://www.w3.org/2000/01/rdf-schema#comment" => vec![FrameInfo {
-            iri: "http://www.w3.org/2000/01/rdf-schema#comment".into(),
-            annotations: vec![Annotation {
-                frame_iri: "http://www.w3.org/2000/01/rdf-schema#comment".to_iri(),
-                iri: LABEL_IRI.into(),
-                string_value: "comment".to_string(),
-                language: None,
-                datatype: STRING_IRI.into(),
-            }]
-            .into_iter()
-            .collect(),
-            frame_type: FrameType::AnnotationProperty,
-            definitions: vec![],
-        }],
-        _ => vec![],
-    }
+macro_rules! fixed_infos {
+    (
+        $(
+            $iri:expr => {
+                frame_type: $frame_type:expr,
+                annotations: [
+                    $( $ann_iri:expr => $string_value:expr, $language:expr $(, datatype: $datatype:expr)? );* $(;)?
+                ]
+            }
+        ),* $(,)?
+    ) => {
+        pub fn get_fixed_infos(iri: &Iri) -> Vec<FrameInfo> {
+            match iri.as_str() {
+                $(
+                    $iri => vec![FrameInfo {
+                        iri: $iri.into(),
+                        annotations: vec![
+                            $(
+                                Annotation {
+                                    frame_iri: $iri.into(),
+                                    iri: $ann_iri.into(),
+                                    string_value: $string_value.to_string(),
+                                    language: Some($language),
+                                    datatype: fixed_infos!(@datatype $($datatype)?),
+                                }
+                            ),*
+                        ]
+                        .into_iter()
+                        .collect(),
+                        frame_type: $frame_type,
+                        definitions: vec![],
+                    }],
+                )*
+                _ => vec![],
+            }
+        }
+    };
+
+    (@datatype) => { STRING_IRI.into() };
+    (@datatype $datatype:expr) => { $datatype };
+}
+
+fixed_infos! {
+    "http://www.w3.org/2000/01/rdf-schema#label" => {
+        frame_type: FrameType::AnnotationProperty,
+        annotations: [
+            LABEL_IRI => "label", Language::En;
+        ]
+    },
+    "http://www.w3.org/2000/01/rdf-schema#comment" => {
+        frame_type: FrameType::AnnotationProperty,
+        annotations: [
+            LABEL_IRI => "comment", Language::En;
+        ]
+    },
+
+    "http://www.w3.org/2001/XMLSchema#string" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: any finite-length sequence of characters.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#normalizedString" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Represents white space normalized strings and do not contain carriage return (#xD), line feed (#xA) nor tab (#x9) characters.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#token" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Represents tokenized strings and do not contain carriage return (#xD), line feed (#xA), tab (#x9), leading/trailing whitespace and internal whitespace runs are collapsed to a single space.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#language" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Natural language identifiers as defined by RFC 1766 (e.g. 'en', 'en-GB').", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#NMTOKEN" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "An XML 'Nmtoken'. One or more XML name characters.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#Name" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "An XML 'Name'. Starts with a name-start character, followed by name characters.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#NCName" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+                [COMMENT_IRI => "A 'non-colonized' name. An XML Name that excludes the colon character, used for unprefixed identifiers.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#boolean" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: the two-value logic space {true, false}, lexically true/false/1/0.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#decimal" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: arbitrary-precision decimal numbers (e.g. -1.23, 12678967.543233, +100000.00, 210).", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#float" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: IEEE 754-1985 single-precision 32-bit floating point numbers (e.g. -1E4, 1267.43233E12, 12.78e-2, 12, INF). The special values positive and negative zero, positive and negative infinity and not-a-number have lexical representations 0, -0, INF, -INF and NaN, respectively. ", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#double" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: IEEE 754-1985 double-precision 64-bit floating point numbers (e.g. -1E4, 1267.43233E12, 12.78e-2, 12 and INF). The special values positive and negative zero, positive and negative infinity and not-a-number have lexical representations 0, -0, INF, -INF and NaN, respectively. ", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#integer" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Derived from xsd:decimal: decimal numbers with no fractional part.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#nonPositiveInteger" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Derived from xsd:integer: integers less than or equal to zero.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#negativeInteger" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Derived from xsd:nonPositiveInteger: integers strictly less than zero.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#long" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Derived from xsd:integer: integers representable in 64 signed bits.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#int" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Derived from xsd:long: integers representable in 32 signed bits.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#short" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Derived from xsd:int: integers representable in 16 signed bits.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#byte" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Derived from xsd:short: integers representable in 8 signed bits.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#nonNegativeInteger" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Derived from xsd:integer: integers greater than or equal to zero.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#unsignedLong" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Derived from xsd:nonNegativeInteger: integers representable in 64 unsigned bits.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#unsignedInt" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Derived from xsd:unsignedLong: integers representable in 32 unsigned bits.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#unsignedShort" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Derived from xsd:unsignedInt: integers representable in 16 unsigned bits.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#unsignedByte" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Derived from xsd:unsignedShort: integers representable in 8 unsigned bits.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#positiveInteger" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Derived from xsd:nonNegativeInteger: integers strictly greater than zero.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#dateTime" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: a specific instant combining date and time-of-day with ISO 8601 extended format CCYY-MM-DDThh:mm:ss (e.g. 2026-08-31T14:30:00, 1999-05-31T13:20:00-05:00). May be immediately followed by a Time Zone using Coordinated Universal Time (UTC).", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#time" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: an instant of time that recurs every day (e.g. 14:30:00, 13:20:00-05:00). May be immediately followed by a Time Zone using Coordinated Universal Time (UTC).", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#date" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: a calendar date CCYY-MM-DD (e.g. 2026-08-31).", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#gYearMonth" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: a specific month of a specific year CCYY-MM (e.g. 2026-08).", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#gYear" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: a specific calendar year CCYY (e.g. 2026).", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#gMonthDay" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: a recurring day of a specific month --MM-DD (e.g. --08-31).", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#gDay" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: a recurring day of the month ---DD (e.g. ---31).", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#gMonth" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: a recurring month --MM-- (e.g. --08--).", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#hexBinary" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: arbitrary binary data encoded as hexadecimal digits [0-9a-fA-F] (e.g. 0FB7, fa02).", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#base64Binary" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: Base64-encoded arbitrary binary data encoded per RFC 2045.", Language::En]},
+
+    "http://www.w3.org/2001/XMLSchema#anyURI" =>{
+    frame_type: FrameType::DataType,
+        annotations:
+            [COMMENT_IRI => "Primitive datatype: a Uniform Resource Identifier Reference (URI) or Internationalized Resource Identifier (IRI), per RFC 2396 amended by RFC 2732. Can be absolute or relative, and may have an optional fragment identifier.", Language::En]},
+
 }
 
 #[allow(clippy::too_many_lines)]
