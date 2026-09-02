@@ -1119,7 +1119,8 @@ fn missin_iri_actions(
                 ..Default::default()
             }))
         }
-        workspace::DiagnosticKind::SyntaxError { .. } => None,
+        workspace::DiagnosticKind::SyntaxError { .. }
+        | workspace::DiagnosticKind::Depricated { .. } => None,
     });
     Ok(create_missing_iri_actions.collect())
 }

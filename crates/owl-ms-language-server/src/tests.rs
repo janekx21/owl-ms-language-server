@@ -4,7 +4,10 @@ use crate::{
     range::{Change, Range},
     rope_provider::RopeProvider,
     test_helpers::*,
-    workspace::{apply_change_to_rope_and_tree, diagnostics as ws_diagnostics, OntologyDocument},
+    workspace::{
+        apply_change_to_rope_and_tree, diagnostics as ws_diagnostics, DiagnosticKind,
+        OntologyDocument,
+    },
     *,
 };
 use horned_owl::{
@@ -184,7 +187,7 @@ fn print_tree(tree: &Tree) {
 #[test]
 #[ignore = "This was just a spike for messing around"]
 fn horned_owl_should_parse_rdf_xml() {
-    let x = r##"    
+    let x = r##"
 <rdf:RDF xmlns="http://www.example.com/iri#"
      xml:base="http://www.example.com/iri"
      xmlns:o="http://www.example.com/iri#"
@@ -224,7 +227,7 @@ fn sophia_should_parse_rdf_xml() {
     use sophia::inmem::graph::LightGraph;
 
     use sophia::turtle::serializer::nt::NtSerializer;
-    let x = r##"    
+    let x = r##"
 <rdf:RDF xmlns="http://www.example.com/iri#"
      xml:base="http://www.example.com/iri"
      xmlns:o="http://www.example.com/iri#"
@@ -827,7 +830,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
                     <Declaration>
                         <Class IRI="ClassA2"/>
                     </Declaration>
-    
+
                     <AnnotationAssertion>
                         <AnnotationProperty abbreviatedIRI="rdfs:label"/>
                         <IRI>ClassA2</IRI>
@@ -942,7 +945,7 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
                     <Declaration>
                         <Class IRI="#ClassA2"/>
                     </Declaration>
-    
+
                     <AnnotationAssertion>
                         <AnnotationProperty abbreviatedIRI="rdfs:label"/>
                         <IRI>#ClassA2</IRI>
@@ -1145,7 +1148,7 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
                  DisjointWith:    Y   DisjointUnionOf:    Y,Z    HasKey:    Y
 
 
-     
+
     Datatype:     B
                EquivalentTo:    Y
     DataProperty:    C
@@ -1200,15 +1203,15 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
 
     Class: Y
 
-    
+
     Class: Z
 
-    
+
     AnnotationProperty: rdfs:label
 
 
     Class: p
-    
+
     "};
 
     let tmp_dir = arrange_workspace_folders(|_| vec![]);
@@ -1323,7 +1326,7 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
                     <Declaration>
                         <Class IRI="ClassA2"/>
                     </Declaration>
-    
+
                     <AnnotationAssertion>
                         <AnnotationProperty abbreviatedIRI="rdfs:label"/>
                         <IRI>ClassA2</IRI>
@@ -1685,7 +1688,7 @@ async fn backend_did_open_should_load_external_documents_via_http() {
                     <Declaration>
                         <Class IRI="#SomeOtherClass"/>
                     </Declaration>
-    
+
                     <AnnotationAssertion>
                         <AnnotationProperty abbreviatedIRI="rdfs:label"/>
                         <IRI>#SomeOtherClass</IRI>
@@ -1972,7 +1975,7 @@ async fn backend_did_open_should_load_external_documents_via_file() {
                         <Declaration>
                             <Class IRI="#SomeOtherClass"/>
                         </Declaration>
-    
+
                         <AnnotationAssertion>
                             <AnnotationProperty abbreviatedIRI="rdfs:label"/>
                             <IRI>#SomeOtherClass</IRI>
@@ -2224,7 +2227,7 @@ async fn backend_completion_should_not_panic() {
         Ontology: <http://foo.org/a>
 
             ööööö
-        
+
             Class: some-other-class-at-c
                 Annotations:
                     rdfs:label "Some other class at c"
@@ -4590,14 +4593,14 @@ async fn backend_did_change_with_some_should_prune_diagnostics() {
 
     let ontology = indoc! { r#"
         Ontology: Dev
-        
+
             Class: Janek
                 SubClassOf: Person, Developer
 
             Class: Person
 
             Class: Developer
-                SubClassOf: Person some X
+                SubClassOf: Person some X #
     "#};
 
     service
@@ -4647,15 +4650,16 @@ async fn backend_did_change_with_some_should_prune_diagnostics() {
         document.rope().to_string(),
         indoc! { r#"
         Ontology: Dev
-        
+
             Class: Janek
                 SubClassOf: Person, Developer
 
             Class: Person
 
             Class: Developer
-                SubClassOf: Person some 
-        "#}
+                SubClassOf: Person some  #
+        "#} //                         ^^
+            // This has trailing whitespace
     );
 
     let diagnostics = ws_diagnostics(document, workspace);
@@ -4673,7 +4677,7 @@ async fn backend_diagnostics_with_syntax_error_should_report_nice_message() {
 
     let ontology = indoc! { r#"
         Ontology: Dev
-        
+
             Class: Janek
                 SubClassOf: Person Developer
         #           Syntax Error  ^
@@ -4712,6 +4716,59 @@ async fn backend_diagnostics_with_syntax_error_should_report_nice_message() {
         .exactly_one()
         .is_ok());
 }
+#[test(tokio::test)]
+async fn backend_diagnostics_with_depricated_entity_should_return_diagnostic() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Prefix: owl: <http://www.w3.org/2002/07/owl#>
+        Ontology: Dev
+
+            Class: Janek
+                SubClassOf: Developer
+            Class: Developer
+                Annotations: owl:depricated "true"
+
+        AnnotationProperty: owl:depricated
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    // Assert
+    let diagnostics = ws_diagnostics(document, workspace);
+    info!("{:#?}", diagnostics);
+    for d in diagnostics {
+        match &d.kind {
+            DiagnosticKind::Depricated(iri) => {
+                assert_eq!(iri.as_str(), "Developer")
+            }
+            k => panic!("Kind was {k:?}"),
+        };
+    }
+}
 
 /////////////////////////
 // Fuzz / property-based tests
@@ -4740,10 +4797,10 @@ mod fuzz {
         Prefix: oth: <http://invalis/other/>
         Ontology: <http://example.org/fuzz-test>
             Import: <http://example.com/ontology>
-        
+
             Class: Foo
                 Annotations: rdfs:label "Foo Label"
-        
+
             Class: Bar
                 Annotations: rdfs:label "Bar Label"
 
