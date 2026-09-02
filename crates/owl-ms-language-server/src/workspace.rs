@@ -893,7 +893,11 @@ impl Diagnostic {
     ) -> Result<lsp_types::Diagnostic> {
         Ok(lsp_types::Diagnostic {
             range: self.range.into_lsp(rope, encoding)?,
-            severity: Some(DiagnosticSeverity::ERROR),
+            severity: if matches!(self.kind, DiagnosticKind::Depricated(_)) {
+                Some(DiagnosticSeverity::WARNING)
+            } else {
+                Some(DiagnosticSeverity::ERROR)
+            },
             code: None,
             code_description: None,
             source: Some("owl language server".to_string()),
