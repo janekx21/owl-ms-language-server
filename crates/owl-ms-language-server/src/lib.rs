@@ -757,13 +757,18 @@ impl LanguageServer for Backend {
         let iri_completion_items =
             iri_completions
                 .into_iter()
-                .map(|(label, details, insert_text, depricated)| {
+                .map(|(label, details, insert_text, deprecated)| {
                     CompletionItem {
                         label,
                         kind: Some(CompletionItemKind::REFERENCE),
                         detail: Some(details),
                         insert_text: Some(insert_text),
-                        deprecated: Some(depricated),
+                        deprecated: Some(deprecated),
+                        tags: if deprecated {
+                            Some(vec![CompletionItemTag::DEPRECATED])
+                        } else {
+                            Some(vec![])
+                        },
                         // TODO #29 add details from the frame
                         ..Default::default()
                     }
@@ -841,12 +846,16 @@ impl LanguageServer for Backend {
                         Ok(SymbolInformation {
                             name: name.clone(),
                             kind,
-                            tags: if fi.is_depricated() {
+                            tags: if fi.is_deprecated() {
                                 Some(vec![SymbolTag::DEPRECATED])
                             } else {
-                                None
+                                Some(vec![])
                             },
-                            deprecated: if fi.is_depricated() { Some(true) } else { None },
+                            deprecated: if fi.is_deprecated() {
+                                Some(true)
+                            } else {
+                                Some(false)
+                            },
                             location: Location {
                                 uri: url.clone(),
                                 range: def.range.into_lsp(doc.rope(), self.encoding())?,
@@ -908,12 +917,16 @@ impl LanguageServer for Backend {
                                 SymbolInformation {
                                     name: name.clone(),
                                     kind: fi.frame_type.into(),
-                                    tags: if fi.is_depricated() {
+                                    tags: if fi.is_deprecated() {
                                         Some(vec![SymbolTag::DEPRECATED])
                                     } else {
-                                        None
+                                        Some(vec![])
                                     },
-                                    deprecated: if fi.is_depricated() { Some(true) } else { None },
+                                    deprecated: if fi.is_deprecated() {
+                                        Some(true)
+                                    } else {
+                                        Some(false)
+                                    },
                                     location,
                                     container_name: None,
                                 }
@@ -1129,7 +1142,7 @@ fn missin_iri_actions(
             }))
         }
         workspace::DiagnosticKind::SyntaxError { .. }
-        | workspace::DiagnosticKind::Depricated { .. } => None,
+        | workspace::DiagnosticKind::Deprecated { .. } => None,
     });
     Ok(create_missing_iri_actions.collect())
 }

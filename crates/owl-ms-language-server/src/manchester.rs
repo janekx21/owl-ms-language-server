@@ -506,7 +506,7 @@ impl OntologyDocument for InternalOmnDocument {
                             frame.label(workspace).unwrap_or(full),
                             frame.info_display(workspace),
                             iri,
-                            frame.is_depricated(),
+                            frame.is_deprecated(),
                         ))
                     }
                 })

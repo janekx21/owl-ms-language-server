@@ -882,7 +882,7 @@ impl Diagnostic {
                     "Syntax Error {msg}. Expected\n  {valid_children}\ninside or after\n  {parent}"
                 )
             }
-            DiagnosticKind::Depricated(iri) => format!("{iri} is depricated"),
+            DiagnosticKind::Deprecated(iri) => format!("{iri} is deprecated"),
         }
     }
 
@@ -893,7 +893,7 @@ impl Diagnostic {
     ) -> Result<lsp_types::Diagnostic> {
         Ok(lsp_types::Diagnostic {
             range: self.range.into_lsp(rope, encoding)?,
-            severity: if matches!(self.kind, DiagnosticKind::Depricated(_)) {
+            severity: if matches!(self.kind, DiagnosticKind::Deprecated(_)) {
                 Some(DiagnosticSeverity::WARNING)
             } else {
                 Some(DiagnosticSeverity::ERROR)
@@ -903,7 +903,7 @@ impl Diagnostic {
             source: Some("owl language server".to_string()),
             message: self.label(),
             related_information: None,
-            tags: if matches!(self.kind, DiagnosticKind::Depricated(_)) {
+            tags: if matches!(self.kind, DiagnosticKind::Deprecated(_)) {
                 Some(vec![DiagnosticTag::DEPRECATED])
             } else {
                 None
@@ -921,7 +921,7 @@ pub enum DiagnosticKind {
         parent: String,
         msg: String, // Eg. "UNEXPECTED '\n'"
     },
-    Depricated(Iri),
+    Deprecated(Iri),
 }
 
 /// Take this document, generate the diagnostics in workspace context and send the results via the client.
@@ -2220,9 +2220,9 @@ impl FrameInfo {
         sum
     }
 
-    pub fn is_depricated(&self) -> bool {
+    pub fn is_deprecated(&self) -> bool {
         self.annotations.iter().any(|annotation| {
-            annotation.iri == "http://www.w3.org/2002/07/owl#depricated".into()
+            annotation.iri == "http://www.w3.org/2002/07/owl#deprecated".into()
                 && (annotation.string_value == "true" || annotation.string_value == "1")
         })
     }
@@ -2365,7 +2365,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
     diagnostics.extend(
         workspace
             .all_frame_infos()
-            .filter(|fi| fi.is_depricated())
+            .filter(|fi| fi.is_deprecated())
             .flat_map(|fi| {
                 iri_locations
                     .get(&fi.iri)
@@ -2373,7 +2373,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
                     .flat_map(|x| x.iter())
                     .map(|d| Diagnostic {
                         range: *d.range(),
-                        kind: DiagnosticKind::Depricated(fi.iri.clone()),
+                        kind: DiagnosticKind::Deprecated(fi.iri.clone()),
                     })
             }),
     );

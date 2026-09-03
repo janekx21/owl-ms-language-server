@@ -4717,7 +4717,7 @@ async fn backend_diagnostics_with_syntax_error_should_report_nice_message() {
         .is_ok());
 }
 #[test(tokio::test)]
-async fn backend_diagnostics_with_depricated_entity_should_return_diagnostic() {
+async fn backend_diagnostics_with_deprecated_entity_should_return_diagnostic() {
     setup();
     // Arrange
     let service = arrange_backend(None, vec![]).await;
@@ -4731,9 +4731,9 @@ async fn backend_diagnostics_with_depricated_entity_should_return_diagnostic() {
             Class: Janek
                 SubClassOf: Developer
             Class: Developer
-                Annotations: owl:depricated "true"
+                Annotations: owl:deprecated "true"
 
-        AnnotationProperty: owl:depricated
+        AnnotationProperty: owl:deprecated
     "#};
 
     service
@@ -4762,7 +4762,7 @@ async fn backend_diagnostics_with_depricated_entity_should_return_diagnostic() {
     info!("{:#?}", diagnostics);
     for d in diagnostics {
         match &d.kind {
-            DiagnosticKind::Depricated(iri) => {
+            DiagnosticKind::Deprecated(iri) => {
                 assert_eq!(iri.as_str(), "Developer")
             }
             k => panic!("Kind was {k:?}"),
