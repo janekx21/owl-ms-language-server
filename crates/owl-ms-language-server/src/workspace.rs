@@ -608,6 +608,14 @@ impl Workspace {
 
         // TODO maybe use workspace.url_to_path_with_catalog(url)
 
+        if let Ok(path) = url.to_file_path() {
+            debug!("Resolving a file path {}", path.display());
+            return Ok(Some(Workspace::resolve_path_to_document(
+                &path,
+                url.clone(),
+            )?));
+        }
+
         let Some((catalog, catalog_uri)) = workspace.find_catalog_uri(url) else {
             warn!("Url {url} could not be found in any catalog");
 
