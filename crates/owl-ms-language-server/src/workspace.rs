@@ -1,9 +1,8 @@
 use crate::catalog::CatalogUri;
-use crate::consts::{
-    get_fixed_infos, keyword_hover_info, LABEL_IRI, STRING_IRI,
-};
+use crate::consts::{get_fixed_infos, keyword_hover_info, LABEL_IRI, STRING_IRI};
 use crate::error::{Error, Result, ResultExt, ResultIterator};
 use crate::functional::InternalOfnDocument;
+use crate::iri::ToIri;
 use crate::iri::{trim_tags, Iri};
 use crate::manchester::InternalOmnDocument;
 use crate::pos::Position;
@@ -14,7 +13,6 @@ use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
     rope_provider::RopeProvider, LANGUAGE_OMN,
 };
-use crate::iri::ToIri;
 use cached::{cached, Cached};
 use enum_dispatch::enum_dispatch;
 use horned_owl::model::Component::{self, AnnotationAssertion};
@@ -52,11 +50,11 @@ use std::{
 };
 use tokio::task::JoinHandle;
 use tower_lsp::lsp_types::{
-    self, DiagnosticSeverity, DidChangeTextDocumentParams, InlayHint, InlayHintLabel,
-    PositionEncodingKind, SymbolKind, TextDocumentContentChangeEvent, Url, WorkspaceFolder,
+    self, DiagnosticSeverity, DiagnosticTag, DidChangeTextDocumentParams, InlayHint,
+    InlayHintLabel, PositionEncodingKind, SymbolKind, TextDocumentContentChangeEvent, Url,
+    WorkspaceFolder,
 };
 use tree_sitter_c2rust::{InputEdit, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
-
 
 static GLOBAL_BUILD_ARC: LazyLock<Mutex<Build<ArcStr>>> = LazyLock::new(|| {
     let build = Build::new_arc();
@@ -81,7 +79,7 @@ pub fn clear_caches() {
     }
 }
 
-pub fn cache_used() -> usize{
+pub fn cache_used() -> usize {
     let c = GET_FRAME_INFO_HELPER_EX.read();
     c.cache_size()
 }
@@ -209,7 +207,7 @@ pub trait OntologyDocument {
         &self,
         pos: Position,
         workspace: &Workspace,
-    ) -> Vec<(String, String, String)>; // TODO can this be done in another way???
+    ) -> Vec<(String, String, String, bool)>; // TODO can this be done in another way???
 
     /// Searches for a declared IRI
     fn find_iri_references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range> {
@@ -294,7 +292,9 @@ impl InternalDocument {
             Lang::Omn => {
                 InternalDocument::InternalOmn(InternalOmnDocument::new(url, version, text))
             }
-            Lang::Ofn => InternalDocument::InternalOfn(InternalOfnDocument::new(url, version, text)),
+            Lang::Ofn => {
+                InternalDocument::InternalOfn(InternalOfnDocument::new(url, version, text))
+            }
         }
     }
 
@@ -438,7 +438,11 @@ impl Workspace {
                     .flat_map(
                         |item| -> Box<dyn Iterator<Item = (String, Iri, FrameInfo)>> {
                             if item.iri.as_str().to_lowercase().contains(&partial_lower) {
-                                Box::new(once((item.iri.to_string(), item.iri.clone(), item.clone())))
+                                Box::new(once((
+                                    item.iri.to_string(),
+                                    item.iri.clone(),
+                                    item.clone(),
+                                )))
                             } else {
                                 Box::new(
                                     item.annotations
@@ -450,7 +454,11 @@ impl Workspace {
                                                 .starts_with(&partial_lower)
                                         })
                                         .map(|annotation| {
-                                            (annotation.iri.to_string(), item.iri.clone(), item.clone())
+                                            (
+                                                annotation.iri.to_string(),
+                                                item.iri.clone(),
+                                                item.clone(),
+                                            )
                                         }),
                                 )
                             }
@@ -813,7 +821,6 @@ pub struct DocumentId {
     pub version: i32,
 }
 
-
 pub fn edit_vec_rb<T: Send>(changes: &[Change], items: &mut Vec<RangeBox<T>>) {
     items.par_iter_mut().for_each(|x| x.edit(changes.iter()));
 }
@@ -875,6 +882,7 @@ impl Diagnostic {
                     "Syntax Error {msg}. Expected\n  {valid_children}\ninside or after\n  {parent}"
                 )
             }
+            DiagnosticKind::Deprecated(iri) => format!("{iri} is deprecated"),
         }
     }
 
@@ -885,13 +893,21 @@ impl Diagnostic {
     ) -> Result<lsp_types::Diagnostic> {
         Ok(lsp_types::Diagnostic {
             range: self.range.into_lsp(rope, encoding)?,
-            severity: Some(DiagnosticSeverity::ERROR),
+            severity: if matches!(self.kind, DiagnosticKind::Deprecated(_)) {
+                Some(DiagnosticSeverity::WARNING)
+            } else {
+                Some(DiagnosticSeverity::ERROR)
+            },
             code: None,
             code_description: None,
             source: Some("owl language server".to_string()),
             message: self.label(),
             related_information: None,
-            tags: None,
+            tags: if matches!(self.kind, DiagnosticKind::Deprecated(_)) {
+                Some(vec![DiagnosticTag::DEPRECATED])
+            } else {
+                None
+            },
             data: None,
         })
     }
@@ -905,6 +921,7 @@ pub enum DiagnosticKind {
         parent: String,
         msg: String, // Eg. "UNEXPECTED '\n'"
     },
+    Deprecated(Iri),
 }
 
 /// Take this document, generate the diagnostics in workspace context and send the results via the client.
@@ -1112,7 +1129,7 @@ impl ParsedDocument {
         }
 
         let rope_provider = RopeProvider::new(&new_rope);
-        let new_tree = 
+        let new_tree =
             // This takes a long time 190ms/16k lines
             timeit("document.edit / parsing", || {
                 parser
@@ -1123,7 +1140,7 @@ impl ParsedDocument {
                     )
                     .expect("language to be set, no timeout to be used, no cancellation flag")
             });
-        
+
         let parsed_document = ParsedDocument {
             tree: new_tree,
             rope: new_rope,
@@ -1380,7 +1397,10 @@ impl ParsedDocument {
                 [] => None,
                 // This should be a full IRI so lets trim it
                 [iri_capture] => Some(RangeBox::new(
-                    (trim_full_iri_rope_slice(iri_capture.node.text).to_iri(), None),
+                    (
+                        trim_full_iri_rope_slice(iri_capture.node.text).to_iri(),
+                        None,
+                    ),
                     iri_capture.node.range,
                 )),
                 [iri_capture, version_iri_capture] => Some(RangeBox::new(
@@ -1414,7 +1434,12 @@ impl ParsedDocument {
             .into_iter()
             .map(|m| match &m.captures[..] {
                 [name_capture, iri_capture] => (
-                    name_capture.node.text.to_string().trim_end_matches(':').to_string(),
+                    name_capture
+                        .node
+                        .text
+                        .to_string()
+                        .trim_end_matches(':')
+                        .to_string(),
                     RangeBox::new(
                         trim_full_iri_rope_slice(iri_capture.node.text).to_string(),
                         Range::new(name_capture.node.range.start, iri_capture.node.range.end),
@@ -1437,9 +1462,14 @@ impl ParsedDocument {
             .into_iter()
             .map(|m| match &m.captures[..] {
                 [name_capture, iri_capture] => (
-                    name_capture.node.text.to_string().trim_end_matches(':').to_string(),
+                    name_capture
+                        .node
+                        .text
+                        .to_string()
+                        .trim_end_matches(':')
+                        .to_string(),
                     RangeBox::new(
-                    trim_full_iri_rope_slice(iri_capture.node.text).to_string(),
+                        trim_full_iri_rope_slice(iri_capture.node.text).to_string(),
                         Range::new(name_capture.node.range.start, iri_capture.node.range.end),
                     ),
                 ),
@@ -1453,9 +1483,11 @@ impl ParsedDocument {
         self.query(&ALL_QUERIES.import_query)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri_capture] => Oxiri::parse(trim_full_iri_rope_slice(iri_capture.node.text).to_string())
-                    .ok()
-                    .map(|iri_| RangeBox::new(iri_.as_str().to_iri(), iri_capture.node.range)),
+                [iri_capture] => {
+                    Oxiri::parse(trim_full_iri_rope_slice(iri_capture.node.text).to_string())
+                        .ok()
+                        .map(|iri_| RangeBox::new(iri_.as_str().to_iri(), iri_capture.node.range))
+                }
                 _ => unimplemented!(),
             })
             .collect_vec()
@@ -1465,9 +1497,11 @@ impl ParsedDocument {
         self.query_range(&ALL_QUERIES.import_query, range)
             .iter()
             .filter_map(|m| match &m.captures[..] {
-                [iri_capture] => Oxiri::parse(trim_full_iri_rope_slice(iri_capture.node.text).to_string())
-                    .ok()
-                    .map(|iri_| RangeBox::new(iri_.as_str().to_iri(), iri_capture.node.range)),
+                [iri_capture] => {
+                    Oxiri::parse(trim_full_iri_rope_slice(iri_capture.node.text).to_string())
+                        .ok()
+                        .map(|iri_| RangeBox::new(iri_.as_str().to_iri(), iri_capture.node.range))
+                }
                 _ => unimplemented!(),
             })
             .collect_vec()
@@ -1513,7 +1547,6 @@ fn query_helper<'a>(
 }
 
 pub type OntologyId = (Iri, Option<Iri>);
-
 
 pub fn capture_by_name<'a>(
     query: &'a Query,
@@ -1907,9 +1940,9 @@ pub fn iri_to_parent_url(iri: &Iri) -> Option<Url> {
 
 /// Should do the same as [`iri_to_parent_url`] but without parsing the url and therefore without allocation
 pub fn iri_to_parent_url_str(iri: &str) -> Option<&str> {
-    iri.rsplit_once('#').map(|(l,_)| l).or_else(||
-        iri.rsplit_once('/').map(|(l, _)| l)
-    )
+    iri.rsplit_once('#')
+        .map(|(l, _)| l)
+        .or_else(|| iri.rsplit_once('/').map(|(l, _)| l))
 }
 
 /// Convert some IRI (here in URL type) into a URL where the IRI can be fetched from
@@ -1941,7 +1974,10 @@ fn get_frame_info_helper_ex(doc: &ExternalDocument, iri: &Iri) -> Option<FrameIn
     graph
         .triples_matching(
             // TODO maybe convert the other way around(as_str)?
-            |s: SimpleTerm| s.iri().is_some_and(|subject| subject.as_str() == iri.as_str()),
+            |s: SimpleTerm| {
+                s.iri()
+                    .is_some_and(|subject| subject.as_str() == iri.as_str())
+            },
             Any,
             Any,
         )
@@ -2043,34 +2079,6 @@ pub struct FrameInfo {
     pub annotations: Vec<Annotation>,
     pub frame_type: FrameType,
     pub definitions: Vec<Location>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Annotation {
-    pub frame_iri: Iri,
-    pub iri: Iri,
-    pub string_value: String,
-    pub language: Option<language::Language>,
-    pub datatype: Iri,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Location {
-    pub uri: Url,
-    pub range: Range,
-}
-
-impl Location {
-    pub fn into_lsp(
-        self,
-        rope: &Rope,
-        encoding: &PositionEncodingKind,
-    ) -> Result<tower_lsp::lsp_types::Location> {
-        Ok(tower_lsp::lsp_types::Location {
-            uri: self.uri.clone(),
-            range: self.range.into_lsp(rope, encoding)?,
-        })
-    }
 }
 
 impl FrameInfo {
@@ -2211,6 +2219,41 @@ impl FrameInfo {
         }
         sum
     }
+
+    pub fn is_deprecated(&self) -> bool {
+        self.annotations.iter().any(|annotation| {
+            annotation.iri == "http://www.w3.org/2002/07/owl#deprecated".into()
+                && (annotation.string_value == "true" || annotation.string_value == "1")
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Annotation {
+    pub frame_iri: Iri,
+    pub iri: Iri,
+    pub string_value: String,
+    pub language: Option<language::Language>,
+    pub datatype: Iri,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Location {
+    pub uri: Url,
+    pub range: Range,
+}
+
+impl Location {
+    pub fn into_lsp(
+        self,
+        rope: &Rope,
+        encoding: &PositionEncodingKind,
+    ) -> Result<tower_lsp::lsp_types::Location> {
+        Ok(tower_lsp::lsp_types::Location {
+            uri: self.uri.clone(),
+            range: self.range.into_lsp(rope, encoding)?,
+        })
+    }
 }
 
 fn trim_url_before_last(iri: &str) -> &str {
@@ -2232,7 +2275,8 @@ pub fn trim_string_value(value: &str) -> String {
 }
 
 pub fn node_text<'a>(node: &Node, rope: &'a Rope) -> RopeSlice<'a> {
-    rope.get_byte_slice(node.start_byte()..node.end_byte()).expect("tree and rope should be synced")
+    rope.get_byte_slice(node.start_byte()..node.end_byte())
+        .expect("tree and rope should be synced")
 }
 
 fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnostic> {
@@ -2316,6 +2360,23 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
             }
         }
     }
+
+    let iri_locations = &doc.iri_locations();
+    diagnostics.extend(
+        workspace
+            .all_frame_infos()
+            .filter(|fi| fi.is_deprecated())
+            .flat_map(|fi| {
+                iri_locations
+                    .get(&fi.iri)
+                    .into_iter()
+                    .flat_map(|x| x.iter())
+                    .map(|d| Diagnostic {
+                        range: *d.range(),
+                        kind: DiagnosticKind::Deprecated(fi.iri.clone()),
+                    })
+            }),
+    );
 
     diagnostics
 }
@@ -2422,33 +2483,31 @@ impl Display for FrameType {
 pub fn trim_full_iri(untrimmed_iri: &str) -> Iri {
     trim_tags(untrimmed_iri).into()
 }
- 
+
 /// Takes an IRI in any form and removed the <> symbols
 pub fn trim_full_iri_rope_slice(slice: RopeSlice<'_>) -> RopeSlice<'_> {
     if slice.len_chars() == 0 {
-        return slice
+        return slice;
     }
 
-    let slice  = slice.get_char(0).map_or_else(|| slice,|c|
-        if c == '<' {
-           slice.slice(1..) 
-        } else {
-            slice
-        }
-
+    let slice = slice.get_char(0).map_or_else(
+        || slice,
+        |c| if c == '<' { slice.slice(1..) } else { slice },
     );
 
-    let slice =  slice.get_char(slice.len_chars()-1).map_or_else(|| slice, |c|  {
-        if c == '>' {
-           slice.slice(..slice.len_chars()-1) 
-        } else {
-            slice
-        } } );
-
+    let slice = slice.get_char(slice.len_chars() - 1).map_or_else(
+        || slice,
+        |c| {
+            if c == '>' {
+                slice.slice(..slice.len_chars() - 1)
+            } else {
+                slice
+            }
+        },
+    );
 
     slice
 }
- 
 
 // Horned owl has no default here. Let's keep it out for now.
 // static STANDARD_PREFIX_NAMES: [(&str, &str); 4] = [
@@ -2626,10 +2685,10 @@ mod tests {
             indoc! {r"
                 Ontology: a
 
-                
+
                 Class: a
 
-                
+
                 AnnotationProperty: a
 
             "}
@@ -2850,7 +2909,8 @@ mod tests {
             .into(),
         );
 
-        let abbr_iri = doc.full_iri_to_abbreviated_iri(&"http://www.w3.org/2002/07/owl#Thing".into());
+        let abbr_iri =
+            doc.full_iri_to_abbreviated_iri(&"http://www.w3.org/2002/07/owl#Thing".into());
 
         assert_eq!(abbr_iri, Some("owl:Thing".to_string()));
     }
@@ -2867,7 +2927,8 @@ mod tests {
             .into(),
         );
 
-        let abbr_iri = doc.full_iri_to_abbreviated_iri(&"http://www.w3.org/2002/07/owl#Thing".into());
+        let abbr_iri =
+            doc.full_iri_to_abbreviated_iri(&"http://www.w3.org/2002/07/owl#Thing".into());
 
         assert_eq!(abbr_iri, Some("Thing".to_string()));
     }

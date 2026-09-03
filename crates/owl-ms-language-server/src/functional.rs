@@ -371,7 +371,7 @@ impl OntologyDocument for InternalOfnDocument {
         &self,
         pos: Position,
         workspace: &Workspace,
-    ) -> Vec<(String, String, String)> {
+    ) -> Vec<(String, String, String, bool)> {
         vec![] // TODO
     }
 

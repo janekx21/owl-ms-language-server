@@ -757,12 +757,18 @@ impl LanguageServer for Backend {
         let iri_completion_items =
             iri_completions
                 .into_iter()
-                .map(|(label, details, insert_text)| {
+                .map(|(label, details, insert_text, deprecated)| {
                     CompletionItem {
                         label,
                         kind: Some(CompletionItemKind::REFERENCE),
                         detail: Some(details),
                         insert_text: Some(insert_text),
+                        deprecated: Some(deprecated),
+                        tags: if deprecated {
+                            Some(vec![CompletionItemTag::DEPRECATED])
+                        } else {
+                            Some(vec![])
+                        },
                         // TODO #29 add details from the frame
                         ..Default::default()
                     }
@@ -828,20 +834,28 @@ impl LanguageServer for Backend {
         return Ok(Some(DocumentSymbolResponse::Flat(
             infos
                 .iter()
-                .flat_map(|info| {
-                    let name = info.label(workspace).unwrap_or_else(|| {
-                        doc.full_iri_to_abbreviated_iri(&info.iri)
-                            .unwrap_or(info.iri.to_string())
+                .flat_map(|fi| {
+                    let name = fi.label(workspace).unwrap_or_else(|| {
+                        doc.full_iri_to_abbreviated_iri(&fi.iri)
+                            .unwrap_or(fi.iri.to_string())
                     });
-                    let kind: SymbolKind = info.frame_type.into();
+                    let kind: SymbolKind = fi.frame_type.into();
                     let url = url.clone();
-                    info.definitions.iter().map(move |def| {
+                    fi.definitions.iter().map(move |def| {
                         #[allow(deprecated)] // All fields need to be specified
                         Ok(SymbolInformation {
                             name: name.clone(),
                             kind,
-                            tags: None,
-                            deprecated: None,
+                            tags: if fi.is_deprecated() {
+                                Some(vec![SymbolTag::DEPRECATED])
+                            } else {
+                                Some(vec![])
+                            },
+                            deprecated: if fi.is_deprecated() {
+                                Some(true)
+                            } else {
+                                Some(false)
+                            },
                             location: Location {
                                 uri: url.clone(),
                                 range: def.range.into_lsp(doc.rope(), self.encoding())?,
@@ -903,8 +917,16 @@ impl LanguageServer for Backend {
                                 SymbolInformation {
                                     name: name.clone(),
                                     kind: fi.frame_type.into(),
-                                    tags: None,
-                                    deprecated: None,
+                                    tags: if fi.is_deprecated() {
+                                        Some(vec![SymbolTag::DEPRECATED])
+                                    } else {
+                                        Some(vec![])
+                                    },
+                                    deprecated: if fi.is_deprecated() {
+                                        Some(true)
+                                    } else {
+                                        Some(false)
+                                    },
                                     location,
                                     container_name: None,
                                 }
@@ -1119,7 +1141,8 @@ fn missin_iri_actions(
                 ..Default::default()
             }))
         }
-        workspace::DiagnosticKind::SyntaxError { .. } => None,
+        workspace::DiagnosticKind::SyntaxError { .. }
+        | workspace::DiagnosticKind::Deprecated { .. } => None,
     });
     Ok(create_missing_iri_actions.collect())
 }

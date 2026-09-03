@@ -147,9 +147,11 @@ fn ontology_query_bench(c: &mut Criterion) {
                         .unwrap();
 
                     let qc = QueryCursor::new();
-                    let query =
-                        Query::new(&LANGUAGE_OMN, "[(full_iri) (simple_iri) (abbreviated_iri)]@iri")
-                            .unwrap();
+                    let query = Query::new(
+                        &LANGUAGE_OMN,
+                        "[(full_iri) (simple_iri) (abbreviated_iri)]@iri",
+                    )
+                    .unwrap();
                     (rope, tree, query, qc)
                 },
                 |(rope, tree, query, qc)| {
