@@ -524,7 +524,7 @@ async fn backend_hover_on_class_should_show_class_info() {
     assert!(contents.contains("**Janek"));
     assert!(contents.contains("`label`: Janek der Coder"));
     assert!(contents.contains("German"));
-    assert!(contents.contains("English"));
+    assert!(!contents.contains("English")); // because english is implied
     assert!(contents.contains("IRI: Janek"));
 }
 
