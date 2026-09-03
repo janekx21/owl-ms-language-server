@@ -757,12 +757,13 @@ impl LanguageServer for Backend {
         let iri_completion_items =
             iri_completions
                 .into_iter()
-                .map(|(label, details, insert_text)| {
+                .map(|(label, details, insert_text, depricated)| {
                     CompletionItem {
                         label,
                         kind: Some(CompletionItemKind::REFERENCE),
                         detail: Some(details),
                         insert_text: Some(insert_text),
+                        deprecated: Some(depricated),
                         // TODO #29 add details from the frame
                         ..Default::default()
                     }

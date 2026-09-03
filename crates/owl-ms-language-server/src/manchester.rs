@@ -480,7 +480,7 @@ impl OntologyDocument for InternalOmnDocument {
         &self,
         pos: Position,
         workspace: &Workspace,
-    ) -> Vec<(String, String, String)> {
+    ) -> Vec<(String, String, String, bool)> {
         let pos_one_left = pos.moved_left(1, self.rope());
         let node = self
             .tree()
@@ -506,6 +506,7 @@ impl OntologyDocument for InternalOmnDocument {
                             frame.label(workspace).unwrap_or(full),
                             frame.info_display(workspace),
                             iri,
+                            frame.is_depricated(),
                         ))
                     }
                 })

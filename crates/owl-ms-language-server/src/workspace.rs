@@ -207,7 +207,7 @@ pub trait OntologyDocument {
         &self,
         pos: Position,
         workspace: &Workspace,
-    ) -> Vec<(String, String, String)>; // TODO can this be done in another way???
+    ) -> Vec<(String, String, String, bool)>; // TODO can this be done in another way???
 
     /// Searches for a declared IRI
     fn find_iri_references(&self, full_iri: &Iri, include_declaration: bool) -> Vec<Range> {
