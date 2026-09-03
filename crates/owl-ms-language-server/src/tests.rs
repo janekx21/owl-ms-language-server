@@ -4716,6 +4716,7 @@ async fn backend_diagnostics_with_syntax_error_should_report_nice_message() {
         .exactly_one()
         .is_ok());
 }
+
 #[test(tokio::test)]
 async fn backend_diagnostics_with_deprecated_entity_should_return_diagnostic() {
     setup();
@@ -4767,6 +4768,213 @@ async fn backend_diagnostics_with_deprecated_entity_should_return_diagnostic() {
             }
             k => panic!("Kind was {k:?}"),
         };
+    }
+}
+
+#[test(tokio::test)]
+async fn backend_diagnostics_with_deprecated_entity_should_show_in_completions() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Prefix: owl: <http://www.w3.org/2002/07/owl#>
+        Ontology: Dev
+
+            Class: Janek
+                SubClassOf: Dev
+        #                      ^
+        #             Place cursor here
+
+            Class: Developer
+                Annotations: owl:deprecated "true"
+
+        AnnotationProperty: owl:deprecated
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let completions = service
+        .inner()
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: ontology_url.clone(),
+                },
+                position: lsp_types::Position {
+                    line: 4,
+                    character: 23,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            context: None,
+        })
+        .await;
+
+    // Assert
+    let completions = completions.unwrap().unwrap();
+    match completions {
+        CompletionResponse::Array(completion_items) => {
+            info!("{:?}", completion_items);
+            assert!(completion_items.iter().any(|i| i.deprecated == Some(true)
+                && i.tags
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .any(|t| t == &CompletionItemTag::DEPRECATED)));
+        }
+        CompletionResponse::List(_completion_list) => todo!(),
+    }
+}
+
+#[test(tokio::test)]
+async fn backend_diagnostics_with_deprecated_entity_should_show_in_symbols() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Prefix: owl: <http://www.w3.org/2002/07/owl#>
+        Ontology: Dev
+
+            Class: Janek
+                SubClassOf: Developer
+
+            Class: Developer
+                Annotations: owl:deprecated "true"
+
+        AnnotationProperty: owl:deprecated
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let symbols = service
+        .inner()
+        .symbol(WorkspaceSymbolParams {
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            query: "Dev".into(),
+        })
+        .await;
+
+    // Assert
+    let symbols = symbols.unwrap().unwrap();
+
+    assert!(symbols.iter().filter(|s| s.name == "Developer").all(
+        #[allow(deprecated)]
+        |s| s
+            .tags
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|t| t == &SymbolTag::DEPRECATED)
+            && s.deprecated == Some(true)
+    ));
+}
+
+#[test(tokio::test)]
+async fn backend_diagnostics_with_deprecated_entity_should_show_in_document_symbols() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        Prefix: owl: <http://www.w3.org/2002/07/owl#>
+        Ontology: Dev
+
+            Class: Janek
+                SubClassOf: Developer
+
+            Class: Developer
+                Annotations: owl:deprecated "true"
+
+        AnnotationProperty: owl:deprecated
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let symbols = service
+        .inner()
+        .document_symbol(DocumentSymbolParams {
+            text_document: TextDocumentIdentifier {
+                uri: ontology_url.clone(),
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await;
+
+    // Assert
+    let symbols = symbols.unwrap().unwrap();
+    match symbols {
+        DocumentSymbolResponse::Flat(symbol_informations) => {
+            assert!(symbol_informations
+                .iter()
+                .filter(|s| s.name == "Developer")
+                .all(
+                    #[allow(deprecated)]
+                    |s| s
+                        .tags
+                        .as_ref()
+                        .unwrap()
+                        .iter()
+                        .any(|t| t == &SymbolTag::DEPRECATED)
+                        && s.deprecated == Some(true)
+                ));
+        }
+        DocumentSymbolResponse::Nested(_document_symbols) => todo!(),
     }
 }
 
