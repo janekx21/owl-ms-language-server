@@ -23,6 +23,7 @@ use horned_owl::model::{
 };
 use horned_owl::ontology::set::SetOntology;
 use itertools::Itertools;
+use language::Language;
 use log::{debug, error, info, trace, warn};
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use ropey::{Rope, RopeSlice};
@@ -1941,11 +1942,6 @@ impl ExternalDocument {
     }
 }
 
-pub fn iri_to_parent_url(iri: &Iri) -> Option<Url> {
-    let url = Url::parse(iri).ok()?;
-    Some(iri_to_onology_url(url))
-}
-
 /// Should do the same as [`iri_to_parent_url`] but without parsing the url and therefore without allocation
 pub fn iri_to_parent_url_str(iri: &str) -> Option<&str> {
     iri.rsplit_once('#')
@@ -2122,7 +2118,13 @@ impl FrameInfo {
             .filter(|annotation| &annotation.iri == iri)
             .map(|annotation| {
                 if let Some(language) = &annotation.language {
-                    format!("{} @ {}", &annotation.string_value, &language.name())
+                    // english is implied
+                    if language == &Language::En {
+                        annotation.string_value.to_string()
+                    } else {
+                        format!("{} @ {}", &annotation.string_value, &language.name())
+                        
+                    }
                 } else if annotation.datatype != STRING_IRI.into() && iri != &LABEL_IRI.into()
                 // Endless recursion if label is a valid iri
                 {
@@ -2139,6 +2141,7 @@ impl FrameInfo {
                     annotation.string_value.clone()
                 }
             })
+            .unique()
             .join(", ");
 
         if joined.is_empty() {
