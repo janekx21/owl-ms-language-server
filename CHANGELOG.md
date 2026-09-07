@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.1.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.0.0...v1.1.0) (2026-09-07)
+
+
+### Features
+
+* [#183](https://github.com/janekx21/owl-ms-language-server/issues/183) add (experimental) functional syntax support ([#184](https://github.com/janekx21/owl-ms-language-server/issues/184)) ([9b5428a](https://github.com/janekx21/owl-ms-language-server/commit/9b5428aeac2c550b18aecfc292dec8f0844b3ef3))
+* [#187](https://github.com/janekx21/owl-ms-language-server/issues/187) add xsd default infos ([#189](https://github.com/janekx21/owl-ms-language-server/issues/189)) ([fd92b1a](https://github.com/janekx21/owl-ms-language-server/commit/fd92b1a716989a72c4c52a29cd6685410b167272))
+* [#33](https://github.com/janekx21/owl-ms-language-server/issues/33) add file path url support ([#191](https://github.com/janekx21/owl-ms-language-server/issues/191)) ([f064811](https://github.com/janekx21/owl-ms-language-server/commit/f064811233db73769d469c37fdf36f445b718763))
+* [#38](https://github.com/janekx21/owl-ms-language-server/issues/38) add support for deprecated entities/frames ([#190](https://github.com/janekx21/owl-ms-language-server/issues/190)) ([b53bd44](https://github.com/janekx21/owl-ms-language-server/commit/b53bd44a39997f73f272d5571a7675eaefeeadcd))
+* [#51](https://github.com/janekx21/owl-ms-language-server/issues/51) datatype and language info on annotation literals ([#181](https://github.com/janekx21/owl-ms-language-server/issues/181)) ([7bca91e](https://github.com/janekx21/owl-ms-language-server/commit/7bca91eba83e37b0b627790702a44634e5b28209))
+
+
+### Performance Improvements
+
+* [#28](https://github.com/janekx21/owl-ms-language-server/issues/28) opimize borrows ([#185](https://github.com/janekx21/owl-ms-language-server/issues/185)) ([70a7923](https://github.com/janekx21/owl-ms-language-server/commit/70a792302d06a8ed62078c446ec2e616ac057ff4))
+
 ## [1.0.0](https://github.com/janekx21/owl-ms-language-server/compare/v0.13.2...v1.0.0) (2026-06-29)
 
 
