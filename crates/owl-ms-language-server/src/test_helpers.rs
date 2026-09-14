@@ -157,7 +157,8 @@ pub async fn assert_empty_diagnostics(service: &LspService<Backend>) {
             // Filter out the not defined IRIs for now
             let diagnostics = workspace::diagnostics(doc, workspace)
                 .into_iter()
-                // .filter(|d| !d.label.contains("not defined"))
+                // This catches one case where we assume there is an unknown prefix callen "unknown_prefix"
+                .filter(|d| !d.label().contains("unknown_prefix"))
                 .collect_vec();
 
             assert_eq!(diagnostics, vec![], "rope:\n{}", doc.rope());
