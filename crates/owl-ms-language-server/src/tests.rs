@@ -4772,7 +4772,7 @@ async fn backend_diagnostics_with_deprecated_entity_should_return_diagnostic() {
 }
 
 #[test(tokio::test)]
-async fn backend_diagnostics_with_deprecated_entity_should_show_in_completions() {
+async fn backend_completion_with_deprecated_entity_should_show_in_completions() {
     setup();
     // Arrange
     let service = arrange_backend(None, vec![]).await;
@@ -4846,7 +4846,7 @@ async fn backend_diagnostics_with_deprecated_entity_should_show_in_completions()
 }
 
 #[test(tokio::test)]
-async fn backend_diagnostics_with_deprecated_entity_should_show_in_symbols() {
+async fn backend_symbol_with_deprecated_entity_should_show_in_symbols() {
     setup();
     // Arrange
     let service = arrange_backend(None, vec![]).await;
@@ -4908,7 +4908,7 @@ async fn backend_diagnostics_with_deprecated_entity_should_show_in_symbols() {
 }
 
 #[test(tokio::test)]
-async fn backend_diagnostics_with_deprecated_entity_should_show_in_document_symbols() {
+async fn backend_document_symbol_with_deprecated_entity_should_show_in_document_symbols() {
     setup();
     // Arrange
     let service = arrange_backend(None, vec![]).await;
@@ -4979,7 +4979,7 @@ async fn backend_diagnostics_with_deprecated_entity_should_show_in_document_symb
 }
 
 #[test(tokio::test)]
-async fn backend_hover_with_file_protocol_import_should_work() {
+async fn backend_symbol_with_file_protocol_import_should_work() {
     setup();
     // Arrange
     let dir = arrange_workspace_folders(|dir| {
@@ -5082,6 +5082,128 @@ async fn backend_hover_with_file_protocol_import_should_work() {
     info!("{:?}", symbols);
     symbols.iter().any(|s| s.name == "class-in-other-file");
     symbols.iter().any(|s| s.name == "class-in-other-2-file");
+}
+
+#[test(tokio::test)]
+async fn backend_goto_definition_with_file_protocol_import_should_work() {
+    setup();
+    // Arrange
+    let dir = arrange_workspace_folders(|dir| {
+        let other_path = dir.join("other.omn");
+        let other2_path = dir.join("other-2.omn");
+        vec![
+            WorkspaceMember::OmnFile {
+                name: "main.omn".into(),
+                content: format!(
+                    indoc! { r#"
+                        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+                        Ontology: <http://a.b/multi-file>
+
+                        Import: <file://{}>
+
+                        Class: class-in-first-file
+                            Annotations: rdfs:label "This class is in the first file"
+
+                            SubClassOf: class-in-other-file, class-in-other-2-file
+                "#},
+                    other_path.to_str().unwrap()
+                ),
+            },
+            WorkspaceMember::OmnFile {
+                name: "other.omn".into(),
+                content: format!(
+                    indoc! { r#"
+                    Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+                    Ontology: <http://a.b/multi-file/other>
+
+                    Import: <file://{}>
+
+                    Class: class-in-other-file
+                        Annotations: rdfs:label "This class is in the other file"
+                        SubClassOf: class-in-other-2-file
+                "#},
+                    other2_path.to_str().unwrap()
+                ),
+            },
+            WorkspaceMember::OmnFile {
+                name: "other-2.omn".into(),
+                content: r#"
+                    Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+                    Ontology: <http://a.b/multi-file/other>
+
+                    Class: class-in-other-2-file
+                        Annotations: rdfs:label "This class is in the other 2 file"
+                "#
+                .to_string(),
+            },
+        ]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(dir.path()).unwrap(),
+            name: "test wosrkpace".into(),
+        }),
+        vec![],
+    )
+    .await;
+
+    let ontology_path = dir.path().join("main.omn");
+    let ontology_url = Url::from_file_path(&ontology_path).unwrap();
+
+    info!("{}", ontology_path.display());
+    let ontology = std::fs::read_to_string(&ontology_path).unwrap();
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let res = service
+        .inner()
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: ontology_url.clone(),
+                },
+                position: lsp_types::Position {
+                    line: 4,
+                    character: 10,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+        })
+        .await;
+
+    // Assert
+    let goto_def_res = res.unwrap().unwrap();
+
+    info!("{:#?}", goto_def_res);
+    match goto_def_res {
+        GotoDefinitionResponse::Scalar(location) => {
+            let other_uri =
+                Url::from_file_path(ontology_path.parent().unwrap().join("other.omn")).unwrap();
+            assert_eq!(location.uri, other_uri);
+        }
+        GotoDefinitionResponse::Array(_locations) => todo!(),
+        GotoDefinitionResponse::Link(_location_links) => todo!(),
+    }
 }
 
 /////////////////////////
