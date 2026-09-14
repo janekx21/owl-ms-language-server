@@ -5100,14 +5100,14 @@ async fn backend_goto_definition_with_file_protocol_import_should_work() {
 
                         Ontology: <http://a.b/multi-file>
 
-                        Import: <file://{}>
+                        Import: <{}>
 
                         Class: class-in-first-file
                             Annotations: rdfs:label "This class is in the first file"
 
                             SubClassOf: class-in-other-file, class-in-other-2-file
                 "#},
-                    other_path.to_str().unwrap()
+                    Url::from_file_path(other_path).unwrap()
                 ),
             },
             WorkspaceMember::OmnFile {
@@ -5118,13 +5118,13 @@ async fn backend_goto_definition_with_file_protocol_import_should_work() {
 
                     Ontology: <http://a.b/multi-file/other>
 
-                    Import: <file://{}>
+                    Import: <{}>
 
                     Class: class-in-other-file
                         Annotations: rdfs:label "This class is in the other file"
                         SubClassOf: class-in-other-2-file
                 "#},
-                    other2_path.to_str().unwrap()
+                    Url::from_file_path(other2_path).unwrap()
                 ),
             },
             WorkspaceMember::OmnFile {
