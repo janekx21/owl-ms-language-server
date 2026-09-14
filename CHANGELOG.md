@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.1.0...v1.2.0) (2026-09-14)
+
+
+### Features
+
+* [#192](https://github.com/janekx21/owl-ms-language-server/issues/192) add file path godot definition ([#194](https://github.com/janekx21/owl-ms-language-server/issues/194)) ([080cf8b](https://github.com/janekx21/owl-ms-language-server/commit/080cf8ba62d291bd2210aa45a7a84b882ebddd8a))
+
 ## [1.1.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.0.0...v1.1.0) (2026-09-07)
 
 
