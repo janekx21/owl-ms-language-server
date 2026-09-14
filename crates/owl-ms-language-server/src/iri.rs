@@ -28,6 +28,9 @@ impl ReusedIriSet {
 
 pub static REUSE_IRI: LazyLock<ReusedIriSet> = LazyLock::new(ReusedIriSet::new);
 
+// TODO
+// Iri could maybe be split into absolute(full iri) and relative(simple and abbriviated iri) versions
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 pub struct Iri(Spur);
 
@@ -93,11 +96,6 @@ impl Borrow<str> for Iri {
     fn borrow(&self) -> &str {
         REUSE_IRI.str(self)
     }
-}
-
-/// Takes a str in any form and removed the <> symbols
-pub fn trim_tags(untrimmed: &str) -> &str {
-    untrimmed.trim_end_matches('>').trim_start_matches('<')
 }
 
 #[cfg(test)]
