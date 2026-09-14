@@ -675,7 +675,12 @@ impl LanguageServer for Backend {
             if *is_import {
                 let url = Url::parse(iri.as_str()).map_err(|_| Error::InvalidUrl(url.clone()))?;
                 // This does not work for external documents from prefixes
-                let path = workspace.url_to_path_with_catalog(&url);
+
+                let path = workspace.url_to_path_with_catalog(&url).or_else(|| {
+                    url.to_file_path()
+                        .inspect_err(|()| warn!("invalid import file path: {url}"))
+                        .ok()
+                });
                 if let Some(path) = path {
                     return Ok(Some(single_path_response(&path)));
                 }
