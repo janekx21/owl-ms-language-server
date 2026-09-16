@@ -6,6 +6,10 @@ use log::info;
 use std::{collections::HashMap, fs, path::Path};
 use tempdir::TempDir;
 use tower_lsp::lsp_types::DiagnosticSeverity;
+use tower_lsp::lsp_types::{
+    DidChangeTextDocumentParams, TextDocumentContentChangeEvent, TextEdit, Url,
+    VersionedTextDocumentIdentifier,
+};
 use tower_lsp::{
     lsp_types::{
         ClientCapabilities, GeneralClientCapabilities, InitializeParams, InitializedParams,
@@ -194,5 +198,32 @@ impl HttpClient for StaticClient {
             url.to_string(),
             "Static client did not define that URL and date",
         ))
+    }
+}
+
+pub async fn apply_text_edits(
+    text_edits: HashMap<Url, Vec<TextEdit>>,
+    service: &LspService<Backend>,
+) {
+    for (url, edits) in text_edits {
+        service
+            .inner()
+            .did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: url.clone(),
+                    version: 1,
+                },
+                content_changes: edits
+                    .iter()
+                    .sorted_by_key(|e| e.range.start)
+                    .rev()
+                    .map(|e| TextDocumentContentChangeEvent {
+                        range: Some(e.range),
+                        range_length: None,
+                        text: e.new_text.clone(),
+                    })
+                    .collect(),
+            })
+            .await;
     }
 }

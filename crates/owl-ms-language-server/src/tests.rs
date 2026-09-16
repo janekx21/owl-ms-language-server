@@ -3989,7 +3989,7 @@ async fn backend_code_action_on_full_iri_should_create_prefix() {
     let ontology = indoc! {r#"
         Prefix: : <http://example.org/main#>
         Ontology: <http://example.org/main>
-            Class: <http://example.org/other>
+            Class: <http://example.org/other#Developer>
     "#};
 
     service
@@ -4039,6 +4039,115 @@ async fn backend_code_action_on_full_iri_should_create_prefix() {
         _ => todo!(),
     }));
 }
+
+#[test(tokio::test)]
+async fn backend_code_action_on_multiple_full_iri_should_shorten_all_prefixed_iris() {
+    setup();
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test workspace".into(),
+        }),
+        vec![],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    let ontology = indoc! {r#"
+        Prefix: : <http://example.org/main#>
+        Ontology: <http://example.org/main>
+            Class: <http://example.org/other#Developer>
+            Class: B
+                SubClassOf: <http://example.org/other#Developer>
+            Class: C
+                SubClassOf: <http://example.org/other#Developer>
+            Class: D
+                SubClassOf: <http://example.org/other#Developer>
+            Class: E
+                SubClassOf: <http://example.org/other#Person>
+            Class: F
+                SubClassOf: <http://example.org/other-2#Janek>
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let result = service
+        .inner()
+        .code_action(CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: url.clone() },
+            range: lsp_types::Range {
+                start: lsp_types::Position::new(2, 26),
+                end: lsp_types::Position::new(2, 26),
+            },
+            context: CodeActionContext::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    // Assert
+
+    let edit = result
+        .unwrap()
+        .into_iter()
+        .filter_map(|ca| match ca {
+            CodeActionOrCommand::CodeAction(CodeAction { title, edit, .. }) => {
+                if title.contains("new-prefix:Developer") {
+                    Some(edit.unwrap())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .exactly_one()
+        .unwrap();
+
+    apply_text_edits(edit.changes.unwrap(), &service).await;
+
+    let sync = service.inner().read_sync().await;
+    let (doc, _) = sync.get_internal_document(&url).unwrap();
+
+    let new_ontology = &doc.rope().to_string()[..];
+
+    assert_eq!(
+        new_ontology,
+        indoc! { r#"
+        Prefix: new-prefix: <http://example.org/other#>
+        Prefix: : <http://example.org/main#>
+        Ontology: <http://example.org/main>
+            Class: new-prefix:Developer
+            Class: B
+                SubClassOf: new-prefix:Developer
+            Class: C
+                SubClassOf: new-prefix:Developer
+            Class: D
+                SubClassOf: new-prefix:Developer
+            Class: E
+                SubClassOf: new-prefix:Person
+            Class: F
+                SubClassOf: <http://example.org/other-2#Janek>
+    "# }
+    );
+}
+
 // TODO
 #[test(tokio::test)]
 async fn backend_code_action_for_keywords_should_work() {

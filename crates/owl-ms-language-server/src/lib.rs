@@ -1193,6 +1193,25 @@ fn create_prefix_from_iri(
 
     let prefix_name = "new-prefix".to_string();
 
+    let prefix_url = &format!("{prefix_start}{split_char}")[..];
+
+    let mut text_edits = vec![];
+    for ele in doc.references() {
+        if ele.value().as_str().starts_with(prefix_url) {
+            let prefix_end = ele.value().as_str().trim_start_matches(prefix_url);
+            let te = TextEdit {
+                range: ele.range().into_lsp(doc.rope(), encoding)?,
+                new_text: format!("{prefix_name}:{prefix_end}"),
+            };
+            text_edits.push(te);
+        }
+    }
+
+    text_edits.push(TextEdit {
+        range: Range::ZERO.into_lsp(doc.rope(), encoding)?,
+        new_text: format!("Prefix: {prefix_name}: <{prefix_start}{split_char}>\n"),
+    });
+
     let code_action = CodeActionOrCommand::CodeAction(CodeAction {
         title: format!(
             "Replace with {prefix_name}:{prefix_end}, create {prefix_name}: <{prefix_start}{split_char}>",
@@ -1200,10 +1219,7 @@ fn create_prefix_from_iri(
         edit: Some(WorkspaceEdit {
             changes: Some(HashMap::from([(
                 doc.uri().clone(),
-                vec![// TODO do the text edits
-                    TextEdit { range: iri_under_cursor.range().into_lsp(doc.rope(), encoding)?, new_text: format!("{prefix_name}:{prefix_end}") },
-                    TextEdit {range: Range::ZERO.into_lsp(doc.rope(), encoding)?, new_text: format!("Prefix: {prefix_name}: <{prefix_start}{split_char}>\n")}
-                ],
+                text_edits
             )])),
             ..Default::default()
         }),
