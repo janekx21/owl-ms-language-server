@@ -10,9 +10,9 @@ use crate::workspace::{
     build_iri_locations, capture_by_name, changes_from_lsp, edit_vec_rb, extend_vec_rb,
     iri_to_parent_url_str, node_text, post_change_ranges, retain_vec_rb, retain_vec_rb_on_remove,
     trim_full_iri_rope_slice, trim_string_value, word_before_character, Annotation, Diagnostic,
-    DocumentId, FormattingSettings, FrameInfo, FrameType, Highlights, HoverResult, IriAtPosition,
-    IriDefinition, KeywordAction, Location, OntologyDocument, OntologyId, ParsedDocument,
-    RenameInfo, UnwrappedQueryMatch, Workspace,
+    DiagnosticKind, DocumentId, FormattingSettings, FrameInfo, FrameType, Highlights, HoverResult,
+    IriAtPosition, IriDefinition, KeywordAction, Location, OntologyDocument, OntologyId,
+    ParsedDocument, RenameInfo, UnwrappedQueryMatch, Workspace,
 };
 use crate::{
     debugging::timeit, queries::ALL_QUERIES, range::Range, rope_provider::RopeProvider,
@@ -266,8 +266,6 @@ impl OntologyDocument for InternalOmnDocument {
     }
 
     fn rename_range(&self, pos: Position) -> Option<Range> {
-        // self.iri_at(pos).map(|iri| iri.range().clone())
-
         let node = self
             .tree()
             .root_node()
@@ -945,10 +943,6 @@ impl QueriedDocument {
 
                 RangeBox::new(annotation, frame_capture.node.range)
             })
-            // TODO remove
-            // .collect::<HashSet<RangeBox<Annotation>>>()
-            // .into_iter()
-            // .sorted_unstable()
             .collect_vec()
     }
 
@@ -1041,12 +1035,15 @@ impl QueriedDocument {
             });
 
         let iri_locations = build_iri_locations(&references);
+
+        let mut local_diagnostics = timeit("syntax errors", || parsed_document.syntax_errors());
+        local_diagnostics.extend(semantic_local_diagnostics(&references));
         Stage2Document {
-            references,
             definitions,
+            references,
             annotations,
             all_frame_infos,
-            local_diagnostics: timeit("syntax errors", || parsed_document.syntax_errors()),
+            local_diagnostics,
             directly_reachable_import_urls,
             directly_reachable_other_urls,
             iri_locations,
@@ -1546,7 +1543,6 @@ impl Stage2Document {
                 )
             });
 
-            self.local_diagnostics = parsed_document.syntax_errors();
             self.all_frame_infos = all_frame_infos;
 
             // TODO split into seperate functions
@@ -1554,6 +1550,10 @@ impl Stage2Document {
                 queried_document.reachable_urls(&self.references, &id.uri);
             self.directly_reachable_import_urls = directly_reachable_import_urls;
             self.directly_reachable_other_urls = directly_reachable_other_urls;
+
+            self.local_diagnostics = parsed_document.syntax_errors();
+            self.local_diagnostics
+                .extend(semantic_local_diagnostics(&self.references));
         });
     }
 
@@ -1568,5 +1568,33 @@ impl Stage2Document {
                 }
             })
         );
+    }
+}
+
+fn semantic_local_diagnostics(references: &[RangeBox<Iri>]) -> Vec<Diagnostic> {
+    let abbriviated_iris_in_refs = references
+        .iter()
+        .filter_map(|rb| try_into_abbriviated(rb.value()).map(|a| RangeBox::new(a, *rb.range())));
+
+    let add = abbriviated_iris_in_refs.map(|x| Diagnostic {
+        range: *x.range(),
+        kind: DiagnosticKind::PrefixNotDefined(x.value().0.to_string()),
+    });
+    add.collect_vec()
+}
+
+// TODO this following function will probibly not catch all cases
+
+fn try_into_abbriviated(iri: &Iri) -> Option<(&str, &str)> {
+    if iri.contains('/') {
+        None
+    } else if let Some((l, r)) = iri.as_str().split_once(':') {
+        if l.is_empty() {
+            None
+        } else {
+            Some((l, r))
+        }
+    } else {
+        None
     }
 }

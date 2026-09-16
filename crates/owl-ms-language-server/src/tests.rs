@@ -1075,7 +1075,7 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
     let url = Url::from_file_path(tmp_dir.path().join("ontology-a").join("a1.omn")).unwrap();
 
     let ontology = r#"
-        Prefix: : <http://foo.org/ontology#>
+        Prefix: : <http://foo.org/ontology#> Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
         Ontology: <http://ontology-a.org/a1>
             Import: <http://ontology-a.org/a2>
             Class: ClassA1
@@ -1139,7 +1139,7 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
     // Arrange
 
     let source = indoc! {"
-    Prefix:    a:    <http://a.b/c/>
+    Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#> Prefix:    a:    <http://a.b/c/>
 
     Prefix:    b:    <http://a.b/b/>
     Ontology:   foo    ver
@@ -1167,6 +1167,7 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
 
     // Reordering frames is disabled on default
     let target = indoc! {"
+    Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
     Prefix: a: <http://a.b/c/>
     Prefix: b: <http://a.b/b/>
 
@@ -1655,7 +1656,7 @@ async fn backend_did_open_should_load_external_documents_via_http() {
             WorkspaceMember::OmnFile {
                 name: "a.omn".into(),
                 content: r#"
-                Ontology: <http://foo.org/a>
+                Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#> Ontology: <http://foo.org/a>
                     AnnotationProperty: rdfs:label
                     Class: some-class
                         Annotations:
@@ -1704,7 +1705,7 @@ async fn backend_did_open_should_load_external_documents_via_http() {
     let url = Url::from_file_path(tmp_dir.path().join("c.omn")).unwrap();
 
     let ontology = r#"
-        Ontology: <http://foo.org/c>
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#> Ontology: <http://foo.org/c>
             Import: <http://foo.org/a.omn>
             AnnotationProperty: rdfs:label
             Class: some-other-class-at-c
@@ -2001,7 +2002,7 @@ async fn backend_did_open_should_load_external_documents_via_file() {
     let url = Url::from_file_path(tmp_dir.path().join("c.omn")).unwrap();
 
     let ontology = r#"
-        Ontology: <http://foo.org/c>
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#> Ontology: <http://foo.org/c>
             Import: <http://foo.org/a>
             AnnotationProperty: rdfs:label
             Class: some-other-class-at-c
@@ -2725,14 +2726,14 @@ async fn backend_rename_prefixless_simple_iri_should_work() {
 async fn backend_rename_unknown_abbriviated_iri_should_work() {
     setup();
     let ontology = indoc! {"
-        Ontology:
-        Class: unknown:B
-            SubClassOf: unknown:B
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#> Ontology:
+        Class: unknown_prefix:B
+            SubClassOf: unknown_prefix:B
     "};
     let new_ontology = indoc! {"
-        Ontology:
-        Class: unknown:beta
-            SubClassOf: unknown:beta
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#> Ontology:
+        Class: unknown_prefix:beta
+            SubClassOf: unknown_prefix:beta
     "};
 
     backend_rename_helper(ontology, new_ontology, Position::new(1, 7), "beta").await;
@@ -2794,14 +2795,14 @@ async fn backend_rename_abbriviated_iri_should_work_for_matching() {
 async fn backend_rename_full_iri_should_work_for_matching() {
     setup();
     let ontology = indoc! {"
-        Ontology:
+        Prefix: o: <http://o.org/o#> Ontology:
         Class: <https://example.com/ontology#B>
             SubClassOf: o:B, B, <https://example.com/ontology#B>
         Class: B
         Class: o:B
     "};
     let new_ontology = indoc! {"
-        Ontology:
+        Prefix: o: <http://o.org/o#> Ontology:
         Class: <https://example.com/ontology#beta>
             SubClassOf: o:B, B, <https://example.com/ontology#beta>
         Class: B
@@ -4843,6 +4844,59 @@ async fn backend_completion_with_deprecated_entity_should_show_in_completions() 
         }
         CompletionResponse::List(_completion_list) => todo!(),
     }
+}
+#[test(tokio::test)]
+
+async fn backend_diagnostics_with_undefined_prefix_should_report() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        # Missing default prefix
+        Ontology: Dev
+
+            Class: Janek
+                SubClassOf: und:Developer
+            #               ^^^
+            #             Not defined
+                SubClassOf: :Person
+            #               ^
+            #            Default prefix (also not defined but other diagnostic)
+
+            Class: Person
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    // Assert
+    let diagnostics = ws_diagnostics(document, workspace);
+    info!("{}", diagnostics.iter().map(|d| d.label()).join(", "));
+    assert!(diagnostics
+        .iter()
+        .filter(|d| d.label().contains("Prefix") && d.label().contains("is not defined"))
+        .all(|d| d.label().contains("und")));
 }
 
 #[test(tokio::test)]

@@ -2,8 +2,8 @@ use crate::catalog::CatalogUri;
 use crate::consts::{get_fixed_infos, keyword_hover_info, LABEL_IRI, STRING_IRI};
 use crate::error::{Error, Result, ResultExt, ResultIterator};
 use crate::functional::InternalOfnDocument;
+use crate::iri::Iri;
 use crate::iri::ToIri;
-use crate::iri::{trim_tags, Iri};
 use crate::manchester::InternalOmnDocument;
 use crate::pos::Position;
 use crate::queries::NODE_TYPES;
@@ -892,6 +892,7 @@ impl Diagnostic {
                 )
             }
             DiagnosticKind::Deprecated(iri) => format!("{iri} is deprecated"),
+            DiagnosticKind::PrefixNotDefined(prefix) => format!("Prefix {prefix} not defined"),
         }
     }
 
@@ -931,6 +932,7 @@ pub enum DiagnosticKind {
         msg: String, // Eg. "UNEXPECTED '\n'"
     },
     Deprecated(Iri),
+    PrefixNotDefined(String),
 }
 
 /// Take this document, generate the diagnostics in workspace context and send the results via the client.
@@ -2123,7 +2125,6 @@ impl FrameInfo {
                         annotation.string_value.to_string()
                     } else {
                         format!("{} @ {}", &annotation.string_value, &language.name())
-                        
                     }
                 } else if annotation.datatype != STRING_IRI.into() && iri != &LABEL_IRI.into()
                 // Endless recursion if label is a valid iri
@@ -2488,11 +2489,6 @@ impl Display for FrameType {
         };
         write!(f, "{name}")
     }
-}
-
-/// Takes an IRI in any form and removed the <> symbols
-pub fn trim_full_iri(untrimmed_iri: &str) -> Iri {
-    trim_tags(untrimmed_iri).into()
 }
 
 /// Takes an IRI in any form and removed the <> symbols
