@@ -230,6 +230,7 @@ impl OntologyDocument for InternalOmnDocument {
         let range: Range = node.range().into();
         let parent_kind = node.parent()?.kind();
         let is_import = parent_kind == "import";
+        let is_ontology = parent_kind == "ontology_iri";
         let frame_type = if is_import {
             None
         } else {
@@ -243,6 +244,7 @@ impl OntologyDocument for InternalOmnDocument {
                 IriAtPosition {
                     full_iri: trim_full_iri_rope_slice(node_text(&node, self.rope())).to_iri(),
                     is_import,
+                    is_ontology,
                     frame_type,
                 },
                 range,
@@ -256,6 +258,7 @@ impl OntologyDocument for InternalOmnDocument {
                     IriAtPosition {
                         full_iri,
                         is_import,
+                        is_ontology,
                         frame_type,
                     },
                     range,

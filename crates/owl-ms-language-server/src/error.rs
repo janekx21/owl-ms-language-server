@@ -27,6 +27,8 @@ pub enum Error {
     LockTimeout(u64),
     #[error("The provided URL is not valid for this LSP {0}")]
     InvalidUrl(Url),
+    #[error("The provided IRI is not valid {0}")]
+    InvalidIri(String),
     #[error("The position is not inside the bounds {0}")]
     PositionOutOfBounds(Position),
     #[error("The tower lsp position is not inside the bounds {0:?}")]

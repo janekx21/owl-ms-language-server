@@ -39,7 +39,7 @@ use tower_lsp::{Client, LanguageServer};
 use tree_sitter_c2rust::Language;
 use workspace::Workspace;
 
-use crate::iri::REUSE_IRI;
+use crate::iri::{Iri, REUSE_IRI};
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{
@@ -722,6 +722,7 @@ impl LanguageServer for Backend {
         let mut actions = vec![];
 
         actions.extend(missin_iri_actions(pos, doc, ws, self.encoding())?);
+        actions.extend(create_prefix_from_iri(pos, doc, ws, self.encoding())?);
         actions.extend(keyword_actions(pos, doc, self.encoding())?);
 
         Ok(Some(actions))
@@ -1149,6 +1150,66 @@ fn missin_iri_actions(
         _ => None,
     });
     Ok(create_missing_iri_actions.collect())
+}
+
+fn create_prefix_from_iri(
+    pos: Position,
+    doc: &InternalDocument,
+    ws: &Workspace,
+    encoding: &PositionEncodingKind,
+) -> Result<Vec<CodeActionOrCommand>> {
+    let Some(iri_under_cursor) = doc.iri_at(pos) else {
+        return Ok(vec![]);
+    };
+
+    if iri_under_cursor.value().is_import || iri_under_cursor.value().is_ontology {
+        return Ok(vec![]);
+    }
+
+    if doc
+        .full_iri_to_abbreviated_iri(&iri_under_cursor.value().full_iri)
+        .is_some()
+    {
+        return Ok(vec![]);
+    }
+
+    let (split_char, (prefix_start, prefix_end)) = &iri_under_cursor
+        .value()
+        .full_iri
+        .as_str()
+        .rsplit_once('#')
+        .map(|t| ('#', t))
+        .or_else(|| {
+            iri_under_cursor
+                .value()
+                .full_iri
+                .as_str()
+                .rsplit_once('/')
+                .map(|t| ('/', t))
+        })
+        .ok_or(Error::InvalidIri(
+            iri_under_cursor.value().full_iri.to_string(),
+        ))?;
+
+    let prefix_name = "new-prefix".to_string();
+
+    let code_action = CodeActionOrCommand::CodeAction(CodeAction {
+        title: format!(
+            "Replace with {prefix_name}:{prefix_end}, create {prefix_name}: <{prefix_start}{split_char}>",
+        ),
+        edit: Some(WorkspaceEdit {
+            changes: Some(HashMap::from([(
+                doc.uri().clone(),
+                vec![// TODO do the text edits
+                    TextEdit { range: iri_under_cursor.range().into_lsp(doc.rope(), encoding)?, new_text: format!("{prefix_name}:{prefix_end}") },
+                    TextEdit {range: Range::ZERO.into_lsp(doc.rope(), encoding)?, new_text: format!("Prefix: {prefix_name}: <{prefix_start}{split_char}>\n")}
+                ],
+            )])),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    Ok(vec![code_action])
 }
 
 fn keyword_actions(

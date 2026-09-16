@@ -255,6 +255,7 @@ pub(crate) enum HoverResult {
 pub struct IriAtPosition {
     pub full_iri: Iri,
     pub is_import: bool,
+    pub is_ontology: bool,
     /// `None` for import IRIs and positions where no frame context was found
     pub frame_type: Option<FrameType>,
 }
