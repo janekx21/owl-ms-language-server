@@ -1037,7 +1037,7 @@ impl QueriedDocument {
         let iri_locations = build_iri_locations(&references);
 
         let mut local_diagnostics = timeit("syntax errors", || parsed_document.syntax_errors());
-        local_diagnostics.extend(semantic_local_diagnostics(&references));
+        local_diagnostics.extend(semantic_local_diagnostics(&references, &self.prefixes));
         Stage2Document {
             definitions,
             references,
@@ -1552,8 +1552,11 @@ impl Stage2Document {
             self.directly_reachable_other_urls = directly_reachable_other_urls;
 
             self.local_diagnostics = parsed_document.syntax_errors();
-            self.local_diagnostics
-                .extend(semantic_local_diagnostics(&self.references));
+
+            self.local_diagnostics.extend(semantic_local_diagnostics(
+                &self.references,
+                &queried_document.prefixes,
+            ));
         });
     }
 
@@ -1571,7 +1574,20 @@ impl Stage2Document {
     }
 }
 
-fn semantic_local_diagnostics(references: &[RangeBox<Iri>]) -> Vec<Diagnostic> {
+fn semantic_local_diagnostics(
+    references: &[RangeBox<Iri>],
+    prefixes: &HashMap<String, RangeBox<String>>,
+) -> Vec<Diagnostic> {
+    // Prefix not defined
+    let add = prefix_not_defined_diagnostics(references);
+    let add = add.chain(default_prefix_not_defined_diagnostics(prefixes));
+
+    add.collect_vec()
+}
+
+fn prefix_not_defined_diagnostics(
+    references: &[RangeBox<Iri>],
+) -> impl Iterator<Item = Diagnostic> + use<'_> {
     let abbriviated_iris_in_refs = references
         .iter()
         .filter_map(|rb| try_into_abbriviated(rb.value()).map(|a| RangeBox::new(a, *rb.range())));
@@ -1580,7 +1596,21 @@ fn semantic_local_diagnostics(references: &[RangeBox<Iri>]) -> Vec<Diagnostic> {
         range: *x.range(),
         kind: DiagnosticKind::PrefixNotDefined(x.value().0.to_string()),
     });
-    add.collect_vec()
+    add
+}
+
+fn default_prefix_not_defined_diagnostics(
+    prefixes: &HashMap<String, RangeBox<String>>,
+) -> impl Iterator<Item = Diagnostic> + use<'_> {
+    if prefixes.get("").is_none() {
+        Some(Diagnostic {
+            range: Range::ZERO,
+            kind: DiagnosticKind::DefaultPrefixNotDefined,
+        })
+    } else {
+        None
+    }
+    .into_iter()
 }
 
 // TODO this following function will probibly not catch all cases

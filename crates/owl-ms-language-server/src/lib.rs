@@ -1146,9 +1146,7 @@ fn missin_iri_actions(
                 ..Default::default()
             }))
         }
-        workspace::DiagnosticKind::SyntaxError { .. }
-        | workspace::DiagnosticKind::Deprecated { .. }
-        | workspace::DiagnosticKind::PrefixNotDefined(_) => None,
+        _ => None,
     });
     Ok(create_missing_iri_actions.collect())
 }

@@ -893,6 +893,9 @@ impl Diagnostic {
             }
             DiagnosticKind::Deprecated(iri) => format!("{iri} is deprecated"),
             DiagnosticKind::PrefixNotDefined(prefix) => format!("Prefix {prefix} not defined"),
+            DiagnosticKind::DefaultPrefixNotDefined => {
+                "The default prefix (:) is not defined".into()
+            }
         }
     }
 
@@ -903,11 +906,7 @@ impl Diagnostic {
     ) -> Result<lsp_types::Diagnostic> {
         Ok(lsp_types::Diagnostic {
             range: self.range.into_lsp(rope, encoding)?,
-            severity: if matches!(self.kind, DiagnosticKind::Deprecated(_)) {
-                Some(DiagnosticSeverity::WARNING)
-            } else {
-                Some(DiagnosticSeverity::ERROR)
-            },
+            severity: Some(self.kind.severity()),
             code: None,
             code_description: None,
             source: Some("owl language server".to_string()),
@@ -933,6 +932,20 @@ pub enum DiagnosticKind {
     },
     Deprecated(Iri),
     PrefixNotDefined(String),
+    DefaultPrefixNotDefined,
+}
+
+impl DiagnosticKind {
+    pub fn severity(&self) -> DiagnosticSeverity {
+        match self {
+            DiagnosticKind::MissingIri(_)
+            | DiagnosticKind::SyntaxError { .. }
+            | DiagnosticKind::PrefixNotDefined(_) => DiagnosticSeverity::ERROR,
+            DiagnosticKind::Deprecated(_) | DiagnosticKind::DefaultPrefixNotDefined => {
+                DiagnosticSeverity::WARNING
+            }
+        }
+    }
 }
 
 /// Take this document, generate the diagnostics in workspace context and send the results via the client.

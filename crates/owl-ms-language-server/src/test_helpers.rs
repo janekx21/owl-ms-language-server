@@ -5,6 +5,7 @@ use itertools::Itertools;
 use log::info;
 use std::{collections::HashMap, fs, path::Path};
 use tempdir::TempDir;
+use tower_lsp::lsp_types::DiagnosticSeverity;
 use tower_lsp::{
     lsp_types::{
         ClientCapabilities, GeneralClientCapabilities, InitializeParams, InitializedParams,
@@ -159,6 +160,8 @@ pub async fn assert_empty_diagnostics(service: &LspService<Backend>) {
                 .into_iter()
                 // This catches one case where we assume there is an unknown prefix callen "unknown_prefix"
                 .filter(|d| !d.label().contains("unknown_prefix"))
+                // I only want error diagnostics not warnings
+                .filter(|d| d.kind.severity() == DiagnosticSeverity::ERROR)
                 .collect_vec();
 
             assert_eq!(diagnostics, vec![], "rope:\n{}", doc.rope());
