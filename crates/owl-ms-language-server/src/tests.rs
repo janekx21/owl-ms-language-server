@@ -4845,6 +4845,59 @@ async fn backend_diagnostics_with_deprecated_entity_should_show_in_completions()
         CompletionResponse::List(_completion_list) => todo!(),
     }
 }
+#[test(tokio::test)]
+
+async fn backend_diagnostics_with_undefined_prefix_should_report() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let ontology_url = Url::from_file_path(dir.path().join("file.omn")).unwrap();
+
+    let ontology = indoc! { r#"
+        # Missing default prefix
+        Ontology: Dev
+
+            Class: Janek
+                SubClassOf: und:Developer
+            #               ^^^
+            #             Not defined
+                SubClassOf: :Person
+            #               ^
+            #            Default prefix (also not defined but other diagnostic)
+
+            Class: Person
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: ontology_url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let document = workspace
+        .internal_documents()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Multiple documents"));
+
+    // Assert
+    let diagnostics = ws_diagnostics(document, workspace);
+    info!("{}", diagnostics.iter().map(|d| d.label()).join(", "));
+    assert!(diagnostics
+        .iter()
+        .filter(|d| d.label().contains("Prefix") && d.label().contains("is not defined"))
+        .all(|d| d.label().contains("und")));
+}
 
 #[test(tokio::test)]
 async fn backend_diagnostics_with_deprecated_entity_should_show_in_symbols() {
