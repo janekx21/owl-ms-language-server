@@ -3967,6 +3967,77 @@ async fn backend_code_action_on_missing_iri_should_create_frame() {
     }));
 }
 
+#[test(tokio::test)]
+async fn backend_code_action_on_full_iri_should_create_prefix() {
+    setup();
+    // Arrange
+
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test workspace".into(),
+        }),
+        vec![],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    let ontology = indoc! {r#"
+        Prefix: : <http://example.org/main#>
+        Ontology: <http://example.org/main>
+            Class: <http://example.org/other>
+    "#};
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+    let result = service
+        .inner()
+        .code_action(CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: url.clone() },
+            range: lsp_types::Range {
+                start: lsp_types::Position::new(2, 26),
+                end: lsp_types::Position::new(2, 26),
+            },
+            context: CodeActionContext::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    let result = result.expect("Sould be some some");
+    assert!(result.iter().any(|action| match action {
+        CodeActionOrCommand::CodeAction(code_action) => {
+            code_action.title.to_lowercase().contains("create")
+                && !code_action
+                    .edit
+                    .as_ref()
+                    .unwrap()
+                    .changes
+                    .as_ref()
+                    .expect("Changes should have one change, the new class")
+                    .get(&url)
+                    .unwrap()
+                    .is_empty()
+        }
+        _ => todo!(),
+    }));
+}
 // TODO
 #[test(tokio::test)]
 async fn backend_code_action_for_keywords_should_work() {
@@ -4845,8 +4916,8 @@ async fn backend_completion_with_deprecated_entity_should_show_in_completions() 
         CompletionResponse::List(_completion_list) => todo!(),
     }
 }
-#[test(tokio::test)]
 
+#[test(tokio::test)]
 async fn backend_diagnostics_with_undefined_prefix_should_report() {
     setup();
     // Arrange
