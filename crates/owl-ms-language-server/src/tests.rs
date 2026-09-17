@@ -2736,7 +2736,28 @@ async fn backend_rename_unknown_abbriviated_iri_should_work() {
             SubClassOf: unknown_prefix:beta
     "};
 
-    backend_rename_helper(ontology, new_ontology, Position::new(1, 7), "beta").await;
+    backend_rename_helper(ontology, new_ontology, Position::new(1, 22), "beta").await;
+}
+
+#[test(tokio::test)]
+async fn backend_rename_prefix_should_work() {
+    setup();
+    let ontology = indoc! {"
+        Prefix: some: <http://some/some#>
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Ontology:
+        Class: some:B
+            SubClassOf: some:B
+    "};
+    let new_ontology = indoc! {"
+        Prefix: another: <http://some/some#>
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Ontology:
+        Class: another:B
+            SubClassOf: another:B
+    "};
+
+    backend_rename_helper(ontology, new_ontology, Position::new(3, 10), "another").await;
 }
 
 #[test(tokio::test)]

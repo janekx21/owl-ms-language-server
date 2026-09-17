@@ -21,8 +21,8 @@ use crate::{
     rope_provider::RopeProvider,
     workspace::{
         changes_from_lsp, Diagnostic, DocumentId, FormattingSettings, FrameInfo, Highlights,
-        HoverResult, IriAtPosition, IriDefinition, KeywordAction, OntologyDocument, ParsedDocument,
-        RenameInfo, Workspace,
+        HoverResult, IriAtPosition, IriDefinition, IriRenameInfo, KeywordAction, OntologyDocument,
+        ParsedDocument, RenameInfo, Workspace,
     },
 };
 
