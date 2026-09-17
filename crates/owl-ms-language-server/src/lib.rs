@@ -1070,13 +1070,14 @@ impl LanguageServer for Backend {
                 })
                 .collect();
 
-            return Ok(Some(WorkspaceEdit {
+            Ok(Some(WorkspaceEdit {
                 changes: Some(changes),
                 document_changes: None,
                 change_annotations: None,
-            }));
+            }))
+        } else {
+            Ok(None)
         }
-        Ok(None)
     }
 
     async fn shutdown(&self) -> Result<()> {

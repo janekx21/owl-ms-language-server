@@ -11,9 +11,10 @@ use crate::workspace::{
     iri_to_parent_url_str, node_text, post_change_ranges, retain_vec_rb, retain_vec_rb_on_remove,
     trim_full_iri_rope_slice, trim_string_value, word_before_character, Annotation, Diagnostic,
     DiagnosticKind, DocumentId, FormattingSettings, FrameInfo, FrameType, Highlights, HoverResult,
-    IriAtPosition, IriDefinition, KeywordAction, Location, OntologyDocument, OntologyId,
-    ParsedDocument, RenameInfo, UnwrappedQueryMatch, Workspace,
+    IriAtPosition, IriDefinition, IriRenameInfo, KeywordAction, Location, OntologyDocument,
+    OntologyId, ParsedDocument, RenameInfo, UnwrappedQueryMatch, Workspace,
 };
+use crate::USizeextra;
 use crate::{
     debugging::timeit, queries::ALL_QUERIES, range::Range, rope_provider::RopeProvider,
     LANGUAGE_OMN,
@@ -305,11 +306,21 @@ impl OntologyDocument for InternalOmnDocument {
                     .find(':')
                     .expect("abbreviated_iri to contain at least one :")
                     + 1;
-                #[allow(clippy::cast_possible_truncation)]
-                Some(Range {
-                    start: range.start.moved_right(col_offset as u32, self.rope()),
-                    ..range
-                })
+
+                let short_iri_start = range.start.moved_right(col_offset.to_u32(), self.rope());
+
+                if pos < short_iri_start {
+                    // prefix rename
+                    Some(Range {
+                        start: range.start,
+                        end: short_iri_start.moved_left(1, self.rope()),
+                    })
+                } else {
+                    Some(Range {
+                        start: range.start.moved_right(col_offset.to_u32(), self.rope()),
+                        ..range
+                    })
+                }
             }
             _ => None,
         }
@@ -332,39 +343,133 @@ impl OntologyDocument for InternalOmnDocument {
         Ok(match node.kind() {
             "full_iri" => {
                 let full_iri = trim_full_iri_rope_slice(node_text(&node, self.rope())).to_iri();
-                Some(RenameInfo {
+                Some(RenameInfo::Iri(IriRenameInfo {
                     full_iri,
                     new_iri: Some(new_name.to_iri()),
                     frame_type,
                     original: new_name.to_string(),
-                })
+                }))
             }
             "simple_iri" => {
                 let iri = node_text(&node, self.rope()).to_iri();
-                Some(RenameInfo {
+                Some(RenameInfo::Iri(IriRenameInfo {
                     full_iri: self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri),
                     new_iri: self.abbreviated_iri_to_full_iri(&new_name.into()),
                     frame_type,
                     original: new_name.to_string(),
-                })
+                }))
             }
             "abbreviated_iri" => {
-                let annreviated_iri: Iri = node_text(&node, self.rope()).to_iri();
-                let (prefix, _) = annreviated_iri
+                let range: Range = node.range().into();
+                let text = node_text(&node, self.rope()).to_string();
+                let col_offset = text
+                    .find(':')
+                    .expect("abbreviated_iri to contain at least one :")
+                    + 1;
+
+                let short_iri_start = range.start.moved_right(col_offset.to_u32(), self.rope());
+
+                let (prefix, _) = text
                     .split_once(':')
                     .expect("abbreviated_iri to contain at least one :");
-                let new_original = format!("{prefix}:{new_name}");
-                Some(RenameInfo {
-                    full_iri: self
-                        .abbreviated_iri_to_full_iri(&annreviated_iri)
-                        .unwrap_or(annreviated_iri),
-                    new_iri: self.abbreviated_iri_to_full_iri(&new_original.to_iri()),
-                    frame_type,
-                    original: new_original,
-                })
+
+                if pos < short_iri_start {
+                    Some(RenameInfo::Prefix(prefix.to_string(), new_name.to_string()))
+                } else {
+                    let new_original = format!("{prefix}:{new_name}");
+                    Some(RenameInfo::Iri(IriRenameInfo {
+                        full_iri: self
+                            .abbreviated_iri_to_full_iri(&text.to_iri())
+                            .unwrap_or(text.to_iri()),
+                        new_iri: self.abbreviated_iri_to_full_iri(&new_original.to_iri()),
+                        frame_type,
+                        original: new_original,
+                    }))
+                }
             }
             _ => None,
         })
+    }
+
+    fn rename_edits(&self, rename_info: &RenameInfo) -> Vec<RangeBox<String>> {
+        match rename_info {
+            RenameInfo::Iri(rename_info) => {
+                let IriRenameInfo {
+                    full_iri,
+                    new_iri,
+                    frame_type,
+                    original,
+                } = rename_info;
+
+                self.parsed_document
+                    .query(&ALL_QUERIES.iri_query_all)
+                    .into_iter()
+                    .map(|m| {
+                        let (iri, range, node_frame_type) = match &m.captures[..] {
+                            [iri_capture] => (
+                                match iri_capture.node.kind {
+                                    "full_iri" => {
+                                        trim_full_iri_rope_slice(iri_capture.node.text).to_iri()
+                                    }
+                                    "simple_iri" | "abbreviated_iri" => self
+                                        .abbreviated_iri_to_full_iri(
+                                            &iri_capture.node.text.to_iri(),
+                                        )
+                                        .unwrap_or(iri_capture.node.text.to_iri()),
+                                    _ => unreachable!(),
+                                },
+                                iri_capture.node.range,
+                                FrameType::parse(
+                                    iri_capture
+                                        .node
+                                        .parent_kind
+                                        .expect("iris should have parents"),
+                                ),
+                            ),
+                            _ => unreachable!(),
+                        };
+                        if &iri == full_iri && &node_frame_type == frame_type {
+                            Ok(Some(RangeBox::new(
+                                new_iri
+                                    .clone()
+                                    .map(|new_iri| self.full_iri_to_shorter_iri(&new_iri))
+                                    .unwrap_or(original.to_string()),
+                                range,
+                            )))
+                        } else {
+                            Ok(None)
+                        }
+                    })
+                    .filter_and_log()
+                    .flatten()
+                    .collect_vec()
+            }
+            RenameInfo::Prefix(old_prefix, new_prefix) => {
+                if self.queried_document.prefixes.contains_key(new_prefix) {
+                    // this is a conflict, lets not rename anything!
+                    return vec![];
+                }
+                if let Some(p) = self.queried_document.prefixes.get(old_prefix) {
+                    let (name_range, _) = self
+                        .parsed_document
+                        .prefix_parts_in_range(*p.range())
+                        .expect("valid prefix in this range");
+
+                    let mut edits = vec![RangeBox::new(format!("{new_prefix}:"), name_range)];
+                    for iri in self.references() {
+                        if let Some(postfix) = iri.value().strip_prefix(p.value()) {
+                            edits.push(RangeBox::new(
+                                format!("{new_prefix}:{postfix}"),
+                                *iri.range(),
+                            ));
+                        }
+                    }
+                    edits
+                } else {
+                    vec![]
+                }
+            }
+        }
     }
 
     fn keyword_actions_at(&self, pos: Position) -> Vec<KeywordAction> {
@@ -515,54 +620,6 @@ impl OntologyDocument for InternalOmnDocument {
         } else {
             Vec::new()
         }
-    }
-
-    fn rename_edits(&self, rename_info: &RenameInfo) -> Vec<RangeBox<String>> {
-        let RenameInfo {
-            full_iri,
-            new_iri,
-            frame_type,
-            original,
-        } = rename_info;
-
-        self.parsed_document
-            .query(&ALL_QUERIES.iri_query_all)
-            .into_iter()
-            .map(|m| {
-                let (iri, range, node_frame_type) = match &m.captures[..] {
-                    [iri_capture] => (
-                        match iri_capture.node.kind {
-                            "full_iri" => trim_full_iri_rope_slice(iri_capture.node.text).to_iri(),
-                            "simple_iri" | "abbreviated_iri" => self
-                                .abbreviated_iri_to_full_iri(&iri_capture.node.text.to_iri())
-                                .unwrap_or(iri_capture.node.text.to_iri()),
-                            _ => unreachable!(),
-                        },
-                        iri_capture.node.range,
-                        FrameType::parse(
-                            iri_capture
-                                .node
-                                .parent_kind
-                                .expect("iris should have parents"),
-                        ),
-                    ),
-                    _ => unreachable!(),
-                };
-                if &iri == full_iri && &node_frame_type == frame_type {
-                    Ok(Some(RangeBox::new(
-                        new_iri
-                            .clone()
-                            .map(|new_iri| self.full_iri_to_shorter_iri(&new_iri))
-                            .unwrap_or(original.to_string()),
-                        range,
-                    )))
-                } else {
-                    Ok(None)
-                }
-            })
-            .filter_and_log()
-            .flatten()
-            .collect_vec()
     }
 
     fn statistic(&self) -> String {

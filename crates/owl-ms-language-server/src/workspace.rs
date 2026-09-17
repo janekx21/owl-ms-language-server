@@ -183,9 +183,10 @@ pub trait OntologyDocument {
     ///  Cursor
     /// ```
     fn rename_range(&self, pos: Position) -> Option<Range>;
-    /// Generate informations for renaming
+    /// Generate informations for renaming for a single document
     fn rename_info_at(&self, pos: Position, new_name: &str) -> Result<Option<RenameInfo>>;
     /// Takes a [`RenameInfo`] and returns the edits that will get performed by the rename
+    /// across the whole workspace
     fn rename_edits(&self, rename_info: &RenameInfo) -> Vec<RangeBox<String>>;
 
     /// Get actions for creating keywords at a position
@@ -260,9 +261,14 @@ pub struct IriAtPosition {
     pub frame_type: Option<FrameType>,
 }
 
-/// Some info for renaming
 #[derive(Debug)]
-pub struct RenameInfo {
+pub enum RenameInfo {
+    Iri(IriRenameInfo),
+    Prefix(String, String),
+}
+
+#[derive(Debug)]
+pub struct IriRenameInfo {
     /// The IRI of the thing that gets renamed
     pub full_iri: Iri,
     /// The IRI that the thing is getting renamed to
@@ -1502,6 +1508,16 @@ impl ParsedDocument {
             })
             .unique_by(|(k, v)| (k.clone(), v.value().clone()))
             .collect()
+    }
+
+    pub fn prefix_parts_in_range(&self, range: Range) -> Option<(Range, Range)> {
+        self.query_range(&ALL_QUERIES.prefix, range)
+            .into_iter()
+            .map(|m| match &m.captures[..] {
+                [name_capture, iri_capture] => (name_capture.node.range, iri_capture.node.range),
+                _ => unreachable!(),
+            })
+            .next()
     }
 
     pub fn imports(&self) -> Vec<RangeBox<Iri>> {
