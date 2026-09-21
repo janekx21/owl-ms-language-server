@@ -67,7 +67,13 @@
 					"description": "Order frames by type when formatting."
 				}
 			}
-		}
+		},
+		"commands": [
+			{
+				"command": "owl-ms.shorten-iris",
+				"title": "OWL: Shorten IRIs"
+			}
+		]
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
