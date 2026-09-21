@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.1.0...v1.2.0) (2026-09-17)
+
+
+### Features
+
+* [#147](https://github.com/janekx21/owl-ms-language-server/issues/147) add code action to create prefix from full iri ([#199](https://github.com/janekx21/owl-ms-language-server/issues/199)) ([58a4ee4](https://github.com/janekx21/owl-ms-language-server/commit/58a4ee44149dffdbe4ac2ac00dffe543fe102198))
+* [#179](https://github.com/janekx21/owl-ms-language-server/issues/179) add missing prefix diagnostic ([#196](https://github.com/janekx21/owl-ms-language-server/issues/196)) ([7443ecc](https://github.com/janekx21/owl-ms-language-server/commit/7443ecc8360bfc21ba650872eb40e526d14d98ef))
+* [#192](https://github.com/janekx21/owl-ms-language-server/issues/192) add file path godot definition ([#194](https://github.com/janekx21/owl-ms-language-server/issues/194)) ([080cf8b](https://github.com/janekx21/owl-ms-language-server/commit/080cf8ba62d291bd2210aa45a7a84b882ebddd8a))
+* [#193](https://github.com/janekx21/owl-ms-language-server/issues/193) renaming prefixes ([#202](https://github.com/janekx21/owl-ms-language-server/issues/202)) ([946c1bc](https://github.com/janekx21/owl-ms-language-server/commit/946c1bc03c68f48b1ec1a115ea1d7184d8cda02e))
+* [#197](https://github.com/janekx21/owl-ms-language-server/issues/197) add missing default prefix diagnostic ([#198](https://github.com/janekx21/owl-ms-language-server/issues/198)) ([18bad8f](https://github.com/janekx21/owl-ms-language-server/commit/18bad8f2630f40c702a8048fe98b6d68db97c3cb))
+* [#200](https://github.com/janekx21/owl-ms-language-server/issues/200) shorten iris for new prefix ([#201](https://github.com/janekx21/owl-ms-language-server/issues/201)) ([73fb0c3](https://github.com/janekx21/owl-ms-language-server/commit/73fb0c326951623c57ea09b56e6cf2a5fe4897bd))
+
 ## [1.1.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.0.0...v1.1.0) (2026-09-07)
 
 
