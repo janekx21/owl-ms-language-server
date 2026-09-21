@@ -1124,6 +1124,8 @@ impl LanguageServer for Backend {
                                     range: r
                                         .range()
                                         .into_lsp(ele.rope(), self.encoding())
+                                        // This should always be inbound, becaucuse the range originates
+                                        // from the server side refrences
                                         .expect("range should be inbound"),
                                     new_text: r.value().clone(),
                                 })

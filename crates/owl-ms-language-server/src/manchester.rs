@@ -460,14 +460,16 @@ impl OntologyDocument for InternalOmnDocument {
                     let mut edits = vec![RangeBox::new(format!("{new_prefix}:"), name_range)];
                     for iri in self.references() {
                         if let Some(postfix) = iri.value().strip_prefix(p.value()) {
-                            edits.push(RangeBox::new(
-                                if new_prefix.is_empty() {
-                                    postfix.into()
-                                } else {
-                                    format!("{new_prefix}:{postfix}")
-                                },
-                                *iri.range(),
-                            ));
+                            if !postfix.contains('/') && !postfix.contains('#') {
+                                edits.push(RangeBox::new(
+                                    if new_prefix.is_empty() {
+                                        postfix.into()
+                                    } else {
+                                        format!("{new_prefix}:{postfix}")
+                                    },
+                                    *iri.range(),
+                                ));
+                            }
                         }
                     }
                     edits
