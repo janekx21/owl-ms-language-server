@@ -445,7 +445,9 @@ impl OntologyDocument for InternalOmnDocument {
                     .collect_vec()
             }
             RenameInfo::Prefix(old_prefix, new_prefix) => {
-                if self.queried_document.prefixes.contains_key(new_prefix) {
+                if self.queried_document.prefixes.contains_key(new_prefix)
+                    && old_prefix != new_prefix
+                {
                     // this is a conflict, lets not rename anything!
                     return vec![];
                 }
@@ -459,7 +461,11 @@ impl OntologyDocument for InternalOmnDocument {
                     for iri in self.references() {
                         if let Some(postfix) = iri.value().strip_prefix(p.value()) {
                             edits.push(RangeBox::new(
-                                format!("{new_prefix}:{postfix}"),
+                                if new_prefix.is_empty() {
+                                    postfix.into()
+                                } else {
+                                    format!("{new_prefix}:{postfix}")
+                                },
                                 *iri.range(),
                             ));
                         }
