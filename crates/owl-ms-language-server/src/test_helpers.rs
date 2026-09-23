@@ -1,15 +1,20 @@
 use crate::functional::LANGUAGE_OFN;
 use crate::workspace::OntologyDocument;
 use crate::{catalog::Catalog, web::HttpClient, workspace, Backend, LANGUAGE_OMN};
+use futures::SinkExt;
 use itertools::Itertools;
 use log::info;
+use serde::Serialize;
+use serde_json::json;
 use std::{collections::HashMap, fs, path::Path};
 use tempdir::TempDir;
+use tower_lsp::jsonrpc::{Request, Response};
 use tower_lsp::lsp_types::DiagnosticSeverity;
 use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, TextDocumentContentChangeEvent, TextEdit, Url,
     VersionedTextDocumentIdentifier,
 };
+use tower_lsp::ClientSocket;
 use tower_lsp::{
     lsp_types::{
         ClientCapabilities, GeneralClientCapabilities, InitializeParams, InitializedParams,
@@ -107,32 +112,71 @@ pub fn arrange_parser_ofn() -> Parser {
 }
 
 pub async fn arrange_init_backend(
-    service: &LspService<Backend>,
+    service: &mut LspService<Backend>,
     workspacefolder: Option<WorkspaceFolder>,
 ) {
-    let result = service
-        .inner()
-        .initialize(InitializeParams {
-            workspace_folders: workspacefolder.map(|w| vec![w]),
-            capabilities: ClientCapabilities {
-                general: Some(GeneralClientCapabilities {
-                    position_encodings: Some(vec![PositionEncodingKind::UTF8]),
-                    ..Default::default()
-                }),
+    let params = InitializeParams {
+        workspace_folders: workspacefolder.map(|w| vec![w]),
+        capabilities: ClientCapabilities {
+            general: Some(GeneralClientCapabilities {
+                position_encodings: Some(vec![PositionEncodingKind::UTF8]),
                 ..Default::default()
-            },
+            }),
             ..Default::default()
-        })
-        .await;
-    assert!(result.is_ok(), "Initialize returned {:#?}", result);
+        },
+        ..Default::default()
+    };
 
-    service.inner().initialized(InitializedParams {}).await;
+    let request = Request::build("initialize")
+        .params(serde_json::to_value(params).unwrap())
+        .id(1)
+        .finish();
+
+    tower_service::Service::call(service, request)
+        .await
+        .unwrap();
+
+    // let result = service
+    //     .inner()
+    //     .initialize(InitializeParams {
+    //         workspace_folders: workspacefolder.map(|w| vec![w]),
+    //         capabilities: ClientCapabilities {
+    //             general: Some(GeneralClientCapabilities {
+    //                 position_encodings: Some(vec![PositionEncodingKind::UTF8]),
+    //                 ..Default::default()
+    //             }),
+    //             ..Default::default()
+    //         },
+    //         ..Default::default()
+    //     })
+    //     .await;
+    // assert!(result.is_ok(), "Initialize returned {:#?}", result);
+
+    // let request = Request::build("initialized")
+    //     .params(json!({}))
+    //     .id(2)
+    //     .finish();
+
+    // tower_service::Service::call(service, request)
+    //     .await
+    //     .unwrap();
+
+    // service.inner().initialized(InitializedParams {}).await;
 }
 
 pub async fn arrange_backend(
     workspace_folder: Option<WorkspaceFolder>,
     data: Vec<(&str, &str)>,
 ) -> LspService<Backend> {
+    arrange_backend_with_client(workspace_folder, data).await.0
+}
+
+use tower_service::Service;
+
+pub async fn arrange_backend_with_client(
+    workspace_folder: Option<WorkspaceFolder>,
+    data: Vec<(&str, &str)>,
+) -> (LspService<Backend>, ClientSocket) {
     let http_client = Box::new(StaticClient {
         data: [
             // Defaults for tests
@@ -146,11 +190,39 @@ pub async fn arrange_backend(
         .collect(),
     });
 
-    let (service, _) = LspService::new(|client| Backend::new(client, http_client));
+    let (mut service, client_socket) = LspService::new(|client| Backend::new(client, http_client));
 
-    arrange_init_backend(&service, workspace_folder).await;
-    service
+    // TODO reenable
+    arrange_init_backend(&mut service, workspace_folder).await;
+
+    // let request = initialize_request(1);
+
+    // tower_service::Service::call(&mut service, request)
+    //     .await
+    //     .unwrap();
+    // let response = service.call(request.clone()).await;
+
+    (service, client_socket)
 }
+
+// fn initialize_request(id: i64) -> Request {
+//     let params = InitializeParams {
+//         workspace_folders: workspacefolder.map(|w| vec![w]),
+//         capabilities: ClientCapabilities {
+//             general: Some(GeneralClientCapabilities {
+//                 position_encodings: Some(vec![PositionEncodingKind::UTF8]),
+//                 ..Default::default()
+//             }),
+//             ..Default::default()
+//         },
+//         ..Default::default()
+//     };
+
+//     Request::build("initialize")
+//         .params(json!({"capabilities":{}}))
+//         .id(id)
+//         .finish()
+// }
 
 #[allow(dead_code)]
 pub async fn assert_empty_diagnostics(service: &LspService<Backend>) {

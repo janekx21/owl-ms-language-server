@@ -10,6 +10,7 @@ use crate::{
     },
     *,
 };
+use futures::{SinkExt, Stream, StreamExt};
 use horned_owl::{
     io::{OWXParserConfiguration, ParserConfiguration, RDFParserConfiguration},
     model::{AnnotatedComponent, Build},
@@ -18,10 +19,11 @@ use indoc::indoc;
 use pos::Position;
 use pretty_assertions::assert_eq;
 use ropey::Rope;
+use serde_json::json;
 use sophia::api::term::SimpleTerm;
 use tempdir::TempDir;
 use test_log::test;
-use tower_lsp::LspService;
+use tower_lsp::{jsonrpc::Response, LspService};
 use tree_sitter_c2rust::Tree;
 
 /// This module contains all functional tests.
@@ -5509,6 +5511,153 @@ async fn backend_goto_definition_with_file_protocol_import_should_work() {
         GotoDefinitionResponse::Array(_locations) => todo!(),
         GotoDefinitionResponse::Link(_location_links) => todo!(),
     }
+}
+
+#[test(tokio::test(flavor = "multi_thread"))]
+async fn backend_execute_command_shorten_iris_should_shorten_iris() {
+    setup();
+    let ontology = indoc! {"
+        Prefix: new-prefix: <http://example.org/other#>
+        Prefix: : <http://example.org/main#>
+        Ontology: <http://example.org/main>
+            Class: <http://example.org/other#Developer>
+            Class: B
+                SubClassOf: <http://example.org/other#Developer>
+            Class: C
+                SubClassOf: <http://example.org/other#Developer>
+            Class: D
+                SubClassOf: <http://example.org/other#Developer>
+            Class: E
+                SubClassOf: <http://example.org/other#Person>
+            Class: F
+                SubClassOf: <http://example.org/other-2#Janek>
+
+        Class: <http://example.org/other#Person>
+
+        Class: <http://example.org/other-2#Janek>
+    "};
+    let new_ontology = indoc! {"
+        Prefix: new-prefix: <http://example.org/other#>
+        Prefix: : <http://example.org/main#>
+        Ontology: <http://example.org/main>
+            Class: new-prefix:Developer
+            Class: B
+                SubClassOf: new-prefix:Developer
+            Class: C
+                SubClassOf: new-prefix:Developer
+            Class: D
+                SubClassOf: new-prefix:Developer
+            Class: E
+                SubClassOf: new-prefix:Person
+            Class: F
+                SubClassOf: <http://example.org/other-2#Janek>
+
+        Class: new-prefix:Person
+
+        Class: <http://example.org/other-2#Janek>
+    "};
+
+    backend_command_helper(ontology, new_ontology, "shorten-iris").await;
+}
+
+async fn backend_command_helper(old_ontology: &str, new_ontology: &str, command: &str) {
+    // Arrange
+    let (service, cs) =
+        arrange_backend_with_client(None, vec![("https://example.com/ontology#", "dummy")]).await;
+
+    // Because the client needs to handle stuff async we use a channel here
+    // and with that we call test if workspace commands change the doc
+    // correctly!
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1024);
+    tokio::spawn(async move {
+        let (request_stream, response_sink) = &mut cs.split();
+        while let Some(x) = request_stream.next().await {
+            let (method, id, params) = x.into_parts();
+            info!("client: {method} {id:?} {params:?}");
+            // panic!();
+            match &method[..] {
+                "workspace/inlayHint/refresh" => {
+                    response_sink
+                        .send(Response::from_ok(id.unwrap(), json!(null)))
+                        .await
+                        .unwrap();
+                }
+                "textDocument/publishDiagnostics" => {
+                    // Do nothing for now
+                }
+                "workspace/applyEdit" => {
+                    let params =
+                        serde_json::from_value::<ApplyWorkspaceEditParams>(params.unwrap())
+                            .unwrap();
+
+                    info!("Sending {params:#?}");
+                    tx.send(params).await.unwrap();
+
+                    response_sink
+                        .send(Response::from_ok(
+                            id.unwrap(),
+                            serde_json::to_value(ApplyWorkspaceEditResponse {
+                                applied: true,
+                                failure_reason: None,
+                                failed_change: None,
+                            })
+                            .unwrap(),
+                        ))
+                        .await
+                        .unwrap();
+                }
+
+                x => todo!("method not implemtented {x}"),
+            }
+        }
+    });
+
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let url = Url::from_file_path(dir.path().join("foo.omn")).unwrap();
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: old_ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    // This triggers a "workspace/applyEdit" notification
+    let result = service
+        .inner()
+        .execute_command(ExecuteCommandParams {
+            command: command.into(),
+            arguments: vec![],
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await;
+
+    // // Assert
+    assert_empty_diagnostics(&service).await;
+    let _ = result.unwrap();
+
+    info!("Waiting for params...");
+    let params = rx.recv().await.unwrap();
+    apply_text_edits(params.edit.changes.unwrap(), &service).await;
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    let doc = workspace
+        .get_internal_document(&url.to_file_path().unwrap())
+        .unwrap();
+    let doc_content = doc.rope().to_string();
+
+    assert_eq!(doc_content, new_ontology);
 }
 
 /////////////////////////

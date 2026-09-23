@@ -345,14 +345,15 @@ fn parse_options(options: Option<serde_json::Value>) -> Options {
 }
 
 async fn refresh_inlay_hints(mini_backend: &Backend) {
-    match mini_backend.client.inline_value_refresh().await {
+    // Dot to confuse with inline value!
+    match mini_backend.client.inlay_hint_refresh().await {
         Ok(()) => {
             debug!("Refresh inline hints");
         }
         // Looks like I dont have a specific tower lsp error variant.
         // Buts thats not that bad. Just log it.
         Err(err) => {
-            error!("{err}");
+            error!("Inlay hint refresh error: {err}");
         }
     }
 }
