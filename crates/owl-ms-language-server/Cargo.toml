@@ -46,6 +46,9 @@ lasso = { version = "0.7.3", features = ["multi-threaded"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 pretty_assertions = "1"
 proptest = "1"
+futures-core = "0.3"
+futures = "0.3"
+tower-service = "0.3"
 
 # pprof does only work on unix
 [target.'cfg(unix)'.dev-dependencies]

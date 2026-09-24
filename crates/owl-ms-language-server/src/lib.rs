@@ -26,6 +26,7 @@ use log::{debug, error, info, warn};
 use pos::Position;
 use range::Range;
 use ropey::Rope;
+use serde_json::Value;
 use std::collections::{HashMap, HashSet, LinkedList};
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
@@ -39,7 +40,7 @@ use tower_lsp::{Client, LanguageServer};
 use tree_sitter_c2rust::Language;
 use workspace::Workspace;
 
-use crate::iri::{Iri, REUSE_IRI};
+use crate::iri::REUSE_IRI;
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{
@@ -297,6 +298,19 @@ impl Backend {
                     work_done_progress: None,
                 },
             })),
+            workspace: Some(WorkspaceServerCapabilities {
+                workspace_folders: Some(WorkspaceFoldersServerCapabilities {
+                    supported: Some(true),
+                    change_notifications: Some(OneOf::Left(false)), // TODO set true, handle notifications
+                }),
+                file_operations: None,
+            }),
+            execute_command_provider: Some(ExecuteCommandOptions {
+                commands: vec!["shorten-iris".into()],
+                work_done_progress_options: WorkDoneProgressOptions {
+                    work_done_progress: Some(false),
+                },
+            }),
             ..Default::default()
         }
     }
@@ -331,14 +345,15 @@ fn parse_options(options: Option<serde_json::Value>) -> Options {
 }
 
 async fn refresh_inlay_hints(mini_backend: &Backend) {
-    match mini_backend.client.inline_value_refresh().await {
+    // Dot to confuse with inline value!
+    match mini_backend.client.inlay_hint_refresh().await {
         Ok(()) => {
             debug!("Refresh inline hints");
         }
         // Looks like I dont have a specific tower lsp error variant.
         // Buts thats not that bad. Just log it.
         Err(err) => {
-            error!("{err}");
+            error!("Inlay hint refresh error: {err}");
         }
     }
 }
@@ -1078,6 +1093,61 @@ impl LanguageServer for Backend {
         } else {
             Ok(None)
         }
+    }
+
+    async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
+        let ExecuteCommandParams {
+            command, arguments, ..
+        } = params;
+        info!("Workspace command: {command} {arguments:#?}");
+
+        // Can get extended
+        #[allow(clippy::single_match)]
+        match &command[..] {
+            "shorten-iris" => {
+                let sync = self.read_sync().await;
+                let changes = sync
+                    .workspaces()
+                    .iter()
+                    .flat_map(|ws| {
+                        ws.internal_documents().map(|ele| {
+                            let edits = ele
+                                .prefixes()
+                                .iter()
+                                .flat_map(|(p, _)| {
+                                    // Rename each prefix to itself
+                                    ele.rename_edits(&workspace::RenameInfo::Prefix(
+                                        p.into(),
+                                        p.into(),
+                                    ))
+                                })
+                                .map(|r| TextEdit {
+                                    range: r
+                                        .range()
+                                        .into_lsp(ele.rope(), self.encoding())
+                                        // This should always be inbound, becaucuse the range originates
+                                        // from the server side refrences
+                                        .expect("range should be inbound"),
+                                    new_text: r.value().clone(),
+                                })
+                                .collect_vec();
+
+                            (ele.uri().clone(), edits)
+                        })
+                    })
+                    .collect();
+
+                self.client
+                    .apply_edit(WorkspaceEdit {
+                        changes: Some(changes),
+                        document_changes: None,
+                        change_annotations: None,
+                    })
+                    .await?;
+            }
+            _ => {}
+        }
+        Ok(None)
     }
 
     async fn shutdown(&self) -> Result<()> {

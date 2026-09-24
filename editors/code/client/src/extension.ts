@@ -1,9 +1,10 @@
 import { spawnSync } from "child_process";
 import * as os from "os";
-import { workspace, ExtensionContext, Uri, window } from 'vscode';
+import { workspace, ExtensionContext, Uri, commands, window } from 'vscode';
 import { SemanticTokensFeature } from 'vscode-languageclient/lib/common/semanticTokens';
 
 import {
+	ExecuteCommandRequest,
 	LanguageClient,
 	LanguageClientOptions,
 	ServerOptions,
@@ -16,10 +17,24 @@ export function activate(context: ExtensionContext) {
 	// Start the language server
 	startClient(context);
 
-	// Restart the language server when configuration changes
 	context.subscriptions.push(
+		commands.registerCommand("owl-ms.shorten-iris", async () => {
+			if (!client) {
+				window.showErrorMessage("Language server is not running");
+				return;
+			}
+			try {
+				await client.sendRequest(ExecuteCommandRequest.type, {
+					command: "shorten-iris",
+					arguments: [],
+				});
+			} catch (err) {
+				window.showErrorMessage(`shorten-iris failed: ${err}`);
+			}
+		}),
+
 		workspace.onDidChangeConfiguration(async (e) => {
-			if (e.affectsConfiguration('omn')) {
+			if (e.affectsConfiguration("omn")) {
 				await restartClient(context);
 			}
 		})

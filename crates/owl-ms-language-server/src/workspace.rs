@@ -186,7 +186,8 @@ pub trait OntologyDocument {
     /// Generate informations for renaming for a single document
     fn rename_info_at(&self, pos: Position, new_name: &str) -> Result<Option<RenameInfo>>;
     /// Takes a [`RenameInfo`] and returns the edits that will get performed by the rename
-    /// across the whole workspace
+    /// across the whole workspace.
+    /// Renaming a prefix to itself will shorten it.
     fn rename_edits(&self, rename_info: &RenameInfo) -> Vec<RangeBox<String>>;
 
     /// Get actions for creating keywords at a position
