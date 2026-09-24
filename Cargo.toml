@@ -14,3 +14,4 @@ version = "1.2.0" # x-release-please-version
 [workspace.dependencies]
 tree-sitter-owl-ms = { path = "crates/tree-sitter-owl-ms", version="1.2.0" } # x-release-please-version
 tree-sitter-owl-fn = { path = "crates/tree-sitter-owl-fn", version="1.2.0" } # x-release-please-version
+tree-sitter-turtle = { path = "crates/tree-sitter-turtle", version="0.0.1" }

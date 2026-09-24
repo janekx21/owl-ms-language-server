@@ -63,7 +63,8 @@ async function startClient(context: ExtensionContext): Promise<void> {
 		// Register the server for plain text documents
 		documentSelector: [
 			{ scheme: 'file', language: 'owl-ms', },
-			{ scheme: 'file', language: 'owl-fn', }
+			{ scheme: 'file', language: 'owl-fn', },
+			{ scheme: 'file', language: 'turtle', }
 		], // dont use pattern. this would break everything.
 		synchronize: {
 			// Notify the server about file changes to '.clientrc files contained in the workspace

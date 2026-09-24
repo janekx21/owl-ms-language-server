@@ -10,7 +10,7 @@ use crate::{
     },
     *,
 };
-use futures::{SinkExt, Stream, StreamExt};
+use futures::{SinkExt, StreamExt};
 use horned_owl::{
     io::{OWXParserConfiguration, ParserConfiguration, RDFParserConfiguration},
     model::{AnnotatedComponent, Build},
@@ -370,9 +370,9 @@ async fn backend_did_open_ofn_should_create_document() {
         .exactly_one()
         .unwrap_or_else(|_| panic!("Should be exactly one"));
 
-    let ofn = match doc {
-        InternalDocument::InternalOmn(_) => panic!("Should be ofn"),
+    let _ofn = match doc {
         InternalDocument::InternalOfn(internal_fn_document) => internal_fn_document,
+        _ => panic!("Should be ofn"),
     };
     // TODO ofn do stuff
 
@@ -380,6 +380,203 @@ async fn backend_did_open_ofn_should_create_document() {
     assert_eq!(doc.version(), 0);
     assert_eq!(doc.rope().to_string(), "abc");
     // assert!(!doc.local_diagnostics().is_empty()); // TODO
+}
+
+#[test(tokio::test)]
+async fn backend_did_open_ttl_should_create_document() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let url = Url::from_file_path(dir.path().join("foo.ofn")).unwrap();
+
+    // Act
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "turtle".to_string(),
+                version: 0,
+                text: "abc".to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+
+    let docs = workspace.internal_documents().collect_vec();
+
+    let doc = docs
+        .iter()
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("Should be exactly one"));
+
+    let _doc = match doc {
+        InternalDocument::InternalTtl(doc) => doc,
+        _ => panic!("Should be ttl"),
+    };
+    // TODO ofn do stuff
+
+    assert_eq!(doc.uri(), &url);
+    assert_eq!(doc.version(), 0);
+    assert_eq!(doc.rope().to_string(), "abc");
+    // assert!(!doc.local_diagnostics().is_empty()); // TODO
+}
+
+#[test(tokio::test)]
+async fn backend_semantic_highlight_ttl_should_not_panic() {
+    setup();
+    // Arrange
+    let service = arrange_backend(None, vec![]).await;
+
+    let dir = TempDir::new("owl-ms-test").unwrap();
+    let url = Url::from_file_path(dir.path().join("foo.ofn")).unwrap();
+
+    let ontology = r#"
+
+
+# =============================================================================
+# highlight-test.ttl -- exercises every capture in highlights.scm
+# =============================================================================
+
+# --- directives: @keyword.directive, @namespace, punctuation.delimiter -------
+@base <http://example.org/> .
+@prefix ex: <http://example.org/ns#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix : <http://example.org/default#> .
+
+# SPARQL-style directives (case-insensitive)
+BASE <http://example.org/sparql/>
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+prefix schema: <http://schema.org/>
+
+# --- subjects (@constant), predicates (@variable.other.member) ---------------
+# `a` (@keyword) and its objects (@type)
+ex:alice a foaf:Person, <http://example.org/ns#Agent> ;
+    foaf:name "Alice"@en, "Alicia"@es-ES ;      # lang_tag (@attribute)
+    foaf:age 30 ;                               # integer
+    ex:height 1.68 ;                            # decimal
+    ex:mass 6.0e1 ;                             # double
+    ex:balance -.5e2 ;                          # double, signed
+    ex:active true ;                            # boolean
+    ex:retired false ;
+    foaf:knows ex:bob, _:carol, [] ;            # blank_node_label, anon
+    ex:address [                                # blank_node_property_list
+        ex:city "Paris" ;
+        ex:zip "75001"^^xsd:string ;            # datatype (prefixed_name)
+        ex:code "42"^^<http://www.w3.org/2001/XMLSchema#integer> ;
+    ] ;
+    ex:friends ( ex:bob ex:dave 1 2.5 "three" ) ;   # collection
+    ex:empty ( ) ;
+    <http://example.org/ns#customPredicate> "iri predicate" ;
+    <#me> ex:self <#anchor> .
+
+# --- IRI and blank-node subjects ---------------------------------------------
+<http://example.org/thing> ex:label "an IRI subject" .
+<#fragment> ex:label "a fragment subject" .
+_:b1 ex:label "a blank node subject" .
+[] ex:label "an anon subject" .
+[ ex:label "property list subject" ] ex:other "trailing properties" .
+
+# --- default (empty) prefix --------------------------------------------------
+:thing :prop :value .
+
+# --- numbers -----------------------------------------------------------------
+ex:numbers
+    ex:int1 42 ;
+    ex:int2 -7 ;
+    ex:int3 +7 ;
+    ex:dec1 3.14 ;
+    ex:dec2 .5 ;
+    ex:dec3 -0.001 ;
+    ex:dbl1 1e10 ;
+    ex:dbl2 -2.5E-3 ;
+    ex:dbl3 .5e2 ;
+    ex:dbl4 12.e+3 .
+
+# --- strings and escapes (@string, @constant.character.escape) --------------
+ex:strings
+    ex:double "double quoted with \"escape\" and \n newline and \t tab" ;
+    ex:single 'single quoted with \'escape\' and \\ backslash' ;
+    ex:unicode "caf\u00E9 and \U0001F600" ;
+    ex:longDouble """long
+double "quoted" string
+with \t escapes""" ;
+    ex:longSingle '''long
+single 'quoted' string
+with \n escapes''' ;
+    ex:langLong """Bonjour
+le monde"""@fr .
+
+# --- graphs: labels (@type), GRAPH (@keyword), braces ------------------------
+{
+    ex:default1 ex:p "default graph, no label" .
+}
+
+ex:graph1 {
+    ex:s1 ex:p1 ex:o1 .
+    ex:s2 ex:p2 "last triple has no terminating dot"
+}
+
+GRAPH <http://example.org/graph2> {
+    ex:s3 a ex:Thing ;
+        ex:p3 "iri graph label" .
+}
+
+GRAPH _:graph3 {
+    ex:s4 ex:p4 42 .
+}
+
+GRAPH ex:graph4 {
+    ex:s5 ex:p5 true
+}
+
+<http://example.org/graph5> {
+    ex:s6 ex:p6 ex:o6 .
+}
+
+_:graph6 {
+    ex:s7 ex:p7 1.5e0 .
+}
+        
+    "#;
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "turtle".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    // Act
+
+    let result = service
+        .inner()
+        .semantic_tokens_full(SemanticTokensParams {
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+            text_document: TextDocumentIdentifier { uri: url.clone() },
+        })
+        .await;
+
+    // Assert
+    result.unwrap().unwrap();
 }
 
 /// This tests if the "did_change" feature works on the lsp. It takes the document DEF and adds two changes resolving in ABCDEFGHI.
