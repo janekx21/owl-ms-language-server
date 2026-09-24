@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.2.0...v1.3.0) (2026-09-24)
+
+
+### Features
+
+* [#146](https://github.com/janekx21/owl-ms-language-server/issues/146) shorten iris on format ([#203](https://github.com/janekx21/owl-ms-language-server/issues/203)) ([e0f0329](https://github.com/janekx21/owl-ms-language-server/commit/e0f0329e9bc273dc314bb5f92b98f17c1e4b964e))
+
 ## [1.2.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.1.0...v1.2.0) (2026-09-17)
 
 
