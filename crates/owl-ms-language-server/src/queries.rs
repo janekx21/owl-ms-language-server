@@ -283,14 +283,141 @@ pub struct SymbolRule {
     pub name: String,
 }
 
+// We use syntax highlighting from helix documentation
+// https://docs.helix-editor.com/themes.html#scopes
+//
+//
+// These keys match tree-sitter scopes.
+//
+// When determining styling for a highlight, the longest matching theme key will be used. For example, if the highlight is function.builtin.static, the key function.builtin will be used instead of function.
+//
+// We use a similar set of scopes as Sublime Text. See also TextMate scopes.
+//
+//     attribute - Class attributes, HTML tag attributes
+//
+//     type - Types
+//         builtin - Primitive types provided by the language (int, usize)
+//         parameter - Generic type parameters (T)
+//         enum
+//             variant
+//
+//     constructor
+//
+//     constant (TODO: constant.other.placeholder for %v)
+//         builtin Special constants provided by the language (true, false, nil etc)
+//             boolean
+//         character
+//             escape
+//         numeric (numbers)
+//             integer
+//             float
+//
+//     string (TODO: string.quoted.{single, double}, string.raw/.unquoted)?
+//         regexp - Regular expressions
+//         special
+//             path
+//             url
+//             symbol - Erlang/Elixir atoms, Ruby symbols, Clojure keywords
+//
+//     comment - Code comments
+//         line - Single line comments (//)
+//             documentation - Line documentation comments (e.g. /// in Rust)
+//         block - Block comments (e.g. (/* */)
+//             documentation - Block documentation comments (e.g. /** */ in Rust)
+//         unused - Unused variables and patterns, e.g. _ and _foo
+
+//     variable - Variables
+//         builtin - Reserved language variables (self, this, super, etc.)
+//         parameter - Function parameters
+//         other
+//             member - Fields of composite data types (e.g. structs, unions)
+//                 private - Private fields that use a unique syntax (currently just ECMAScript-based languages)
+//
+//     label - .class, #id in CSS, etc.
+//
+//     punctuation
+//         delimiter - Commas, colons
+//         bracket - Parentheses, angle brackets, etc.
+//         special - String interpolation brackets.
+//
+//     keyword
+//         control
+//             conditional - if, else
+//             repeat - for, while, loop
+//             import - import, export
+//             return
+//             exception
+//         operator - or, in
+//         directive - Preprocessor directives (#if in C)
+//         function - fn, func
+//         storage - Keywords describing how things are stored
+//             type - The type of something, class, function, var, let, etc.
+//             modifier - Storage modifiers like static, mut, const, ref, etc.
+//
+//     operator - ||, +=, >
+//
+//     function
+//         builtin
+//         method
+//             private - Private methods that use a unique syntax (currently just ECMAScript-based languages)
+//         macro
+//         special (preprocessor in C)
+//
+//     tag - Tags (e.g. <body> in HTML)
+//         builtin
+//
+//     namespace
+//
+//     special - derive in Rust, etc.
+//
+//     markup
+//         heading
+//             marker
+//             1, 2, 3, 4, 5, 6 - heading text for h1 through h6
+//         list
+//             unnumbered
+//             numbered
+//             checked
+//             unchecked
+//         bold
+//         italic
+//         strikethrough
+//         link
+//             url - URLs pointed to by links
+//             label - non-URL link references
+//             text - URL and image descriptions in links
+//         quote
+//         raw
+//             inline
+//             block
+//
+//     diff - version control changes
+//         plus - additions
+//             gutter - gutter indicator
+//         minus - deletions
+//             gutter - gutter indicator
+//         delta - modifications
+//             moved - renamed or moved files/changes
+//             conflict - merge conflicts
+//             gutter - gutter indicator
+
+/// Convert a tree-sitter capture into a semantic token index. These reference the helix highlight names.
 pub fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) -> u32 {
     match str {
-        "keyword" => 15, // SemanticTokenType::KEYWORD,
+        "namespace" => 0, // SemanticTokenType::NAMESPACE,
+        "type" => 1,      // SemanticTokenType::TYPE,
+        // constants, subjects, local names and blank node labels
+        "variable" | "variable.builtin" | "constant" | "constant.builtin" | "label" => 8, // SemanticTokenType::VARIABLE,
+        "variable.other.member" => 9, // SemanticTokenType::PROPERTY,
+        // `@prefix`, `@base`, `BASE`, `PREFIX`, `GRAPH`, `a`, `true`, `false`
+        "keyword" | "keyword.directive" | "constant.builtin.boolean" => 15, // SemanticTokenType::KEYWORD,
+        "comment" | "comment.line" => 17, // SemanticTokenType::COMMENT,
+        // IRIs, strings and their escape sequences
+        "string" | "string.special" | "string.special.url" | "constant.character.escape" => 18, // SemanticTokenType::STRING,
+        "number" | "constant.numeric.integer" | "constant.numeric.float" => 19, // SemanticTokenType::NUMBER,
         "operator" | "punctuation.delimiter" | "punctuation.bracket" | "punctuation.special" => 21, // SemanticTokenType::OPERATOR,
-        "variable.builtin" | "constant.builtin" | "variable" => 8, // SemanticTokenType::VARIABLE,
-        "string" | "string.special" => 18,                         // SemanticTokenType::STRING,
-        "number" => 19,                                            // SemanticTokenType::NUMBER,
-        "comment" => 17,                                           // SemanticTokenType::COMMENT,
+        // language tags (@en, @fr-CA)
+        "attribute" => 22, // SemanticTokenType::DECORATOR,
         _ => todo!("highlight capture {} not implemented", str),
     }
 }

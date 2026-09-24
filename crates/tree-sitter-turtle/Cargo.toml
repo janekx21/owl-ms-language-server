@@ -1,0 +1,29 @@
+[package]
+name = "tree-sitter-turtle"
+description = "turtle grammar for the tree-sitter parsing library"
+version = "0.0.1"
+keywords = ["incremental", "parsing", "turtle"]
+categories = ["parsing", "text-editors"]
+repository = "https://github.com/GordianDziwis/tree-sitter-turtle"
+edition.workspace = true
+license = "MIT"
+
+build = "bindings/rust/build.rs"
+include = [
+  "bindings/rust/*",
+  "grammar.js",
+  "queries/*",
+  "src/*",
+]
+
+[lib]
+path = "bindings/rust/lib.rs"
+
+[dependencies]
+tree-sitter-language = "0.1"
+
+[build-dependencies]
+cc = "1.2"
+
+[dev-dependencies]
+tree-sitter-c2rust = "0.25"

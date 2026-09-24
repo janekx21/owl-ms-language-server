@@ -8,6 +8,7 @@ use crate::manchester::InternalOmnDocument;
 use crate::pos::Position;
 use crate::queries::NODE_TYPES;
 use crate::range::{Change, RangeBox};
+use crate::turtle::InternalTtlDocument;
 use crate::web::{url_to_filename, HttpClient};
 use crate::{
     catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
@@ -103,6 +104,7 @@ pub struct Workspace {
 pub enum InternalDocument {
     InternalOmn(InternalOmnDocument),
     InternalOfn(InternalOfnDocument),
+    InternalTtl(InternalTtlDocument),
 }
 
 /// The read/write internal document trait.
@@ -293,6 +295,7 @@ pub type Highlights = Vec<RangeBox<u32>>;
 pub enum Lang {
     Omn,
     Ofn,
+    Ttl,
 }
 
 impl InternalDocument {
@@ -303,6 +306,9 @@ impl InternalDocument {
             }
             Lang::Ofn => {
                 InternalDocument::InternalOfn(InternalOfnDocument::new(url, version, text))
+            }
+            Lang::Ttl => {
+                InternalDocument::InternalTtl(InternalTtlDocument::new(url, version, text))
             }
         }
     }
@@ -319,6 +325,9 @@ impl InternalDocument {
             InternalDocument::InternalOfn(doc) => doc
                 .edit_inner(params, encoding)
                 .map(InternalDocument::InternalOfn),
+            InternalDocument::InternalTtl(doc) => doc
+                .edit_inner(params, encoding)
+                .map(InternalDocument::InternalTtl),
         }
     }
 }
