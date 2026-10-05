@@ -29,6 +29,7 @@ tower-lsp = { version = "0.20", features = ["proposed"] }
 tree-sitter-c2rust = "0.25"
 tree-sitter-owl-ms.workspace = true
 tree-sitter-owl-fn.workspace = true
+tree-sitter-turtle.workspace = true
 ureq = "3.0"
 walkdir = "2.5"
 indoc = "2"

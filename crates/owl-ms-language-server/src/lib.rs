@@ -16,6 +16,7 @@ mod test_helpers;
 #[cfg(test)]
 #[allow(clippy::pedantic)]
 mod tests;
+mod turtle;
 pub mod web;
 mod workspace;
 
@@ -453,6 +454,7 @@ impl LanguageServer for Backend {
             let lang = match &language_id[..] {
                 "owl-ms" => Some(Lang::Omn),
                 "owl-fn" => Some(Lang::Ofn),
+                "turtle" => Some(Lang::Ttl),
                 // TODO test this case
                 _ => None,
             };

@@ -1452,6 +1452,7 @@ dependencies = [
  "tree-sitter-c2rust",
  "tree-sitter-owl-fn",
  "tree-sitter-owl-ms",
+ "tree-sitter-turtle",
  "ureq 3.1.4",
  "walkdir",
 ]
@@ -2776,6 +2777,15 @@ dependencies = [
 [[package]]
 name = "tree-sitter-owl-ms"
 version = "1.2.0"
+dependencies = [
+ "cc",
+ "tree-sitter-c2rust",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-turtle"
+version = "0.0.1"
 dependencies = [
  "cc",
  "tree-sitter-c2rust",

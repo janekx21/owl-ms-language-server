@@ -1,0 +1,29 @@
+{
+  "grammars": [
+    {
+      "name": "turtle",
+      "camelcase": "Turtle",
+      "scope": "source.ttl",
+      "path": ".",
+      "file-types": [
+        "ttl"
+      ]
+    }
+  ],
+  "metadata": {
+    "version": "0.0.1",
+    "license": "MIT",
+    "description": "Parser for turtle based on tree sitter",
+    "links": {
+      "repository": "https://github.com/BonaBeavis/tree-sitter-turtle"
+    }
+  },
+  "bindings": {
+    "c": true,
+    "go": true,
+    "node": true,
+    "python": true,
+    "rust": true,
+    "swift": true
+  }
+}
