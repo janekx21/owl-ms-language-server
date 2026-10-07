@@ -80,7 +80,7 @@ impl Backend {
             http_client: http_client.into(),
             position_encoding: OnceCell::new(),
             sync: Arc::new(RwLock::new(SyncBackend::default())),
-            options: OnceCell::new(),
+            options: Default::default(),
         }
     }
 
@@ -315,34 +315,37 @@ impl Backend {
             ..Default::default()
         }
     }
+
+    fn set_options(&self, options: Option<Value>) {
+        let options = parse_options(options);
+        debug!("Setting options: {options:?}");
+        self.options
+            .set(options)
+            .unwrap_or_else(|e| error!("Options error: {e}"));
+    }
+
+    fn get_options(&self) -> &Options {
+        self.options.get().expect("Options should be set")
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 struct Options {
+    omn: OmnOptions,
+    preferred_languages: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct OmnOptions {
     order_frames: bool,
 }
 
 fn parse_options(options: Option<serde_json::Value>) -> Options {
-    {
-        let mut is_order_frames = false;
-        if let Some(o) = options {
-            if let Some(root) = o.as_object() {
-                // TODO test this case
-                if let Some(omn) = root.get("omn") {
-                    if let Some(omn) = omn.as_object() {
-                        if let Some(order_frames) = omn.get("orderFrames") {
-                            if let Some(order_frames) = order_frames.as_bool() {
-                                is_order_frames = order_frames;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Options {
-            order_frames: is_order_frames,
-        }
-    }
+    options
+        .and_then(|o| serde_json::from_value(o).ok())
+        .unwrap_or_default()
 }
 
 async fn refresh_inlay_hints(mini_backend: &Backend) {
@@ -388,12 +391,7 @@ impl LanguageServer for Backend {
         debug!("Client capabilities:\n{:#?}", params.capabilities);
         debug!("Options: {:#?}", params.initialization_options);
 
-        let options = params.initialization_options;
-        let options = parse_options(options);
-        debug!("Parsed Options: {options:?}");
-        self.options
-            .set(options)
-            .expect("options should not be set");
+        self.set_options(params.initialization_options);
 
         let encodings = params
             .capabilities
@@ -575,17 +573,18 @@ impl LanguageServer for Backend {
 
         let tab_size = params.options.tab_size;
 
+        let order_frames = {
+            let x = self.options.get().expect("Options should be set");
+            x.omn.order_frames
+        };
+
         let sync = self.read_sync().await;
         let (doc, _) = sync.get_internal_document(&url)?;
 
         let options = FormattingSettings {
             tab_size: if tab_size == 0 { 4 } else { tab_size },
             ruler_width: 80,
-            order_frames: self
-                .options
-                .get()
-                .expect("options should be initilized")
-                .order_frames,
+            order_frames,
         };
         // TODO just send the diff
         let text = doc.formatted(&options);
@@ -656,7 +655,14 @@ impl LanguageServer for Backend {
                 .ok_or(Error::InvalidUrl(url.clone()))?
         );
 
-        let hints = document_inlay_hint(document, range, self.encoding(), workspace);
+        let list = self
+            .get_options()
+            .preferred_languages
+            .iter()
+            .filter_map(|lang_str| language::Language::try_from(lang_str.as_str()).ok())
+            .collect();
+
+        let hints = document_inlay_hint(document, range, self.encoding(), workspace, list);
 
         Ok(Some(hints))
     }

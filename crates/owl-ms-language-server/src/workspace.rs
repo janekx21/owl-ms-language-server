@@ -430,6 +430,21 @@ impl Workspace {
     }
 
     /// Returns the path for the cache folder
+    pub fn shared_config_folder_path(&self) -> PathBuf {
+        if let Some(dir) = dirs::config_dir() {
+            // Well all projects can even share a cache dir
+            dir.join("owl-ms-language-server")
+        } else {
+            // If the cache folder can not be accessed then lets just use a local folder
+            self.folder
+                .uri
+                .to_file_path()
+                .expect("Workspace folder url should be file path")
+                .join(".owl")
+        }
+    }
+
+    /// Returns the path for the cache folder
     pub fn shared_cache_folder_path(&self) -> PathBuf {
         if let Some(dir) = dirs::cache_dir() {
             // Well all projects can even share a cache dir
@@ -1004,6 +1019,7 @@ pub fn inlay_hint(
     range: Range,
     encoding: &PositionEncodingKind,
     workspace: &Workspace,
+    prefered_language: Vec<Language>,
 ) -> Vec<InlayHint> {
     let reachable_docs = reachable_docs_recursive(doc, workspace, true);
     debug!("Reachable docs for {} are {reachable_docs:#?}", doc.uri());

@@ -1,15 +1,12 @@
 use crate::functional::LANGUAGE_OFN;
 use crate::workspace::OntologyDocument;
 use crate::{catalog::Catalog, web::HttpClient, workspace, Backend, LANGUAGE_OMN};
-use futures::SinkExt;
 use itertools::Itertools;
 use log::info;
-use serde::Serialize;
-use serde_json::json;
 use std::{collections::HashMap, fs, path::Path};
 use tempdir::TempDir;
-use tower_lsp::jsonrpc::{Request, Response};
-use tower_lsp::lsp_types::DiagnosticSeverity;
+use tower_lsp::jsonrpc::Request;
+use tower_lsp::lsp_types::{DiagnosticSeverity, DidOpenTextDocumentParams, TextDocumentItem};
 use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, TextDocumentContentChangeEvent, TextEdit, Url,
     VersionedTextDocumentIdentifier,
@@ -17,8 +14,8 @@ use tower_lsp::lsp_types::{
 use tower_lsp::ClientSocket;
 use tower_lsp::{
     lsp_types::{
-        ClientCapabilities, GeneralClientCapabilities, InitializeParams, InitializedParams,
-        PositionEncodingKind, WorkspaceFolder,
+        ClientCapabilities, GeneralClientCapabilities, InitializeParams, PositionEncodingKind,
+        WorkspaceFolder,
     },
     LanguageServer, LspService,
 };
@@ -298,4 +295,44 @@ pub async fn apply_text_edits(
             })
             .await;
     }
+}
+
+pub async fn arrange_single_file_backend(ontology: &str) -> (TempDir, LspService<Backend>, Url) {
+    let (tmp_dir, service) = arrange_empty_backend().await;
+
+    let url = arrange_main_omn(&tmp_dir, &service, ontology).await;
+
+    (tmp_dir, service, url)
+}
+
+async fn arrange_empty_backend() -> (TempDir, LspService<Backend>) {
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test wosrkpace".into(),
+        }),
+        vec![],
+    )
+    .await;
+    (tmp_dir, service)
+}
+
+async fn arrange_main_omn(tmp_dir: &TempDir, service: &LspService<Backend>, ontology: &str) -> Url {
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "owl-ms".to_string(),
+                version: 0,
+                text: ontology.to_string(),
+            },
+        })
+        .await;
+
+    url
 }

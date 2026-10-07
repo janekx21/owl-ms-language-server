@@ -33,11 +33,12 @@ export function activate(context: ExtensionContext) {
 			}
 		}),
 
+		/* TODO remove
 		workspace.onDidChangeConfiguration(async (e) => {
 			if (e.affectsConfiguration("omn")) {
 				await restartClient(context);
 			}
-		})
+		})*/
 	);
 }
 
@@ -96,6 +97,7 @@ async function startClient(context: ExtensionContext): Promise<void> {
 	await client.start();
 }
 
+/* TODO remove
 async function restartClient(context: ExtensionContext): Promise<void> {
 	if (client) {
 		await client.stop();
@@ -103,6 +105,7 @@ async function restartClient(context: ExtensionContext): Promise<void> {
 	}
 	await startClient(context);
 }
+*/
 
 export function deactivate(): Thenable<void> | undefined {
 	if (!client) {

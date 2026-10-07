@@ -75,7 +75,26 @@
 					"scope": "resource",
 					"type": "boolean",
 					"default": false,
-					"description": "Order frames by type when formatting."
+					"description": "Order frames by type when formatting"
+				},
+				"omn.preferredLanguages": {
+					"scope": "resource",
+					"type": "string",
+					"items": {
+						"type": "string",
+						"enum": [
+							"en",
+							"de"
+						],
+						"enumDescriptions": [
+							"foobar",
+							"bar foo"
+						]
+					},
+					"default": [
+						"en"
+					],
+					"description": "Languages in which the labels should preferably be displayed"
 				}
 			}
 		},
