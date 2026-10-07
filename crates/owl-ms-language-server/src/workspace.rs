@@ -2230,6 +2230,7 @@ impl FrameInfo {
                     if language == &Language::En {
                         annotation.string_value.to_string()
                     } else {
+                        // TODO the "...@ Language" suffix could be removed when just one lang matches
                         format!("{} @ {}", &annotation.string_value, &language.name())
                     }
                 } else if annotation.datatype != STRING_IRI.into() && iri != &LABEL_IRI.into()

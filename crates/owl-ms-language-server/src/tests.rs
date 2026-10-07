@@ -1711,6 +1711,111 @@ async fn backend_inlay_hint_with_single_language_list_should_show_single_languag
 }
 
 #[test(tokio::test)]
+async fn backend_inlay_hint_with_two_language_list_should_show_single_language() {
+    setup();
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+    let (service, _) =
+        arrange_backend_with_client(None, vec![], json!({"preferredLanguages": ["de", "en"]}))
+            .await;
+
+    let url = arrange_main_omn(&tmp_dir, &service, indoc! {r#"
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Prefix: : <http://small/ontology#>
+
+        Ontology: <http://small/ontology>
+        AnnotationProperty: rdfs:label
+        Class: Table
+            Annotations: rdfs:label "Table no lang", rdfs:label "Table en"@en, rdfs:label "Tisch de"@de
+        "#})
+    .await;
+
+    // Act
+    let result = service
+        .inner()
+        .inlay_hint(InlayHintParams {
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            text_document: TextDocumentIdentifier { uri: url.clone() },
+            range: lsp_types::Range {
+                start: lsp_types::Position::new(0, 0),
+                end: lsp_types::Position::new(999, 0),
+            },
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    assert_empty_diagnostics(&service).await;
+    let result = result.unwrap();
+
+    info!("result={result:#?}");
+    assert_eq!(result.len(), 1); // One hint at the definition
+
+    assert!(result.iter().any(|x| match &x.label {
+        InlayHintLabel::String(a) =>
+            a.contains("Tisch de @ German")
+                && !a.contains("Table en")
+                && !a.contains("Table no lang"),
+        InlayHintLabel::LabelParts(_) => todo!(),
+    }));
+}
+
+#[test(tokio::test)]
+async fn backend_inlay_hint_without_matching_lang_should_show_all_languages() {
+    setup();
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|_| vec![]);
+    let (service, _) =
+        arrange_backend_with_client(None, vec![], json!({"preferredLanguages": ["ru"]})).await;
+
+    let url = arrange_main_omn(&tmp_dir, &service, indoc! {r#"
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Prefix: : <http://small/ontology#>
+
+        Ontology: <http://small/ontology>
+        AnnotationProperty: rdfs:label
+        Class: Table
+            Annotations: rdfs:label "Table no lang", rdfs:label "Table en"@en, rdfs:label "Tisch de"@de
+        "#})
+    .await;
+
+    // Act
+    let result = service
+        .inner()
+        .inlay_hint(InlayHintParams {
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            text_document: TextDocumentIdentifier { uri: url.clone() },
+            range: lsp_types::Range {
+                start: lsp_types::Position::new(0, 0),
+                end: lsp_types::Position::new(999, 0),
+            },
+        })
+        .await
+        .unwrap();
+
+    // Assert
+    assert_empty_diagnostics(&service).await;
+    let result = result.unwrap();
+
+    info!("result={result:#?}");
+    assert_eq!(result.len(), 1); // One hint at the definition
+
+    assert!(
+        result.iter().any(|x| match &x.label {
+            InlayHintLabel::String(a) =>
+                a.contains("Tisch de @ German")
+                    && a.contains("Table en")
+                    && a.contains("Table no lang"),
+            InlayHintLabel::LabelParts(_) => todo!(),
+        })
+    );
+}
+
+#[test(tokio::test)]
 async fn backend_import_resolve_should_load_documents() {
     setup();
     // Arrange
