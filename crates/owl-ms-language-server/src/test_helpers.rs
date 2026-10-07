@@ -3,6 +3,7 @@ use crate::workspace::OntologyDocument;
 use crate::{catalog::Catalog, web::HttpClient, workspace, Backend, LANGUAGE_OMN};
 use itertools::Itertools;
 use log::info;
+use serde_json::Value;
 use std::{collections::HashMap, fs, path::Path};
 use tempdir::TempDir;
 use tower_lsp::jsonrpc::Request;
@@ -111,6 +112,7 @@ pub fn arrange_parser_ofn() -> Parser {
 pub async fn arrange_init_backend(
     service: &mut LspService<Backend>,
     workspacefolder: Option<WorkspaceFolder>,
+    options: Value,
 ) {
     let params = InitializeParams {
         workspace_folders: workspacefolder.map(|w| vec![w]),
@@ -121,6 +123,7 @@ pub async fn arrange_init_backend(
             }),
             ..Default::default()
         },
+        initialization_options: Some(options),
         ..Default::default()
     };
 
@@ -132,47 +135,21 @@ pub async fn arrange_init_backend(
     tower_service::Service::call(service, request)
         .await
         .unwrap();
-
-    // let result = service
-    //     .inner()
-    //     .initialize(InitializeParams {
-    //         workspace_folders: workspacefolder.map(|w| vec![w]),
-    //         capabilities: ClientCapabilities {
-    //             general: Some(GeneralClientCapabilities {
-    //                 position_encodings: Some(vec![PositionEncodingKind::UTF8]),
-    //                 ..Default::default()
-    //             }),
-    //             ..Default::default()
-    //         },
-    //         ..Default::default()
-    //     })
-    //     .await;
-    // assert!(result.is_ok(), "Initialize returned {:#?}", result);
-
-    // let request = Request::build("initialized")
-    //     .params(json!({}))
-    //     .id(2)
-    //     .finish();
-
-    // tower_service::Service::call(service, request)
-    //     .await
-    //     .unwrap();
-
-    // service.inner().initialized(InitializedParams {}).await;
 }
 
 pub async fn arrange_backend(
     workspace_folder: Option<WorkspaceFolder>,
     data: Vec<(&str, &str)>,
 ) -> LspService<Backend> {
-    arrange_backend_with_client(workspace_folder, data).await.0
+    arrange_backend_with_client(workspace_folder, data, Value::Null)
+        .await
+        .0
 }
-
-use tower_service::Service;
 
 pub async fn arrange_backend_with_client(
     workspace_folder: Option<WorkspaceFolder>,
     data: Vec<(&str, &str)>,
+    options: Value,
 ) -> (LspService<Backend>, ClientSocket) {
     let http_client = Box::new(StaticClient {
         data: [
@@ -189,37 +166,10 @@ pub async fn arrange_backend_with_client(
 
     let (mut service, client_socket) = LspService::new(|client| Backend::new(client, http_client));
 
-    // TODO reenable
-    arrange_init_backend(&mut service, workspace_folder).await;
-
-    // let request = initialize_request(1);
-
-    // tower_service::Service::call(&mut service, request)
-    //     .await
-    //     .unwrap();
-    // let response = service.call(request.clone()).await;
+    arrange_init_backend(&mut service, workspace_folder, options).await;
 
     (service, client_socket)
 }
-
-// fn initialize_request(id: i64) -> Request {
-//     let params = InitializeParams {
-//         workspace_folders: workspacefolder.map(|w| vec![w]),
-//         capabilities: ClientCapabilities {
-//             general: Some(GeneralClientCapabilities {
-//                 position_encodings: Some(vec![PositionEncodingKind::UTF8]),
-//                 ..Default::default()
-//             }),
-//             ..Default::default()
-//         },
-//         ..Default::default()
-//     };
-
-//     Request::build("initialize")
-//         .params(json!({"capabilities":{}}))
-//         .id(id)
-//         .finish()
-// }
 
 #[allow(dead_code)]
 pub async fn assert_empty_diagnostics(service: &LspService<Backend>) {
@@ -305,7 +255,7 @@ pub async fn arrange_single_file_backend(ontology: &str) -> (TempDir, LspService
     (tmp_dir, service, url)
 }
 
-async fn arrange_empty_backend() -> (TempDir, LspService<Backend>) {
+pub async fn arrange_empty_backend() -> (TempDir, LspService<Backend>) {
     let tmp_dir = arrange_workspace_folders(|_| vec![]);
 
     let service = arrange_backend(
@@ -319,7 +269,11 @@ async fn arrange_empty_backend() -> (TempDir, LspService<Backend>) {
     (tmp_dir, service)
 }
 
-async fn arrange_main_omn(tmp_dir: &TempDir, service: &LspService<Backend>, ontology: &str) -> Url {
+pub async fn arrange_main_omn(
+    tmp_dir: &TempDir,
+    service: &LspService<Backend>,
+    ontology: &str,
+) -> Url {
     let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
 
     service

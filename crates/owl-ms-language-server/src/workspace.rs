@@ -1031,7 +1031,7 @@ pub fn inlay_hint(
 
             let label = Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs)
                 .ok_or(Error::FrameInfoNotFound(iri.to_string()))?
-                .label(workspace)
+                .label_with_lang(workspace, &prefered_language)
                 .unwrap_or_default();
 
             trace!("Found {label} for {iri}");
@@ -2165,15 +2165,65 @@ impl FrameInfo {
         };
     }
 
+    /// Gets a text label for the frame info.
+    /// Uses rdfs:label and returns all languages by default.
+    ///
+    /// TODO this can be replaced with [`label_with_lang`]
     pub fn label(&self, workspace: &Workspace) -> Option<String> {
-        self.annotation_display(&LABEL_IRI.into(), workspace)
+        self.annotation_display(&LABEL_IRI.into(), workspace, &vec![])
     }
 
-    pub fn annotation_display(&self, iri: &Iri, workspace: &Workspace) -> Option<String> {
-        let joined = self
+    pub fn label_with_lang(
+        &self,
+        workspace: &Workspace,
+        prefered_language: &Vec<Language>,
+    ) -> Option<String> {
+        self.annotation_display(&LABEL_IRI.into(), workspace, prefered_language)
+    }
+
+    ///
+    /// | labels          | preferred lang         | results in |
+    /// | --------------- | ---------------------- | ---------- |
+    /// | @de, @en        | @de                    | @de        |
+    /// | @de, @en        |                        | @en, @de   |
+    /// | @de, @en        | @en                    | @en        |
+    /// | @de, @en        | @ru                    | @en, @de   |
+    /// | @de, @en        | @ru, @de               | @de        |
+    /// | @de, @en, @NO   | @de                    | @de        |
+    /// | @de, @en, @NO   |                        | @en, @de,@NO|
+    /// | @de, @en, @NO   | @en                    | @en        |
+    /// | @de, @en, @NO   | @ru                    | @en, @de,@NO|
+    /// | @de, @en, @NO   | @ru, @de               | @de        |
+    /// | @de, @ru, @NO   | @ru, @de               | @ru        |
+    ///
+    pub fn annotation_display(
+        &self,
+        iri: &Iri,
+        workspace: &Workspace,
+        prefered_language: &Vec<Language>,
+    ) -> Option<String> {
+        let annotations = self
             .annotations
             .iter()
-            .filter(|annotation| &annotation.iri == iri)
+            .filter(|annotation| &annotation.iri == iri);
+
+        let preferrd_single_lang = prefered_language
+            .iter()
+            .find(|l| annotations.clone().any(|a| a.language == Some(**l)));
+
+        let annotations = annotations.filter(|a| {
+            if let Some(lang) = preferrd_single_lang {
+                a.language == Some(*lang)
+            } else {
+                true
+            }
+        });
+
+        debug!(
+            "pref {prefered_language:?}, pref sing {preferrd_single_lang:?}, ann {annotations:?}"
+        );
+
+        let joined = annotations
             .map(|annotation| {
                 if let Some(language) = &annotation.language {
                     // english is implied
@@ -2231,7 +2281,7 @@ impl FrameInfo {
                     .unwrap_or(annotation.iri.to_string());
                 // TODO #28 use values directly
                 let mut annotation_display = self
-                    .annotation_display(&annotation.iri, workspace)
+                    .annotation_display(&annotation.iri, workspace, &vec![])
                     .unwrap_or(annotation.iri.to_string());
 
                 // If this is a multiline string then give it some space to work with

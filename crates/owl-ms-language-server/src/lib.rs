@@ -80,7 +80,7 @@ impl Backend {
             http_client: http_client.into(),
             position_encoding: OnceCell::new(),
             sync: Arc::new(RwLock::new(SyncBackend::default())),
-            options: Default::default(),
+            options: OnceCell::new(),
         }
     }
 
@@ -655,14 +655,20 @@ impl LanguageServer for Backend {
                 .ok_or(Error::InvalidUrl(url.clone()))?
         );
 
-        let list = self
+        let preferred_languages = self
             .get_options()
             .preferred_languages
             .iter()
             .filter_map(|lang_str| language::Language::try_from(lang_str.as_str()).ok())
             .collect();
 
-        let hints = document_inlay_hint(document, range, self.encoding(), workspace, list);
+        let hints = document_inlay_hint(
+            document,
+            range,
+            self.encoding(),
+            workspace,
+            preferred_languages,
+        );
 
         Ok(Some(hints))
     }
