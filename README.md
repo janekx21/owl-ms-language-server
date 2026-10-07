@@ -111,13 +111,14 @@ To integrate the language server into an editor not listed above use the documen
 
 ## Configuration
 
-This server contributes the following LSP settings:
+This server contributes the following LSP settings (initialization options):
 
-| Setting              | Description                                | Default |
-| -------------------- | ------------------------------------------ | ------- |
-| omn.orderFrames      | Enables ordering frames when formating     | false   |
+| Setting                | Type       | Description                                | Default   | Example        |
+| ---------------------- | ---------- | ------------------------------------------ | --------- | -------------- |
+| `omn.orderFrames`      | `bool`     | Enables ordering frames when formating     | `false`   | `true`         |
+| `preferredLanguages`   | `string[]` | List of language tags to use for labels    | `[]`      | `["en", "de"]` |
 
-Settings may need a restart to be applied.
+Settings need a restart to be applied.
 
 ## FAQ
 
