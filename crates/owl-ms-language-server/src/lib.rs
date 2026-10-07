@@ -389,7 +389,7 @@ impl LanguageServer for Backend {
         info!("Initialize language server -----------------------------");
         info!("Client info:\n{:#?}", params.client_info);
         debug!("Client capabilities:\n{:#?}", params.capabilities);
-        debug!("Options: {:#?}", params.initialization_options);
+        info!("Options: {:?}", params.initialization_options);
 
         self.set_options(params.initialization_options);
 
