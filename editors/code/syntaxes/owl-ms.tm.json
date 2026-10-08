@@ -1,0 +1,233 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "OWL Manchester Syntax",
+  "scopeName": "source.owl-ms",
+  "patterns": [
+    {
+      "include": "#string"
+    },
+    {
+      "include": "#comment"
+    },
+    {
+      "include": "#prefix-declaration"
+    },
+    {
+      "include": "#frame-headers"
+    },
+    {
+      "include": "#section-keywords"
+    },
+    {
+      "include": "#full-iri"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#blank-node"
+    },
+    {
+      "include": "#abbreviated-iri"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    }
+  ],
+  "repository": {
+    "comment": {
+      "match": "#.*$",
+      "name": "comment.line.number-sign.owl-ms"
+    },
+    "string": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.owl-ms",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.owl-ms"
+        }
+      ]
+    },
+    "language-tag": {
+      "match": "@[A-Za-z]+(?:-[A-Za-z0-9]+)*",
+      "name": "constant.language.language-tag.owl-ms"
+    },
+    "prefix-declaration": {
+      "match": "(?<![\\w.\\-])(Prefix:)[ \\t]*((?:[A-Za-z][\\w.\\-]*)?:)",
+      "captures": {
+        "1": {
+          "name": "keyword.control.section.owl-ms"
+        },
+        "2": {
+          "name": "entity.name.namespace.owl-ms"
+        }
+      }
+    },
+    "frame-headers": {
+      "patterns": [
+        {
+          "match": "(?<![\\w.\\-])(Class:)[ \\t]*(\\S+)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.frame.owl-ms"
+            },
+            "2": {
+              "name": "entity.name.type.class.owl-ms"
+            }
+          }
+        },
+        {
+          "match": "(?<![\\w.\\-])(Datatype:)[ \\t]*(\\S+)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.frame.owl-ms"
+            },
+            "2": {
+              "name": "entity.name.type.datatype.owl-ms"
+            }
+          }
+        },
+        {
+          "match": "(?<![\\w.\\-])(ObjectProperty:)[ \\t]*(\\S+)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.frame.owl-ms"
+            },
+            "2": {
+              "name": "variable.other.property.object-property.owl-ms"
+            }
+          }
+        },
+        {
+          "match": "(?<![\\w.\\-])(DataProperty:)[ \\t]*(\\S+)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.frame.owl-ms"
+            },
+            "2": {
+              "name": "variable.other.property.data-property.owl-ms"
+            }
+          }
+        },
+        {
+          "match": "(?<![\\w.\\-])(AnnotationProperty:)[ \\t]*(\\S+)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.frame.owl-ms"
+            },
+            "2": {
+              "name": "variable.other.property.annotation-property.owl-ms"
+            }
+          }
+        },
+        {
+          "match": "(?<![\\w.\\-])(Individual:)[ \\t]*(\\S+)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.frame.owl-ms"
+            },
+            "2": {
+              "name": "variable.other.constant.individual.owl-ms"
+            }
+          }
+        }
+      ]
+    },
+    "section-keywords": {
+      "match": "(?<![\\w.\\-])(?:Prefix|Ontology|Import|Annotations|Datatype|Class|ObjectProperty|DataProperty|AnnotationProperty|Individual|EquivalentTo|SubClassOf|DisjointWith|DisjointUnionOf|HasKey|Domain|Range|SubPropertyOf|InverseOf|SubPropertyChain|Characteristics|Types|Facts|SameAs|DifferentFrom|EquivalentClasses|DisjointClasses|EquivalentProperties|DisjointProperties|SameIndividual|DifferentIndividuals):",
+      "name": "keyword.control.section.owl-ms"
+    },
+    "full-iri": {
+      "match": "<[A-Za-z][A-Za-z0-9+\\-.]*:[^\\s<>\"{}|\\\\^`]*>",
+      "name": "string.other.link.iri.owl-ms"
+    },
+    "blank-node": {
+      "match": "_:[\\w.\\-]*\\w",
+      "name": "variable.other.blank-node.owl-ms"
+    },
+    "abbreviated-iri": {
+      "match": "(?<![\\w.\\-:])((?:[A-Za-z][\\w.\\-]*)?:)([\\w\\-]+(?:\\.+[\\w\\-]+)*)",
+      "name": "meta.iri.abbreviated.owl-ms",
+      "captures": {
+        "1": {
+          "name": "entity.name.namespace.owl-ms"
+        }
+      }
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "match": "(?<![\\w.\\-])[+-]?(?:\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?|\\.\\d+(?:[eE][+-]?\\d+)?)[fF](?![\\w.\\-:])",
+          "name": "constant.numeric.float.owl-ms"
+        },
+        {
+          "match": "(?<![\\w.\\-])[+-]?\\d+\\.\\d+(?![\\w.\\-:])",
+          "name": "constant.numeric.decimal.owl-ms"
+        },
+        {
+          "match": "(?<![\\w.\\-])[+-]?\\d+(?![\\w.\\-:])",
+          "name": "constant.numeric.integer.owl-ms"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "match": "(?<![\\w.:\\-])(?:and|or|not|that)(?![\\w.:\\-])",
+          "name": "keyword.operator.logical.owl-ms"
+        },
+        {
+          "match": "(?<![\\w.:\\-])(?:some|only|value|min|max|exactly|Self|inverse)(?![\\w.:\\-])",
+          "name": "keyword.operator.restriction.owl-ms"
+        },
+        {
+          "match": "(?<![\\w.:\\-])(?:Functional|InverseFunctional|Reflexive|Irreflexive|Symmetric|Asymmetric|Transitive)(?![\\w.:\\-])",
+          "name": "storage.modifier.characteristic.owl-ms"
+        },
+        {
+          "match": "(?<![\\w.:\\-])(?:length|minLength|maxLength|pattern|langRange)(?![\\w.:\\-])",
+          "name": "keyword.operator.facet.owl-ms"
+        },
+        {
+          "match": "(?<![\\w.:\\-])(?:integer|decimal|float|string)(?![\\w.:\\-])",
+          "name": "support.type.datatype.owl-ms"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "match": "\\^\\^",
+          "name": "keyword.operator.datatype.owl-ms"
+        },
+        {
+          "include": "#language-tag"
+        },
+        {
+          "match": "<=|>=|<|>",
+          "name": "keyword.operator.comparison.owl-ms"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "match": ",",
+          "name": "punctuation.separator.comma.owl-ms"
+        },
+        {
+          "match": "[{}\\[\\]()]",
+          "name": "punctuation.bracket.owl-ms"
+        }
+      ]
+    }
+  }
+}

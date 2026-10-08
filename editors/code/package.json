@@ -67,6 +67,13 @@
 				]
 			}
 		],
+		"grammars": [
+			{
+				"language": "owl-ms",
+				"scopeName": "source.owl-ms",
+				"path": "./syntaxes/owl-ms.tm.json"
+			}
+		],
 		"configuration": {
 			"type": "object",
 			"title": "OWL Manchester Syntax",
