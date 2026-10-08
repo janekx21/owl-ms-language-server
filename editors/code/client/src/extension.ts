@@ -57,6 +57,7 @@ async function startClient(context: ExtensionContext): Promise<void> {
 	// Get configuration
 	const config = workspace.getConfiguration('omn');
 	const orderFrames = config.get<boolean>('orderFrames', false);
+	const preferredLanguages = config.get<string[]>('preferredLanguages');
 
 	// Options to control the language client
 	const clientOptions: LanguageClientOptions = {
@@ -78,7 +79,8 @@ async function startClient(context: ExtensionContext): Promise<void> {
 		initializationOptions: {
 			omn: {
 				orderFrames: orderFrames
-			}
+			},
+			preferredLanguages
 		}
 	};
 
