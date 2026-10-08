@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.2.0...v1.3.0) (2026-10-08)
+
+
+### Features
+
+* [#146](https://github.com/janekx21/owl-ms-language-server/issues/146) shorten iris on format ([#203](https://github.com/janekx21/owl-ms-language-server/issues/203)) ([e0f0329](https://github.com/janekx21/owl-ms-language-server/commit/e0f0329e9bc273dc314bb5f92b98f17c1e4b964e))
+* [#208](https://github.com/janekx21/owl-ms-language-server/issues/208) language priority list ([#209](https://github.com/janekx21/owl-ms-language-server/issues/209)) ([4482878](https://github.com/janekx21/owl-ms-language-server/commit/448287837a7b601c2208d801765be31d4b0c3491))
+* [#23](https://github.com/janekx21/owl-ms-language-server/issues/23) support for rdf turtle syntax ([#205](https://github.com/janekx21/owl-ms-language-server/issues/205)) ([595826d](https://github.com/janekx21/owl-ms-language-server/commit/595826d6b400467c4dc3d77906a4f526c89a1b60))
+
 ## [1.2.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.1.0...v1.2.0) (2026-09-17)
 
 
