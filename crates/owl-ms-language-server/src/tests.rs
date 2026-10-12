@@ -4321,6 +4321,7 @@ async fn backend_goto_definition_on_import_iri_with_nested_catalog_should_work()
         _ => panic!("Expected Scalar response for import IRI goto definition"),
     }
 }
+
 #[test(tokio::test)]
 async fn backend_code_action_on_missing_iri_should_create_frame() {
     setup();
@@ -4391,6 +4392,86 @@ async fn backend_code_action_on_missing_iri_should_create_frame() {
                     .is_some()
         }
     }));
+}
+
+#[test(tokio::test)]
+async fn backend_code_action_on_iri_without_label_should_create_label() {
+    setup();
+    // Arrange
+    let (_tmp, service, url) = arrange_main_omn_backend(indoc! {"
+        Prefix: : <http://example.org/main#>
+        Ontology: <http://example.org/main.omn>
+            Class: BatteryAcid
+    "})
+    .await;
+
+    // Act
+    let result = service
+        .inner()
+        .code_action(CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: url.clone() },
+            range: lsp_types::Range {
+                start: lsp_types::Position::new(2, 15),
+                end: lsp_types::Position::new(2, 15),
+            },
+            context: CodeActionContext::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    info!("result={result:#?}");
+
+    // Assert
+    let result = result.expect("Sould be some some");
+    assert!(result.iter().any(|action| match action {
+        CodeActionOrCommand::Command(_) => false,
+        CodeActionOrCommand::CodeAction(code_action) => {
+            code_action.title.to_lowercase().contains("create label")
+                && code_action
+                    .edit
+                    .as_ref()
+                    .unwrap()
+                    .changes
+                    .as_ref()
+                    .expect("Changes should have one change, the new label")
+                    .get(&url)
+                    .is_some()
+        }
+    }));
+
+    let edit = result
+        .into_iter()
+        .filter_map(|ca| match ca {
+            CodeActionOrCommand::CodeAction(CodeAction { title, edit, .. }) => {
+                if title.contains("label") {
+                    Some(edit.unwrap())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .exactly_one()
+        .unwrap();
+
+    apply_text_edits(edit.changes.unwrap(), &service).await;
+
+    let sync = service.inner().read_sync().await;
+    let (doc, _) = sync.get_internal_document(&url).unwrap();
+
+    let new_ontology = &doc.rope().to_string()[..];
+    assert_eq!(
+        new_ontology,
+        indoc! { r#"
+            Prefix: : <http://example.org/main#>
+            Ontology: <http://example.org/main.omn>
+                Class: BatteryAcid
+                Annotations: http://www.w3.org/2000/01/rdf-schema#label "Battery Acid"
+        "# } //              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+             //    This will get resolved if a prefix is defined
+    );
 }
 
 #[test(tokio::test)]

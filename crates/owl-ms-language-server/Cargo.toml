@@ -42,6 +42,7 @@ language = "0.4.1"
 enum_dispatch = "0.3.13"
 rayon-join = "1.12.0"
 lasso = { version = "0.7.3", features = ["multi-threaded"] }
+stringcase = "1.0.0"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

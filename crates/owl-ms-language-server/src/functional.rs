@@ -20,9 +20,9 @@ use crate::{
     range::{Range, RangeBox},
     rope_provider::RopeProvider,
     workspace::{
-        changes_from_lsp, Diagnostic, DocumentId, FormattingSettings, FrameInfo, Highlights,
-        HoverResult, IriAtPosition, IriDefinition, IriRenameInfo, KeywordAction, OntologyDocument,
-        ParsedDocument, RenameInfo, Workspace,
+        changes_from_lsp, Annotation, Diagnostic, DocumentId, FormattingSettings, FrameInfo,
+        Highlights, HoverResult, IriAtPosition, IriDefinition, IriRenameInfo, KeywordAction,
+        OntologyDocument, ParsedDocument, RenameInfo, Workspace,
     },
 };
 
@@ -377,5 +377,9 @@ impl OntologyDocument for InternalOfnDocument {
 
     fn statistic(&self) -> String {
         "Not implemented".into()
+    }
+
+    fn add_annotation_edits(&self, annotation: Annotation) -> Vec<RangeBox<String>> {
+        vec![]
     }
 }

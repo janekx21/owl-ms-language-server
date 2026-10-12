@@ -290,3 +290,9 @@ pub async fn arrange_main_omn(
 
     url
 }
+
+pub async fn arrange_main_omn_backend(ontology: &str) -> (TempDir, LspService<Backend>, Url) {
+    let (t, s) = arrange_empty_backend().await;
+    let url = arrange_main_omn(&t, &s, ontology).await;
+    (t, s, url)
+}

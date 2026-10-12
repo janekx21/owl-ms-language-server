@@ -41,13 +41,15 @@ use tower_lsp::{Client, LanguageServer};
 use tree_sitter_c2rust::Language;
 use workspace::Workspace;
 
-use crate::iri::REUSE_IRI;
+use crate::consts::{LABEL_IRI, STRING_IRI};
+use crate::iri::{Iri, ToIri, REUSE_IRI};
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{
     cache_used, inlay_hint as document_inlay_hint, publish_lsp_diagnostics,
-    reachable_docs_recursive, Document, DocumentReference, FormattingSettings, Highlights,
-    HoverResult, InternalDocument, IriAtPosition, KeywordAction, Lang, OntologyDocument,
+    reachable_docs_recursive, Document, DocumentReference, FormattingSettings, FrameType,
+    Highlights, HoverResult, InternalDocument, IriAtPosition, KeywordAction, Lang,
+    OntologyDocument,
 };
 
 // Re-export for benchmarks
@@ -752,6 +754,7 @@ impl LanguageServer for Backend {
 
         actions.extend(missin_iri_actions(pos, doc, ws, self.encoding())?);
         actions.extend(create_prefix_from_iri(pos, doc, ws, self.encoding())?);
+        actions.extend(create_label_code_action(pos, doc, ws, self.encoding())?);
         actions.extend(keyword_actions(pos, doc, self.encoding())?);
 
         Ok(Some(actions))
@@ -1258,23 +1261,7 @@ fn create_prefix_from_iri(
         return Ok(vec![]);
     }
 
-    let (split_char, (prefix_start, prefix_end)) = &iri_under_cursor
-        .value()
-        .full_iri
-        .as_str()
-        .rsplit_once('#')
-        .map(|t| ('#', t))
-        .or_else(|| {
-            iri_under_cursor
-                .value()
-                .full_iri
-                .as_str()
-                .rsplit_once('/')
-                .map(|t| ('/', t))
-        })
-        .ok_or(Error::InvalidIri(
-            iri_under_cursor.value().full_iri.to_string(),
-        ))?;
+    let (prefix_start, prefix_end, split_char) = split_iri(&iri_under_cursor.value().full_iri)?;
 
     let prefix_name = "new-prefix".to_string();
 
@@ -1306,6 +1293,76 @@ fn create_prefix_from_iri(
                 doc.uri().clone(),
                 text_edits
             )])),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    Ok(vec![code_action])
+}
+
+fn split_iri(iri: &Iri) -> Result<(&str, &str, char)> {
+    let (split_char, (prefix_start, prefix_end)) = iri
+        .as_str()
+        .rsplit_once('#')
+        .map(|t| ('#', t))
+        .or_else(|| iri.as_str().rsplit_once('/').map(|t| ('/', t)))
+        .ok_or(Error::InvalidIri(iri.to_string()))?;
+    Ok((prefix_start, prefix_end, split_char))
+}
+
+fn create_label_code_action(
+    pos: Position,
+    doc: &InternalDocument,
+    ws: &Workspace,
+    encoding: &PositionEncodingKind,
+) -> Result<Vec<CodeActionOrCommand>> {
+    let Some(iri_under_cursor) = doc.iri_at(pos) else {
+        return Ok(vec![]);
+    };
+
+    if iri_under_cursor.value().is_import || iri_under_cursor.value().is_ontology {
+        // TODO do the same for ontrology iri
+        return Ok(vec![]);
+    }
+
+    let (_prefix_start, prefix_end, _split_char) = split_iri(&iri_under_cursor.value().full_iri)?;
+
+    let label = stringcase::title_case(prefix_end);
+
+    let text_edits = doc.add_annotation_edits(workspace::Annotation {
+        frame_iri: iri_under_cursor.value().full_iri.clone(),
+        iri: LABEL_IRI.to_iri(),
+        string_value: label.clone(),
+        language: None,
+        datatype: STRING_IRI.to_iri(),
+    });
+
+    if text_edits.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let shorter_iri_under_cursor = doc.full_iri_to_shorter_iri(&iri_under_cursor.value().full_iri);
+    let kind = iri_under_cursor
+        .value()
+        .frame_type
+        .unwrap_or(FrameType::Unknown);
+
+    let text_edits = text_edits
+        .into_iter()
+        .map(|rb| {
+            TextEdit::new(
+                rb.range()
+                    .into_lsp(doc.rope(), encoding)
+                    .expect("valid range"),
+                rb.value().clone(),
+            )
+        })
+        .collect_vec();
+
+    let code_action = CodeActionOrCommand::CodeAction(CodeAction {
+        title: format!("Create label \"{label}\" for {kind} `{shorter_iri_under_cursor}`",),
+        edit: Some(WorkspaceEdit {
+            changes: Some(HashMap::from([(doc.uri().clone(), text_edits)])),
             ..Default::default()
         }),
         ..Default::default()

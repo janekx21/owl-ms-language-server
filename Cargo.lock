@@ -1443,6 +1443,7 @@ dependencies = [
  "serde_json",
  "simple-logging",
  "sophia",
+ "stringcase",
  "tempdir",
  "test-log",
  "thiserror 2.0.16",
@@ -2395,6 +2396,12 @@ name = "streaming-iterator"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b2231b7c3057d5e4ad0156fb3dc807d900806020c5ffa3ee6ff2c8c76fb8520"
+
+[[package]]
+name = "stringcase"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55568efde976541e1b56b084e8ae95fa15c23594934e37c397d5cf867f480ec2"
 
 [[package]]
 name = "strsim"

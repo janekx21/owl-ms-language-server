@@ -192,6 +192,8 @@ pub trait OntologyDocument {
     /// Renaming a prefix to itself will shorten it.
     fn rename_edits(&self, rename_info: &RenameInfo) -> Vec<RangeBox<String>>;
 
+    fn add_annotation_edits(&self, annotation: Annotation) -> Vec<RangeBox<String>>;
+
     /// Get actions for creating keywords at a position
     fn keyword_actions_at(&self, pos: Position) -> Vec<KeywordAction>;
 
