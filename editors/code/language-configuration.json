@@ -3,37 +3,70 @@
     "lineComment": "#"
   },
   "brackets": [
+    [
+      "{",
+      "}"
+    ],
+    [
+      "[",
+      "]"
+    ],
+    [
+      "(",
+      ")"
+    ]
   ],
   "autoClosingPairs": [
-    { "open": "<", "close": ">" },
-    { "open": "[", "close": "]" },
-    { "open": "(", "close": ")" },
-    { "open": "{", "close": "}" },
-    { "open": "\"", "close": "\"", "notIn": ["string"] }
-  ],
-  "autoCloseBefore": ",}])>` \n\t",
-  "surroundingPairs": [
-    ["{", "}"],
-    ["<", ">"],
-    ["[", "]"],
-    ["(", ")"],
-    ["\"", "\""]
-  ],
-  "folding": {
-    "markers": {
-      "start": "^\\s*#\\s*?region\\b",
-      "end": "^\\s*#\\s*?endregion\\b"
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "\"",
+      "close": "\"",
+      "notIn": [
+        "string",
+        "comment"
+      ]
+    },
+    {
+      "open": "<",
+      "close": ">",
+      "notIn": [
+        "string",
+        "comment"
+      ]
     }
-  },
-  "wordPattern": "(-?\\d*\\.\\d\\w*)|([^\\`\\~\\!\\@\\#\\%\\^\\&\\*\\(\\)\\-\\=\\+\\[\\{\\]\\}\\\\\\|\\;\\:\\'\\\"\\,\\.\\<\\>\\/\\?\\s]+)",
-  "indentationRules": {
-    "increaseIndentPattern": "^((?!\\/\\/).)*(\\{[^}\"'`]*|\\([^)\"'`]*|\\[[^\\]\"'`]*)$",
-    "decreaseIndentPattern": "^((?!.*?\\/\\*).*\\*/)?\\s*[\\)\\}\\]].*$"
-  },
-    "onEnterRules": [
-        {
-        "beforeText": "^\\s*(?:Ontology:|Class:|Datatype:|ObjectProperty:|DataProperty:|AnnotationProperty:|Annotations:|Individual:).*?:\\s*$",
-        "action": { "indent": "indent" }
-        }
+  ],
+  "surroundingPairs": [
+    [
+      "{",
+      "}"
+    ],
+    [
+      "[",
+      "]"
+    ],
+    [
+      "(",
+      ")"
+    ],
+    [
+      "\"",
+      "\""
+    ],
+    [
+      "<",
+      ">"
     ]
+  ],
+  "wordPattern": "[A-Za-z0-9_:.\\-]+"
 }
