@@ -1,5 +1,6 @@
 use crate::consts::{
-    child_keywords_for_kind, keyword_hover_info, DECIMAL_IRI, FLOAT_IRI, INTEGER_IRI, STRING_IRI,
+    child_keywords_for_kind, keyword_hover_info, DECIMAL_IRI, FLOAT_IRI, INTEGER_IRI, LABEL_IRI,
+    STRING_IRI,
 };
 use crate::error::{Error, Result, ResultIterator};
 use crate::iri::{Iri, ToIri};
@@ -14,13 +15,13 @@ use crate::workspace::{
     IriAtPosition, IriDefinition, IriRenameInfo, KeywordAction, Location, OntologyDocument,
     OntologyId, ParsedDocument, RenameInfo, UnwrappedQueryMatch, Workspace,
 };
-use crate::USizeextra;
 use crate::{
     debugging::timeit, queries::ALL_QUERIES, range::Range, rope_provider::RopeProvider,
     LANGUAGE_OMN,
 };
+use crate::{split_iri, USizeextra};
 use itertools::Itertools;
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 use pretty::RcDoc;
 use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
@@ -647,6 +648,45 @@ impl OntologyDocument for InternalOmnDocument {
             self.stage2.all_frame_infos.values().map(|a| a.annotations.len()).sum::<usize>(),
             self.stage2.all_frame_infos.values().map(|a| a.definitions.len()).sum::<usize>(),
         )
+    }
+
+    fn add_annotation_edits(&self, annotation: Annotation) -> Vec<RangeBox<String>> {
+        let iri_under_cursor = annotation.frame_iri;
+
+        let fi = self.find_frame_info(&iri_under_cursor);
+        let Some(fi) = fi else {
+            debug!("no frame info");
+            return vec![];
+        };
+
+        let Some(l) = fi.definitions.iter().find(|d| &d.uri == self.uri()) else {
+            debug!("not defined here");
+            return vec![];
+        };
+
+        let Ok((_prefix_start, prefix_end, _split_char)) = split_iri(&iri_under_cursor) else {
+            debug!("cant split {iri_under_cursor}");
+            return vec![];
+        };
+
+        let label = stringcase::title_case(prefix_end);
+
+        // The label is there already
+        if fi.annotations.iter().any(|a| {
+            a.iri == annotation.iri && a.string_value.to_lowercase() == label.to_lowercase()
+        }) {
+            debug!("label is here already");
+            return vec![];
+        }
+
+        let annotation_iri = self
+            .full_iri_to_abbreviated_iri(&annotation.iri)
+            .unwrap_or(annotation.iri.to_string());
+
+        vec![RangeBox::new(
+            format!("\n    Annotations: {annotation_iri} \"{label}\""),
+            Range::new(l.range.end, l.range.end),
+        )]
     }
 }
 
