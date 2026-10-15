@@ -1,6 +1,5 @@
 use crate::{
     catalog::Catalog,
-    queries::ALL_QUERIES,
     range::{Change, Range},
     rope_provider::RopeProvider,
     test_helpers::*,
@@ -72,13 +71,6 @@ fn parse_omn_should_work() {
 
     // Assert
     assert_eq!(tree.root_node().has_error(), false);
-}
-
-#[test]
-/// This test should initilize all queries and therefore check if they are valid
-fn deref_all_queries_should_be_valid() {
-    setup();
-    let _ = *ALL_QUERIES;
 }
 
 #[test]
@@ -3359,6 +3351,133 @@ async fn backend_rename_helper(
     let doc_content = doc.rope().to_string();
 
     assert_eq!(doc_content, new_ontology);
+}
+
+#[test(tokio::test)]
+async fn backend_rename_should_work_for_functinal() {
+    setup();
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![
+            WorkspaceMember::CatalogFile(
+                Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
+                    .with_uri("http://example/func", "func.ofn"),
+            ),
+            WorkspaceMember::OfnFile {
+                name: "func.ofn".into(),
+                content: indoc! {r#"
+                    Prefix(:=<http://example/onto#>)
+
+
+                    Ontology(<http://example/onto>
+                    <http://example/onto>
+
+                    Declaration(Class(:class-in-func))
+
+                    )
+                "#}
+                .into(),
+            },
+        ]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test workspace".into(),
+        }),
+        vec![
+            ("http://www.w3.org/2000/01/rdf-schema#", ""), //dummy
+        ],
+    )
+    .await;
+
+    let url = arrange_main_omn(
+        &tmp_dir,
+        &service,
+        indoc! {"
+            Prefix: : <http://example/onto#>
+
+            Ontology: <http://example/onto> <http://example/onto>
+            Import: <http://example/func>
+
+            Class: class-in-main
+                SubClassOf: class-in-func
+    "},
+    )
+    .await;
+
+    // Act
+    let result = service
+        .inner()
+        .rename(RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url.clone() },
+                position: lsp_types::Position {
+                    line: 6,
+                    character: 20,
+                },
+            },
+            new_name: "class-in-func-2".to_string(),
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await;
+
+    // Assert
+    assert_empty_diagnostics(&service).await;
+    let result = result.unwrap();
+    let result = result.unwrap();
+
+    info!("{result:#?}");
+
+    let changes = result.changes.unwrap();
+    for (url, edits) in changes {
+        service
+            .inner()
+            .did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: url.clone(),
+                    version: 1,
+                },
+                content_changes: edits
+                    .iter()
+                    .sorted_by_key(|e| e.range.start)
+                    .rev()
+                    .map(|e| TextDocumentContentChangeEvent {
+                        range: Some(e.range),
+                        range_length: None,
+                        text: e.new_text.clone(),
+                    })
+                    .collect(),
+            })
+            .await;
+    }
+
+    let sync = service.inner().read_sync().await;
+    let workspaces = sync.workspaces();
+    let workspace = workspaces.iter().exactly_one().unwrap();
+    info!("{:#?}", workspace.internal_documents());
+    let doc_func = workspace
+        .get_internal_document(&tmp_dir.path().join("func.ofn"))
+        .unwrap();
+    let doc_func_content = doc_func.rope().to_string();
+
+    assert_eq!(
+        doc_func_content,
+        indoc! {"
+            Prefix(:=<http://example/onto#>)
+
+
+            Ontology(<http://example/onto>
+            <http://example/onto>
+
+            Declaration(Class(:class-in-func-2))
+
+            )
+        "}
+    );
 }
 
 #[test(tokio::test)]

@@ -1,0 +1,7 @@
+Prefix(:=<http://example/onto#>)
+
+
+Ontology(<http://example/onto>
+<http://example/onto>
+
+Declaration(Class(:class-in-func-2)))

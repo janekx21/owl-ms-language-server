@@ -1098,7 +1098,10 @@ impl LanguageServer for Backend {
                                 })
                         })
                         .collect_vec();
-                    (doc.uri().clone(), edits)
+                    (
+                        Url::from_file_path(doc.path()).expect("path should be valid url"),
+                        edits,
+                    )
                 })
                 .collect();
 

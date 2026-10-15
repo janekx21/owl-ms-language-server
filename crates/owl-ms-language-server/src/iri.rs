@@ -1,6 +1,9 @@
+use itertools::Itertools;
 use lasso::{Spur, ThreadedRodeo};
 use ropey::RopeSlice;
-use std::{borrow::Borrow, fmt::Display, ops::Deref, sync::LazyLock};
+use std::{borrow::Borrow, collections::HashMap, fmt::Display, ops::Deref, sync::LazyLock};
+
+use crate::range::RangeBox;
 
 #[derive(Debug, Default)]
 pub struct ReusedIriSet(ThreadedRodeo<Spur>);
@@ -43,6 +46,42 @@ impl Display for Iri {
 impl Iri {
     pub fn as_str(&self) -> &str {
         REUSE_IRI.str(self)
+    }
+
+    pub fn try_to_full(&self, prefixes: &HashMap<String, RangeBox<String>>) -> Option<Self> {
+        if let Some((prefix, simple_iri)) = self.as_str().split_once(':') {
+            prefixes.get(prefix).map(|resolved_prefix| {
+                [resolved_prefix.value().as_str(), simple_iri]
+                    .join("")
+                    .to_iri()
+            })
+        } else {
+            // Simple IRIs get a free colon prepended
+            // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
+            prefixes.get("").map(|resolved_prefix| {
+                [resolved_prefix.value().as_str(), self.as_str()]
+                    .join("")
+                    .to_iri()
+            })
+        }
+    }
+
+    pub fn try_to_abbriviated(
+        &self,
+        prefixes: &HashMap<String, RangeBox<String>>,
+    ) -> Option<String> {
+        prefixes
+            .iter()
+            .map(|(k, v)| (k.clone(), v.value().clone()))
+            .filter_map(
+                |(prefix, url)| match self.as_str().split_once(url.as_str()) {
+                    Some(("", post)) if prefix.is_empty() => Some(post.to_string()),
+                    Some(("", post)) => Some(prefix + ":" + post),
+                    Some(_) | None => None,
+                },
+            )
+            .sorted_by_key(String::len)
+            .next()
     }
 }
 
