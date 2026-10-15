@@ -63,8 +63,8 @@ async function startClient(context: ExtensionContext): Promise<void> {
 	const clientOptions: LanguageClientOptions = {
 		// Register the server for plain text documents
 		documentSelector: [
-			{ scheme: 'file', language: 'owl-ms', },
-			{ scheme: 'file', language: 'owl-fn', },
+			{ scheme: 'file', language: 'manchester', },
+			{ scheme: 'file', language: 'owl-functional', },
 			{ scheme: 'file', language: 'turtle', }
 		], // dont use pattern. this would break everything.
 		synchronize: {

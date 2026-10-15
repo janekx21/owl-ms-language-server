@@ -281,7 +281,7 @@ pub async fn arrange_main_omn(
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },

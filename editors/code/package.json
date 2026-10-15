@@ -16,15 +16,16 @@
 	"keywords": [
 		"owl-ms",
 		"vscode",
-		"owl"
+		"owl",
+		"manchester"
 	],
 	"engines": {
 		"vscode": "^1.75.0"
 	},
 	"activationEvents": [
 		"onLanguage:plaintext",
-		"onLanguage:owl-ms",
-		"onLanguage:owl-fn",
+		"onLanguage:manchester",
+		"onLanguage:owl-functional",
 		"onLanguage:turtle"
 	],
 	"icon": "icon.png",
@@ -36,7 +37,7 @@
 	"contributes": {
 		"languages": [
 			{
-				"id": "owl-ms",
+				"id": "manchester",
 				"extensions": [
 					".omn"
 				],
@@ -44,16 +45,22 @@
 					"OWL Manchester Syntax",
 					"omn"
 				],
-				"configuration": "./language-configuration.json"
+				"configuration": "./language-configuration.json",
+				"mimetypes": [
+					"text/owl-manchester"
+				]
 			},
 			{
-				"id": "owl-fn",
+				"id": "owl-functional",
 				"extensions": [
 					".ofn"
 				],
 				"aliases": [
 					"OWL Functional Syntax",
 					"ofn"
+				],
+				"mimetypes": [
+					"text/owl-functional"
 				]
 			},
 			{
@@ -64,13 +71,16 @@
 				"aliases": [
 					"Turtle Syntax",
 					"ttl"
+				],
+				"mimetypes": [
+					"text/turtle"
 				]
 			}
 		],
 		"grammars": [
 			{
-				"language": "owl-ms",
-				"scopeName": "source.owl-ms",
+				"language": "manchester",
+				"scopeName": "source.manchester",
 				"path": "./syntaxes/owl-ms.tm.json"
 			}
 		],

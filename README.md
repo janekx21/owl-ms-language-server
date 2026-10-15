@@ -42,7 +42,7 @@ Make sure the language server binary is installed (See Section [Installing the b
 command = "owl-ms-language-server"
 
 [[language]]
-name = "owl-ms"
+name = "manchester"
 injection-regex = "owl-ms"
 scope = "text.omn"
 file-types = ["omn"]
@@ -50,7 +50,7 @@ roots = []
 language-servers = ["owl-ms-language-server"] # you can use the absolut path to the binary if needed
 comment-token = "//"
 indent = { tab-width = 4, unit = "    " }
-grammar = "owl-ms" # this is the default
+grammar = "owl-ms"
 
 
 [[grammar]]

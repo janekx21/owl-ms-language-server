@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "OWL Manchester Syntax",
-  "scopeName": "source.owl-ms",
+  "scopeName": "source.manchester",
   "patterns": [
     {
       "include": "#string"
@@ -43,31 +43,31 @@
   "repository": {
     "comment": {
       "match": "#.*$",
-      "name": "comment.line.number-sign.owl-ms"
+      "name": "comment.line.number-sign.manchester"
     },
     "string": {
       "begin": "\"",
       "end": "\"",
-      "name": "string.quoted.double.owl-ms",
+      "name": "string.quoted.double.manchester",
       "patterns": [
         {
           "match": "\\\\.",
-          "name": "constant.character.escape.owl-ms"
+          "name": "constant.character.escape.manchester"
         }
       ]
     },
     "language-tag": {
       "match": "@[A-Za-z]+(?:-[A-Za-z0-9]+)*",
-      "name": "constant.language.language-tag.owl-ms"
+      "name": "constant.language.language-tag.manchester"
     },
     "prefix-declaration": {
       "match": "(?<![\\w.\\-])(Prefix:)[ \\t]*((?:[A-Za-z][\\w.\\-]*)?:)",
       "captures": {
         "1": {
-          "name": "keyword.control.section.owl-ms"
+          "name": "keyword.control.section.manchester"
         },
         "2": {
-          "name": "entity.name.namespace.owl-ms"
+          "name": "entity.name.namespace.manchester"
         }
       }
     },
@@ -77,10 +77,10 @@
           "match": "(?<![\\w.\\-])(Class:)[ \\t]*(\\S+)",
           "captures": {
             "1": {
-              "name": "keyword.control.frame.owl-ms"
+              "name": "keyword.control.frame.manchester"
             },
             "2": {
-              "name": "entity.name.type.class.owl-ms"
+              "name": "entity.name.type.class.manchester"
             }
           }
         },
@@ -88,10 +88,10 @@
           "match": "(?<![\\w.\\-])(Datatype:)[ \\t]*(\\S+)",
           "captures": {
             "1": {
-              "name": "keyword.control.frame.owl-ms"
+              "name": "keyword.control.frame.manchester"
             },
             "2": {
-              "name": "entity.name.type.datatype.owl-ms"
+              "name": "entity.name.type.datatype.manchester"
             }
           }
         },
@@ -99,10 +99,10 @@
           "match": "(?<![\\w.\\-])(ObjectProperty:)[ \\t]*(\\S+)",
           "captures": {
             "1": {
-              "name": "keyword.control.frame.owl-ms"
+              "name": "keyword.control.frame.manchester"
             },
             "2": {
-              "name": "variable.other.property.object-property.owl-ms"
+              "name": "variable.other.property.object-property.manchester"
             }
           }
         },
@@ -110,10 +110,10 @@
           "match": "(?<![\\w.\\-])(DataProperty:)[ \\t]*(\\S+)",
           "captures": {
             "1": {
-              "name": "keyword.control.frame.owl-ms"
+              "name": "keyword.control.frame.manchester"
             },
             "2": {
-              "name": "variable.other.property.data-property.owl-ms"
+              "name": "variable.other.property.data-property.manchester"
             }
           }
         },
@@ -121,10 +121,10 @@
           "match": "(?<![\\w.\\-])(AnnotationProperty:)[ \\t]*(\\S+)",
           "captures": {
             "1": {
-              "name": "keyword.control.frame.owl-ms"
+              "name": "keyword.control.frame.manchester"
             },
             "2": {
-              "name": "variable.other.property.annotation-property.owl-ms"
+              "name": "variable.other.property.annotation-property.manchester"
             }
           }
         },
@@ -132,10 +132,10 @@
           "match": "(?<![\\w.\\-])(Individual:)[ \\t]*(\\S+)",
           "captures": {
             "1": {
-              "name": "keyword.control.frame.owl-ms"
+              "name": "keyword.control.frame.manchester"
             },
             "2": {
-              "name": "variable.other.constant.individual.owl-ms"
+              "name": "variable.other.constant.individual.manchester"
             }
           }
         }
@@ -143,22 +143,22 @@
     },
     "section-keywords": {
       "match": "(?<![\\w.\\-])(?:Prefix|Ontology|Import|Annotations|Datatype|Class|ObjectProperty|DataProperty|AnnotationProperty|Individual|EquivalentTo|SubClassOf|DisjointWith|DisjointUnionOf|HasKey|Domain|Range|SubPropertyOf|InverseOf|SubPropertyChain|Characteristics|Types|Facts|SameAs|DifferentFrom|EquivalentClasses|DisjointClasses|EquivalentProperties|DisjointProperties|SameIndividual|DifferentIndividuals):",
-      "name": "keyword.control.section.owl-ms"
+      "name": "keyword.control.section.manchester"
     },
     "full-iri": {
       "match": "<[A-Za-z][A-Za-z0-9+\\-.]*:[^\\s<>\"{}|\\\\^`]*>",
-      "name": "string.other.link.iri.owl-ms"
+      "name": "string.other.link.iri.manchester"
     },
     "blank-node": {
       "match": "_:[\\w.\\-]*\\w",
-      "name": "variable.other.blank-node.owl-ms"
+      "name": "variable.other.blank-node.manchester"
     },
     "abbreviated-iri": {
       "match": "(?<![\\w.\\-:])((?:[A-Za-z][\\w.\\-]*)?:)([\\w\\-]+(?:\\.+[\\w\\-]+)*)",
-      "name": "meta.iri.abbreviated.owl-ms",
+      "name": "meta.iri.abbreviated.manchester",
       "captures": {
         "1": {
-          "name": "entity.name.namespace.owl-ms"
+          "name": "entity.name.namespace.manchester"
         }
       }
     },
@@ -166,15 +166,15 @@
       "patterns": [
         {
           "match": "(?<![\\w.\\-])[+-]?(?:\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?|\\.\\d+(?:[eE][+-]?\\d+)?)[fF](?![\\w.\\-:])",
-          "name": "constant.numeric.float.owl-ms"
+          "name": "constant.numeric.float.manchester"
         },
         {
           "match": "(?<![\\w.\\-])[+-]?\\d+\\.\\d+(?![\\w.\\-:])",
-          "name": "constant.numeric.decimal.owl-ms"
+          "name": "constant.numeric.decimal.manchester"
         },
         {
           "match": "(?<![\\w.\\-])[+-]?\\d+(?![\\w.\\-:])",
-          "name": "constant.numeric.integer.owl-ms"
+          "name": "constant.numeric.integer.manchester"
         }
       ]
     },
@@ -182,23 +182,23 @@
       "patterns": [
         {
           "match": "(?<![\\w.:\\-])(?:and|or|not|that)(?![\\w.:\\-])",
-          "name": "keyword.operator.logical.owl-ms"
+          "name": "keyword.operator.logical.manchester"
         },
         {
           "match": "(?<![\\w.:\\-])(?:some|only|value|min|max|exactly|Self|inverse)(?![\\w.:\\-])",
-          "name": "keyword.operator.restriction.owl-ms"
+          "name": "keyword.operator.restriction.manchester"
         },
         {
           "match": "(?<![\\w.:\\-])(?:Functional|InverseFunctional|Reflexive|Irreflexive|Symmetric|Asymmetric|Transitive)(?![\\w.:\\-])",
-          "name": "storage.modifier.characteristic.owl-ms"
+          "name": "storage.modifier.characteristic.manchester"
         },
         {
           "match": "(?<![\\w.:\\-])(?:length|minLength|maxLength|pattern|langRange)(?![\\w.:\\-])",
-          "name": "keyword.operator.facet.owl-ms"
+          "name": "keyword.operator.facet.manchester"
         },
         {
           "match": "(?<![\\w.:\\-])(?:integer|decimal|float|string)(?![\\w.:\\-])",
-          "name": "support.type.datatype.owl-ms"
+          "name": "support.type.datatype.manchester"
         }
       ]
     },
@@ -206,14 +206,14 @@
       "patterns": [
         {
           "match": "\\^\\^",
-          "name": "keyword.operator.datatype.owl-ms"
+          "name": "keyword.operator.datatype.manchester"
         },
         {
           "include": "#language-tag"
         },
         {
           "match": "<=|>=|<|>",
-          "name": "keyword.operator.comparison.owl-ms"
+          "name": "keyword.operator.comparison.manchester"
         }
       ]
     },
@@ -221,11 +221,11 @@
       "patterns": [
         {
           "match": ",",
-          "name": "punctuation.separator.comma.owl-ms"
+          "name": "punctuation.separator.comma.manchester"
         },
         {
           "match": "[{}\\[\\]()]",
-          "name": "punctuation.bracket.owl-ms"
+          "name": "punctuation.bracket.manchester"
         }
       ]
     }
