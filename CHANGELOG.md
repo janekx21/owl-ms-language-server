@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/janekx21/owl-ms-language-server/compare/v1.3.0...v1.3.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* [#213](https://github.com/janekx21/owl-ms-language-server/issues/213) OntoGraph-lite language conflict ([#214](https://github.com/janekx21/owl-ms-language-server/issues/214)) ([f6f3711](https://github.com/janekx21/owl-ms-language-server/commit/f6f37115f858140bf256c4b2b76576d4a0431fe4))
+
 ## [1.3.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.2.0...v1.3.0) (2026-10-12)
 
 
