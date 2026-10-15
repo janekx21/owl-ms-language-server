@@ -79,8 +79,8 @@
 		],
 		"grammars": [
 			{
-				"language": "owl-ms",
-				"scopeName": "source.owl-ms",
+				"language": "manchester",
+				"scopeName": "source.manchester",
 				"path": "./syntaxes/owl-ms.tm.json"
 			}
 		],
