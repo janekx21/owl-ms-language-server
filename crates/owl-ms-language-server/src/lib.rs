@@ -452,8 +452,8 @@ impl LanguageServer for Backend {
             info!("Did open {file_url} {language_id} ...",);
 
             let lang = match &language_id[..] {
-                "owl-ms" => Some(Lang::Omn),
-                "owl-fn" => Some(Lang::Ofn),
+                "manchester" => Some(Lang::Omn),
+                "owl-functional" => Some(Lang::Ofn),
                 "turtle" => Some(Lang::Ttl),
                 // TODO test this case
                 _ => None,

@@ -310,7 +310,7 @@ async fn backend_did_open_should_create_document() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: "abc".to_string(),
             },
@@ -351,7 +351,7 @@ async fn backend_did_open_ofn_should_create_document() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-fn".to_string(),
+                language_id: "owl-functional".to_string(),
                 version: 0,
                 text: "abc".to_string(),
             },
@@ -594,7 +594,7 @@ async fn backend_did_change_should_update_internal_rope() -> error::Result<()> {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: "DE😊F".to_string(),
             },
@@ -678,7 +678,7 @@ async fn backend_hover_on_class_should_show_class_info() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -758,7 +758,7 @@ async fn backend_hover_on_class_should_show_datatype_label() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -889,7 +889,7 @@ async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1063,7 +1063,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1178,7 +1178,7 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1289,7 +1289,7 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1428,7 +1428,7 @@ async fn backend_formatting_on_file_should_correctly_format() -> error::Result<(
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: source.to_string(),
             },
@@ -1560,7 +1560,7 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1855,7 +1855,7 @@ async fn backend_import_resolve_should_load_documents() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: file_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -1892,7 +1892,7 @@ Class: class-in-first-file
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2006,7 +2006,7 @@ async fn backend_workspace_symbols_should_work() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2124,7 +2124,7 @@ async fn backend_did_open_should_load_external_documents_via_http() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2211,7 +2211,7 @@ async fn backend_did_open_should_load_external_rdf_via_http() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2312,7 +2312,7 @@ async fn backend_hover_should_use_external_rdf_info() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2421,7 +2421,7 @@ async fn backend_did_open_should_load_external_documents_via_file() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2564,7 +2564,7 @@ async fn backend_completion_test_helper(partial: &str, full: &str, ontology: &st
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2643,7 +2643,7 @@ async fn backend_completion_should_not_panic() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2697,7 +2697,7 @@ async fn backend_completion_on_empty_doc_should_suggest_ontology() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2769,7 +2769,7 @@ async fn backend_completion_with_iri_should_complete_to_iri() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -2845,7 +2845,7 @@ async fn backend_completion_with_iri_should_be_case_insensitive() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -3291,7 +3291,7 @@ async fn backend_rename_helper(
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: old_ontology.to_string(),
             },
@@ -3438,7 +3438,7 @@ async fn backend_did_open_should_load_external_documents_recursivly() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.into(),
             },
@@ -3512,7 +3512,7 @@ async fn diagnostics_missing_class_with_external_document_should_report_error() 
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -3595,7 +3595,7 @@ async fn diagnostics_missing_datatype_with_external_document_should_report_error
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -3676,7 +3676,7 @@ async fn diagnostics_missing_object_property_with_external_document_should_repor
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -3760,7 +3760,7 @@ async fn diagnostics_missing_data_property_with_external_document_should_report_
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -3845,7 +3845,7 @@ async fn diagnostics_missing_annotation_property_with_external_document_should_r
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -3928,7 +3928,7 @@ async fn diagnostics_missing_individual_with_external_document_should_report_err
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4025,7 +4025,7 @@ async fn diagnostics_all_defined_in_external_document_should_have_no_errors() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4095,7 +4095,7 @@ async fn diagnostics_multiple_missing_iris_with_external_document_should_report_
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4208,7 +4208,7 @@ async fn backend_goto_definition_on_import_iri_not_in_catalog_should_return_none
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4285,7 +4285,7 @@ async fn backend_goto_definition_on_import_iri_with_nested_catalog_should_work()
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4352,7 +4352,7 @@ async fn backend_code_action_on_missing_iri_should_create_frame() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4503,7 +4503,7 @@ async fn backend_code_action_on_full_iri_should_create_prefix() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4585,7 +4585,7 @@ async fn backend_code_action_on_multiple_full_iri_should_shorten_all_prefixed_ir
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4685,7 +4685,7 @@ async fn backend_code_action_for_keywords_should_work() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4742,7 +4742,7 @@ async fn backend_did_change_should_update_ontology_id() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4817,7 +4817,7 @@ async fn backend_did_change_with_syntax_change_should_update_ontology_id() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4891,7 +4891,7 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -4989,7 +4989,7 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -5071,7 +5071,7 @@ async fn backend_did_change_with_large_syntax_change_should_update_imports_2() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -5184,7 +5184,7 @@ async fn backend_did_change_with_large_syntax_change_should_update_prefixes() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -5296,7 +5296,7 @@ async fn backend_did_change_with_some_should_prune_diagnostics() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -5377,7 +5377,7 @@ async fn backend_diagnostics_with_syntax_error_should_report_nice_message() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -5430,7 +5430,7 @@ async fn backend_diagnostics_with_deprecated_entity_should_return_diagnostic() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -5487,7 +5487,7 @@ async fn backend_completion_with_deprecated_entity_should_show_in_completions() 
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -5561,7 +5561,7 @@ async fn backend_diagnostics_with_undefined_prefix_should_report() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -5605,7 +5605,7 @@ async fn backend_diagnostics_with_undefined_default_prefix_should_report() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -5661,7 +5661,7 @@ async fn backend_symbol_with_deprecated_entity_should_show_in_symbols() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -5723,7 +5723,7 @@ async fn backend_document_symbol_with_deprecated_entity_should_show_in_document_
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -5846,7 +5846,7 @@ async fn backend_symbol_with_file_protocol_import_should_work() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -5952,7 +5952,7 @@ async fn backend_goto_definition_with_file_protocol_import_should_work() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: ontology_url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: ontology.to_string(),
             },
@@ -6107,7 +6107,7 @@ async fn backend_command_helper(old_ontology: &str, new_ontology: &str, command:
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: url.clone(),
-                language_id: "owl-ms".to_string(),
+                language_id: "manchester".to_string(),
                 version: 0,
                 text: old_ontology.to_string(),
             },
@@ -6308,7 +6308,7 @@ mod fuzz {
                         .did_open(DidOpenTextDocumentParams {
                             text_document: TextDocumentItem {
                                 uri: ontology_url.clone(),
-                                language_id: "owl-ms".to_string(),
+                                language_id: "manchester".to_string(),
                                 version: 0,
                                 text: ONTOLOGY.to_string(),
                             },
@@ -6419,7 +6419,7 @@ mod fuzz {
                             .did_open(DidOpenTextDocumentParams {
                                 text_document: TextDocumentItem {
                                     uri: ontology_url.clone(),
-                                    language_id: "owl-ms".to_string(),
+                                    language_id: "manchester".to_string(),
                                     version: 0,
                                     text: ONTOLOGY.to_string(),
                                 },
@@ -6476,7 +6476,7 @@ mod fuzz {
                         .did_open(DidOpenTextDocumentParams {
                             text_document: TextDocumentItem {
                                 uri: ontology_url.clone(),
-                                language_id: "owl-ms".to_string(),
+                                language_id: "manchester".to_string(),
                                 version: 0,
                                 text: ontology_after_edit,
                             },
