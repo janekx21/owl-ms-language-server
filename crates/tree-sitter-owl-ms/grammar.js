@@ -90,7 +90,9 @@ module.exports = grammar({
       ),
 
     quoted_string: $ => /"([^"\\]|\\\\|\\")*"/,
-    language_tag: $ => /@[a-zA-Z\-]+/, // TODO make more strict https://www.rfc-editor.org/rfc/bcp/bcp47.txt
+    // LANGTAG from Turtle and SPARQL: subtags after the first may contain digits (BCP 47, e.g. `es-419`,
+    // `de-CH-1996`). Whether a tag is registered is a diagnostic, not a parse error (#180).
+    language_tag: $ => /@[a-zA-Z]+(-[a-zA-Z0-9]+)*/,
     _lexial_value: $ => $.quoted_string,
 
     // 2.2 Ontologies and Annotations
