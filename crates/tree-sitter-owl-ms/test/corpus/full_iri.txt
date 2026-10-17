@@ -1,0 +1,54 @@
+===================
+Full IRIs: non-ASCII, URN, query and percent-encoding
+===================
+
+Ontology: <http://example.org/o>
+Class: <http://example.org/o#Straße>
+Class: <urn:example:Street>
+Class: <http://example.org/o?a=1&b=2#Big%20Street>
+
+---
+
+(source_file
+  (ontology
+    (keyword_ontology)
+    (ontology_iri (full_iri))
+    (class_frame
+      (keyword_class)
+      (class_iri (full_iri)))
+    (class_frame
+      (keyword_class)
+      (class_iri (full_iri)))
+    (class_frame
+      (keyword_class)
+      (class_iri (full_iri)))))
+
+===================
+Full IRI does not swallow facets written without spaces
+===================
+
+Prefix: : <http://example.org/o#>
+Ontology: <http://example.org/o>
+Datatype: :Small
+    EquivalentTo: <http://www.w3.org/2001/XMLSchema#integer>[<=10,>=1]
+
+---
+
+(source_file
+  (prefix_declaration
+    (keyword_prefix)
+    (prefix_name)
+    (full_iri))
+  (ontology
+    (keyword_ontology)
+    (ontology_iri (full_iri))
+    (datatype_frame
+      (keyword_datatype)
+      (datatype_iri (abbreviated_iri))
+      (datatype_equavalent_to
+        (keyword_equivalent_to)
+        (data_range
+          (datatype_restriction
+            (datatype_iri (full_iri))
+            (integer_literal)
+            (integer_literal)))))))
