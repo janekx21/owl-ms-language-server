@@ -1,0 +1,19 @@
+=========
+Comment ends at a lone carriage return
+=========
+
+# note<http://example.org/A> <http://example.org/p> <http://example.org/B> .
+
+---
+
+(document
+  (comment)
+  (triple
+    (subject
+      (iri_reference))
+    (property_list
+      (property
+        (predicate
+          (iri_reference))
+        (object_list
+          (iri_reference))))))
