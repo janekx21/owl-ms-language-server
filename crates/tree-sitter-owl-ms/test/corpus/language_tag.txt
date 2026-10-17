@@ -1,0 +1,36 @@
+===================
+Language tags with digits in subtags
+===================
+
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Ontology: <http://example.org/o>
+Class: <http://example.org/o#Street>
+    Annotations:
+        rdfs:label "Strasse"@de-CH-1996,
+        rdfs:label "calle"@es-419
+
+---
+
+(source_file
+  (prefix_declaration
+    (keyword_prefix)
+    (prefix_name)
+    (full_iri))
+  (ontology
+    (keyword_ontology)
+    (ontology_iri (full_iri))
+    (class_frame
+      (keyword_class)
+      (class_iri (full_iri))
+      (annotations
+        (keyword_annotations)
+        (annotation
+          (annotation_property_iri (abbreviated_iri))
+          (string_literal_with_language
+            (quoted_string)
+            (language_tag)))
+        (annotation
+          (annotation_property_iri (abbreviated_iri))
+          (string_literal_with_language
+            (quoted_string)
+            (language_tag)))))))
