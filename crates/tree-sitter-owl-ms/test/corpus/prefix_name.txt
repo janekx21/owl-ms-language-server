@@ -1,0 +1,21 @@
+===================
+Prefix name with non-ASCII letters
+===================
+
+Prefix: größe: <http://example.org/groesse#>
+Ontology: <http://example.org/o>
+Class: größe:Maß
+
+---
+
+(source_file
+  (prefix_declaration
+    (keyword_prefix)
+    (prefix_name)
+    (full_iri))
+  (ontology
+    (keyword_ontology)
+    (ontology_iri (full_iri))
+    (class_frame
+      (keyword_class)
+      (class_iri (abbreviated_iri)))))
