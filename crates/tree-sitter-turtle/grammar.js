@@ -384,8 +384,9 @@ module.exports = grammar({
     ),
 
     // [139s]
-    namespace: $ => seq(
-      optional($.pn_prefix),
+    // PNAME_NS is one token: no white space between the prefix and the colon.
+    namespace: $ => choice(
+      seq($.pn_prefix, token.immediate(':')),
       ':'
     ),
 
