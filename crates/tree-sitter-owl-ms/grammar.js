@@ -21,8 +21,7 @@ module.exports = grammar({
     full_iri: $ => token(seq('<', iri_rfc3987(), '>')),
     abbreviated_iri: $ => $._pname_ln,
     simple_iri: $ => $._pn_local,
-    // PNAME_NS from SPARQL, like the prefix part of abbreviated IRIs (`_pname_ln`).
-    prefix_name: $ => token(pname_ns()),
+    prefix_name: _ => token(pname_ns()),
 
     _datatype: $ =>
       choice(
