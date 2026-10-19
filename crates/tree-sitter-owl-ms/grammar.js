@@ -712,22 +712,11 @@ function pn_prefix() {
   )
 }
 
+// An absolute IRI (RFC 3987): a scheme, then any character except those that IRIREF in Turtle and SPARQL
+// excludes (control characters, space and <>"{}|^`\). This accepts non-ASCII characters (ucschar), IRIs
+// without `//` (`urn:`) and all sub-delims; checking the finer structure of RFC 3987 is left to diagnostics.
 function iri_rfc3987() {
-  return seq(
-    /[A-Za-z][A-Za-z0-9+\-\.]*/,
-    ':',
-    seq(
-      '//',
-      seq(
-        optional(seq(/[A-Za-z0-9_\-\.\~:%]*/, '@')),
-        /[A-Za-z0-9_\-\.\~:%]*/,
-        optional(seq(':', /[0-9]*/)),
-      ),
-      repeat1(seq('/', /[A-Za-z0-9_\-\.\~:%]*/)),
-    ),
-    optional(/\?[A-Za-z0-9_\-\.\~\/\?]*/),
-    optional(/\#[A-Za-z0-9_\-\.\~\/\?]*/),
-  )
+  return seq(/[A-Za-z][A-Za-z0-9+\-\.]*/, ':', /[^\x00-\x20<>"{}|^`\\]*/)
 }
 
 function _digits() {
