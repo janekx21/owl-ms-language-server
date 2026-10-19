@@ -1033,7 +1033,7 @@
     },
     "language_tag": {
       "type": "PATTERN",
-      "value": "@[a-zA-Z\\-]+"
+      "value": "@[a-zA-Z]+(-[a-zA-Z0-9]+)*"
     },
     "_lexial_value": {
       "type": "SYMBOL",
