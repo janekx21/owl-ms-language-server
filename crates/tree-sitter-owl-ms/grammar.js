@@ -21,7 +21,7 @@ module.exports = grammar({
     full_iri: $ => token(seq('<', iri_rfc3987(), '>')),
     abbreviated_iri: $ => $._pname_ln,
     simple_iri: $ => $._pn_local,
-    prefix_name: $ => /([A-Za-z][A-Za-z0-9_\-\.]*)?:/,
+    prefix_name: _ => token(pname_ns()),
 
     _datatype: $ =>
       choice(
