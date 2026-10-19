@@ -139,8 +139,12 @@ module.exports = grammar({
     // 2.3  Property and Datatype Expressions
     _object_property_expression: $ =>
       choice($.object_property_iri, $._inverse_object_property),
+    // The OWL API (Protégé, ROBOT) writes `inverse(:p)` and reads both forms.
     _inverse_object_property: $ =>
-      seq($.keyword_inverse, $.object_property_iri),
+      seq(
+        $.keyword_inverse,
+        choice($.object_property_iri, seq('(', $.object_property_iri, ')')),
+      ),
 
     _data_property_expression: $ => $.data_property_iri,
 

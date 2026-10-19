@@ -1,0 +1,40 @@
+===================
+Inverse with a parenthesized property (OWL API output)
+===================
+
+Prefix: : <http://example.org/o#>
+Ontology: <http://example.org/o>
+Class: :Vehicle
+    SubClassOf:
+        inverse(:partOf) some :Axle,
+        inverse (:partOf) some :Axle
+
+---
+
+(source_file
+  (prefix_declaration
+    (keyword_prefix)
+    (prefix_name)
+    (full_iri))
+  (ontology
+    (keyword_ontology)
+    (ontology_iri (full_iri))
+    (class_frame
+      (keyword_class)
+      (class_iri (abbreviated_iri))
+      (sub_class_of
+        (keyword_sub_class_of)
+        (description
+          (conjunction
+            (primary
+              (keyword_inverse)
+              (object_property_iri (abbreviated_iri))
+              (keyword_some)
+              (primary (class_iri (abbreviated_iri))))))
+        (description
+          (conjunction
+            (primary
+              (keyword_inverse)
+              (object_property_iri (abbreviated_iri))
+              (keyword_some)
+              (primary (class_iri (abbreviated_iri))))))))))
