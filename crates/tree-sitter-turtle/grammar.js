@@ -122,7 +122,8 @@ module.exports = grammar({
     // [7g] labelOrSubject ::= iri | BlankNode
     _label: $ => seq(optional('GRAPH'), choice($._iri, $._blank_node)),
 
-    comment: _ => token(prec(-1, /#.*/)),
+    // [Turtle 1.1, COMMENT] '#' ([^#xD#xA])*: a carriage return ends a comment too.
+    comment: _ => token(prec(-1, /#[^\r\n]*/)),
 
     // [2]
     // Triple Statement vs Graph Statement:
