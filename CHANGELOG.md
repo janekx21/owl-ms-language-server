@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.4.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.3.0...v1.4.0) (2026-10-21)
+
+
+### Features
+
+* [#219](https://github.com/janekx21/owl-ms-language-server/issues/219) add support for OWL-API style inverse object property ([#225](https://github.com/janekx21/owl-ms-language-server/issues/225)) ([9210020](https://github.com/janekx21/owl-ms-language-server/commit/92100209630c746bd72ba365f39d588a9bf239c9))
+* [#228](https://github.com/janekx21/owl-ms-language-server/issues/228) add rename for ofn files (but only from omn files) ([#231](https://github.com/janekx21/owl-ms-language-server/issues/231)) ([d948f8a](https://github.com/janekx21/owl-ms-language-server/commit/d948f8a3f091866eedcac3edc95f0e6cbf7025ad))
+
+
+### Bug Fixes
+
+* [#213](https://github.com/janekx21/owl-ms-language-server/issues/213) OntoGraph-lite language conflict ([#214](https://github.com/janekx21/owl-ms-language-server/issues/214)) ([f6f3711](https://github.com/janekx21/owl-ms-language-server/commit/f6f37115f858140bf256c4b2b76576d4a0431fe4))
+* [#216](https://github.com/janekx21/owl-ms-language-server/issues/216) non ascii prefix names ([#222](https://github.com/janekx21/owl-ms-language-server/issues/222)) ([#222](https://github.com/janekx21/owl-ms-language-server/issues/222)) ([e23c94c](https://github.com/janekx21/owl-ms-language-server/commit/e23c94c182b514dad3323b15af48827d0dd09738))
+* [#217](https://github.com/janekx21/owl-ms-language-server/issues/217) language tags with digits yield errors ([#223](https://github.com/janekx21/owl-ms-language-server/issues/223)) ([af5df87](https://github.com/janekx21/owl-ms-language-server/commit/af5df878691568c8cd0ac3e1080f2a01b3c57da3))
+* [#218](https://github.com/janekx21/owl-ms-language-server/issues/218) support full iri outside ascii set ([#224](https://github.com/janekx21/owl-ms-language-server/issues/224)) ([844ba20](https://github.com/janekx21/owl-ms-language-server/commit/844ba2094478b4596b6b1e64862a60cf9e5931c5))
+* [#220](https://github.com/janekx21/owl-ms-language-server/issues/220) turtle comment runs past a lone carige return ([#226](https://github.com/janekx21/owl-ms-language-server/issues/226)) ([629031a](https://github.com/janekx21/owl-ms-language-server/commit/629031a97cb92f0918bbf57952443132aa408738))
+* [#221](https://github.com/janekx21/owl-ms-language-server/issues/221) ttl prefix declaration with whitespace ([#227](https://github.com/janekx21/owl-ms-language-server/issues/227)) ([16218f8](https://github.com/janekx21/owl-ms-language-server/commit/16218f83a9c5f6e616d37604f7c3e3a91fa4bde9))
+
 ## [1.3.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.2.0...v1.3.0) (2026-10-12)
 
 
