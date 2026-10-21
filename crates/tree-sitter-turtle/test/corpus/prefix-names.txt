@@ -1,0 +1,49 @@
+=========
+Prefix declaration with white space before the colon
+=========
+
+@prefix ex : <http://example.org/> .
+
+---
+
+(document
+  (directive
+    (prefix_id
+      (ERROR
+        (pn_prefix))
+      (namespace)
+      (iri_reference))))
+
+=========
+Prefixed name with white space before the colon
+=========
+
+@prefix ex: <http://example.org/> .
+ex:A ex:p ex:B .
+
+---
+
+(document
+  (directive
+    (prefix_id
+      (namespace
+        (pn_prefix))
+      (iri_reference)))
+  (triple
+    (subject
+      (prefixed_name
+        (namespace
+          (pn_prefix))
+        (pn_local)))
+    (property_list
+      (property
+        (predicate
+          (prefixed_name
+            (namespace
+              (pn_prefix))
+            (pn_local)))
+        (object_list
+          (prefixed_name
+            (namespace
+              (pn_prefix))
+            (pn_local)))))))

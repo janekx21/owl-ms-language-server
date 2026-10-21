@@ -988,17 +988,21 @@
       ]
     },
     "namespace": {
-      "type": "SEQ",
+      "type": "CHOICE",
       "members": [
         {
-          "type": "CHOICE",
+          "type": "SEQ",
           "members": [
             {
               "type": "SYMBOL",
               "name": "pn_prefix"
             },
             {
-              "type": "BLANK"
+              "type": "IMMEDIATE_TOKEN",
+              "content": {
+                "type": "STRING",
+                "value": ":"
+              }
             }
           ]
         },
