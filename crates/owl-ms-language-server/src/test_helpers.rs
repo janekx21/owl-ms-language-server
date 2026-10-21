@@ -42,6 +42,10 @@ pub enum WorkspaceMember {
         name: String,
         content: String,
     },
+    TtlFile {
+        name: String,
+        content: String,
+    },
     OwxFile {
         name: String,
         content: String,
@@ -96,6 +100,10 @@ fn arrange_workspace_member(member: WorkspaceMember, path: &Path) {
             fs::write(path.join(name), content).unwrap();
         }
         WorkspaceMember::OfnFile { name, content } => {
+            fs::write(path.join(name), content).unwrap();
+        }
+        WorkspaceMember::TtlFile { name, content } => {
+            assert!(name.ends_with(".ttl"));
             fs::write(path.join(name), content).unwrap();
         }
         WorkspaceMember::OwxFile { name, content } => {

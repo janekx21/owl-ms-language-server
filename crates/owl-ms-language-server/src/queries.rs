@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::LazyLock};
 use serde::{Deserialize, Serialize};
 use tree_sitter_c2rust::Query;
 
-use crate::{functional::LANGUAGE_OFN, LANGUAGE_OMN};
+use crate::{functional::LANGUAGE_OFN, turtle::LANGUAGE_TTL, LANGUAGE_OMN};
 
 pub static OMN_NODE_TYPES: LazyLock<HashMap<String, StaticNode>> = LazyLock::new(|| {
     let node_types: Vec<StaticNode> =
@@ -168,6 +168,36 @@ pub static OFN_ALL_QUERIES: LazyLock<OfnAllQueries> = LazyLock::new(|| OfnAllQue
                     (NamedIndividual (IRI)@iri)
                 ]
             )
+        )",
+    )
+    .expect("valid query"),
+});
+
+pub struct TtlAllQueries {
+    pub iri_query_all: Query,
+    pub prefix: Query,
+    pub definition: Query,
+}
+//
+// All queries are in one struct for easy testing. Invalid ones are detected by unit tests.
+pub static TTL_ALL_QUERIES: LazyLock<TtlAllQueries> = LazyLock::new(|| TtlAllQueries {
+    iri_query_all: Query::new(&LANGUAGE_TTL, "[(iri_reference) (prefixed_name)]@iri")
+        .expect("valid query"),
+    prefix: Query::new(
+        &LANGUAGE_TTL,
+        "
+        (prefix_id
+            (namespace)@prefix_name
+            (iri_reference)@iri_reference
+        )",
+    )
+    .expect("valid query"),
+    definition: Query::new(
+        &LANGUAGE_TTL,
+        "
+        (
+            (subject [(iri_reference) (prefixed_name)]@iri_reference)
+            (property_list)
         )",
     )
     .expect("valid query"),
@@ -474,8 +504,14 @@ mod tests {
         let _ = *OMN_ALL_QUERIES;
     }
 
+    #[test]
     fn deref_ofn_all_queries_should_be_valid() {
         let _ = *OFN_ALL_QUERIES;
+    }
+
+    #[test]
+    fn deref_ttl_all_queries_should_be_valid() {
+        let _ = *TTL_ALL_QUERIES;
     }
 
     #[test]
