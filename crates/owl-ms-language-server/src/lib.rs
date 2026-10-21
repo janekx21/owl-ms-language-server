@@ -163,6 +163,7 @@ impl Backend {
                         mini_backend.http_client.clone(),
                     )
                     .await
+                    .inspect_log()
                     .ok()
                 };
 

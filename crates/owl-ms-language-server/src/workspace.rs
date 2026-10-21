@@ -751,6 +751,15 @@ impl Workspace {
                 );
                 Ok(Document::Internal(document.into()))
             }
+            "ttl" => {
+                let document = InternalTtlDocument::new_with_path(
+                    original_url,
+                    -1,
+                    document_text,
+                    path.to_path_buf(),
+                );
+                Ok(Document::Internal(document.into()))
+            }
             "owl" | "owx" => {
                 let document = ExternalDocument::new(document_text, path_url)?;
                 Ok(Document::External(document))
