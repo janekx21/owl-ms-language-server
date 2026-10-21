@@ -38,6 +38,10 @@ pub enum WorkspaceMember {
         name: String,
         content: String,
     },
+    OfnFile {
+        name: String,
+        content: String,
+    },
     OwxFile {
         name: String,
         content: String,
@@ -89,6 +93,9 @@ fn arrange_workspace_member(member: WorkspaceMember, path: &Path) {
             fs::write(path.join("catalog-v001.xml"), content).unwrap();
         }
         WorkspaceMember::OmnFile { name, content } => {
+            fs::write(path.join(name), content).unwrap();
+        }
+        WorkspaceMember::OfnFile { name, content } => {
             fs::write(path.join(name), content).unwrap();
         }
         WorkspaceMember::OwxFile { name, content } => {

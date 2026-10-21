@@ -29,7 +29,9 @@ impl SyncBackend {
         // - A document could be in its own workspace
         // - Then a catalog file is created or modified that would place a document in that workspace
         // - Because of the early return the document can never move to the new workspace
-        let path = url.to_file_path().unwrap(); // TODO
+        let path = url
+            .to_file_path()
+            .unwrap_or_else(|()| panic!("url should be valid file path, but was {url}")); // TODO
         let maybe_index = self.workspaces.iter().position(|workspace| {
             workspace.contains_internal_document(&path)
                 || workspace.catalog_contains_url(url)

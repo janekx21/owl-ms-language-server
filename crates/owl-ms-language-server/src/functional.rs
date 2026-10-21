@@ -14,15 +14,15 @@ use tree_sitter_c2rust::{Language, Parser, Query, QueryCursor, StreamingIterator
 use crate::{
     debugging::timeit,
     error::{Error, Result},
-    iri::Iri,
+    iri::{Iri, ToIri},
     pos::Position,
-    queries::treesitter_highlight_capture_into_semantic_token_type_index,
+    queries::{treesitter_highlight_capture_into_semantic_token_type_index, OFN_ALL_QUERIES},
     range::{Range, RangeBox},
     rope_provider::RopeProvider,
     workspace::{
-        changes_from_lsp, Annotation, Diagnostic, DocumentId, FormattingSettings, FrameInfo,
-        Highlights, HoverResult, IriAtPosition, IriDefinition, IriRenameInfo, KeywordAction,
-        OntologyDocument, ParsedDocument, RenameInfo, Workspace,
+        changes_from_lsp, trim_full_iri_rope_slice, Annotation, Diagnostic, DocumentId,
+        FormattingSettings, FrameInfo, FrameType, Highlights, HoverResult, IriAtPosition,
+        IriDefinition, KeywordAction, OntologyDocument, ParsedDocument, RenameInfo, Workspace,
     },
 };
 
@@ -47,6 +47,8 @@ thread_local! {
 pub struct InternalOfnDocument {
     id: DocumentId,
     parsed_document: ParsedDocument,
+    prefixes: HashMap<String, RangeBox<String>>,
+    definitions: Vec<RangeBox<IriDefinition>>,
     // TODO
     // pub queried_document: QueriedDocument,
     // pub stage2: Stage2Document,
@@ -71,9 +73,10 @@ impl InternalOfnDocument {
             })
         });
 
-        // TODO
         let rope = Rope::from(text);
         let parsed_document = ParsedDocument::new(tree, rope);
+
+        let prefixes = gen_prefixes(&parsed_document);
 
         // let queried_document: QueriedDocument = parsed_document.into_queried();
 
@@ -81,11 +84,14 @@ impl InternalOfnDocument {
 
         // debug!("Stage2Document -> InternalDocument");
 
+        let definitions = gen_definitions(&parsed_document, &prefixes);
+
         Self {
             id,
             parsed_document,
-            // queried_document,
-            // stage2,
+            prefixes,
+            definitions, // queried_document,
+                         // stage2,
         }
     }
 
@@ -115,6 +121,8 @@ impl InternalOfnDocument {
         let InternalOfnDocument {
             id,
             parsed_document,
+            prefixes: _,    // regenreated for now
+            definitions: _, // regenreated for now
         } = self;
 
         let changes = changes_from_lsp(params, encoding, parsed_document.rope());
@@ -168,15 +176,63 @@ impl InternalOfnDocument {
         //     );
         // });
 
+        let prefixes = gen_prefixes(&parsed_document);
+
+        let definitions = gen_definitions(&parsed_document, &prefixes);
+
         let doc = Self {
             id,
             parsed_document,
-            // queried_document,
-            // stage2,
+            prefixes,
+            definitions, // queried_document,
+                         // stage2,
         };
 
         Ok(doc)
     }
+}
+
+fn gen_prefixes(parsed_document: &ParsedDocument) -> HashMap<String, RangeBox<String>> {
+    let mut prefixes = HashMap::new();
+    for ele in parsed_document.query(&OFN_ALL_QUERIES.prefix) {
+        let (prefix_name_c, full_iri_c) = ele
+            .captures
+            .into_iter()
+            .next_tuple()
+            .expect("should match query");
+
+        let mut name = prefix_name_c.node.text.to_string();
+        if name.ends_with(':') {
+            name.pop();
+        }
+
+        let iri = trim_full_iri_rope_slice(full_iri_c.node.text).to_string();
+        // TODO range is zero!
+        prefixes.insert(name, RangeBox::new(iri, Range::ZERO));
+    }
+    prefixes
+}
+
+fn gen_definitions(
+    parsed_document: &ParsedDocument,
+    prefixes: &HashMap<String, RangeBox<String>>,
+) -> Vec<RangeBox<IriDefinition>> {
+    parsed_document
+        .query(&OFN_ALL_QUERIES.definition)
+        .into_iter()
+        .map(|m| {
+            let iri_c = m.captures.iter().next().expect("should be one");
+            let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
+            let iri = iri.try_to_full(&prefixes).unwrap_or(iri);
+            RangeBox::new(
+                IriDefinition {
+                    iri,
+                    kind: FrameType::parse(iri_c.node.parent_kind.expect("iri should have parent")),
+                },
+                iri_c.node.range,
+            )
+        })
+        .collect()
 }
 
 impl PartialEq for InternalOfnDocument {
@@ -225,7 +281,7 @@ impl OntologyDocument for InternalOfnDocument {
     }
 
     fn definitions(&self) -> Vec<&RangeBox<IriDefinition>> {
-        vec![] // TODO
+        self.definitions.iter().collect()
     }
 
     fn references(&self) -> Vec<&RangeBox<Iri>> {
@@ -258,14 +314,20 @@ impl OntologyDocument for InternalOfnDocument {
     #[doc = " Taking a (relative) abbreviated or simple IRI and resolving the (absolute) full IRI."]
     #[doc = " The reverse of [`full_iri_to_abbreviated_iri`]."]
     fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<Iri> {
-        None // TODO
+        iri.try_to_full(&self.prefixes)
     }
 
     #[doc = " Taking a (absolute) full IRI and by prefixing it making it shorter into a (relative)"]
     #[doc = " abbriviated or simple IRI."]
     #[doc = " The reverse of [`abbreviated_iri_to_full_iri`]."]
     fn full_iri_to_abbreviated_iri(&self, full_iri: &Iri) -> Option<String> {
-        None // TODO
+        full_iri.try_to_abbriviated(&self.prefixes).map(|s| {
+            if s.contains(':') {
+                s
+            } else {
+                format!(":{s}") // We have to prefix!
+            }
+        })
     }
 
     #[doc = " Prefix map with key prefix and value prefix target"]
@@ -278,31 +340,48 @@ impl OntologyDocument for InternalOfnDocument {
         self.parsed_document.tree().root_node().range().into()
     }
 
-    #[doc = " Takes a positon and returns an IRI and a range when one is found at that position."]
-    #[doc = " It does not include the \'<\' \'>\' chars of a full iri."]
     fn iri_at(&self, pos: Position) -> Option<RangeBox<IriAtPosition>> {
         None // TODO
     }
 
-    #[doc = " The range of an IRI that can be renamed. Does not include \'<\' \'>\' or prefixes."]
-    #[doc = " So it should trigger like this:"]
-    #[doc = " ```txt"]
-    #[doc = " foo:bar    --->    \"bar\""]
-    #[doc = "   ^"]
-    #[doc = "  Cursor"]
-    #[doc = " ```"]
     fn rename_range(&self, pos: Position) -> Option<Range> {
         None // TODO
     }
 
-    #[doc = " Generate informations for renaming"]
     fn rename_info_at(&self, pos: Position, new_name: &str) -> Result<Option<RenameInfo>> {
         Ok(None) // TODO
     }
 
-    #[doc = " Takes a [`RenameInfo`] and returns the edits that will get performed by the rename"]
     fn rename_edits(&self, rename_info: &RenameInfo) -> Vec<RangeBox<String>> {
-        vec![] // TODO
+        match rename_info {
+            RenameInfo::Iri(iri_rename_info) => {
+                self.parsed_document
+                    .query(&OFN_ALL_QUERIES.iri_query_all)
+                    .into_iter()
+                    .filter_map(|ele| {
+                        let iri_c = ele.captures.iter().next().expect("should match once"); // TODO trim and to full iri
+
+                        let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
+                        let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
+
+                        // iri.node.range
+
+                        if iri == iri_rename_info.full_iri {
+                            let value = iri_rename_info
+                                .new_iri
+                                .as_ref()
+                                .and_then(|i| self.full_iri_to_abbreviated_iri(i))
+                                .unwrap_or(iri_rename_info.original.clone());
+
+                            Some(RangeBox::new(value, iri_c.node.range))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            }
+            RenameInfo::Prefix(_, _) => vec![], // TODO
+        }
     }
 
     #[doc = " Get actions for creating keywords at a position"]

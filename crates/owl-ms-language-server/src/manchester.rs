@@ -1,6 +1,5 @@
 use crate::consts::{
-    child_keywords_for_kind, keyword_hover_info, DECIMAL_IRI, FLOAT_IRI, INTEGER_IRI, LABEL_IRI,
-    STRING_IRI,
+    child_keywords_for_kind, keyword_hover_info, DECIMAL_IRI, FLOAT_IRI, INTEGER_IRI, STRING_IRI,
 };
 use crate::error::{Error, Result, ResultIterator};
 use crate::iri::{Iri, ToIri};
@@ -16,12 +15,12 @@ use crate::workspace::{
     OntologyId, ParsedDocument, RenameInfo, UnwrappedQueryMatch, Workspace,
 };
 use crate::{
-    debugging::timeit, queries::ALL_QUERIES, range::Range, rope_provider::RopeProvider,
+    debugging::timeit, queries::OMN_ALL_QUERIES, range::Range, rope_provider::RopeProvider,
     LANGUAGE_OMN,
 };
 use crate::{split_iri, USizeextra};
 use itertools::Itertools;
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, info, trace};
 use pretty::RcDoc;
 use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
@@ -158,19 +157,7 @@ impl OntologyDocument for InternalOmnDocument {
     }
 
     fn full_iri_to_abbreviated_iri(&self, full_iri: &Iri) -> Option<String> {
-        self.queried_document
-            .prefixes
-            .iter()
-            .map(|(k, v)| (k.clone(), v.value().clone()))
-            .filter_map(
-                |(prefix, url)| match full_iri.as_str().split_once(url.as_str()) {
-                    Some(("", post)) if prefix.is_empty() => Some(post.to_string()),
-                    Some(("", post)) => Some(prefix + ":" + post),
-                    Some(_) | None => None,
-                },
-            )
-            .sorted_by_key(String::len)
-            .next()
+        full_iri.try_to_abbriviated(&self.queried_document.prefixes)
     }
 
     fn prefixes(&self) -> HashMap<String, String> {
@@ -403,7 +390,7 @@ impl OntologyDocument for InternalOmnDocument {
                 } = rename_info;
 
                 self.parsed_document
-                    .query(&ALL_QUERIES.iri_query_all)
+                    .query(&OMN_ALL_QUERIES.iri_query_all)
                     .into_iter()
                     .map(|m| {
                         let (iri, range, node_frame_type) = match &m.captures[..] {
@@ -505,7 +492,7 @@ impl OntologyDocument for InternalOmnDocument {
     }
 
     fn all_iris_in_range(&self, range: Range) -> Vec<RangeBox<Iri>> {
-        self.query_range(&ALL_QUERIES.iri_query_all, range)
+        self.query_range(&OMN_ALL_QUERIES.iri_query_all, range)
             .into_iter()
             .flat_map(|match_| match_.captures)
             .map(|capture| {
@@ -586,7 +573,7 @@ impl OntologyDocument for InternalOmnDocument {
 
         lei.iter_names()
             .inspect(|n| debug!("- LEI name: {n}"))
-            .filter_map(|kind| (*queries::KEYWORDS_MAP).get(kind).cloned())
+            .filter_map(|kind| (*queries::OMN_KEYWORDS_MAP).get(kind).cloned())
             .filter(|kw| kw.starts_with(&partial))
             .collect_vec()
     }
@@ -905,22 +892,7 @@ impl QueriedDocument {
     }
 
     pub fn abbreviated_iri_to_full_iri(&self, abbreviated_iri: &Iri) -> Option<Iri> {
-        let prefixes = &self.prefixes;
-        if let Some((prefix, simple_iri)) = abbreviated_iri.as_str().split_once(':') {
-            prefixes.get(prefix).map(|resolved_prefix| {
-                [resolved_prefix.value().as_str(), simple_iri]
-                    .join("")
-                    .to_iri()
-            })
-        } else {
-            // Simple IRIs get a free colon prepended
-            // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
-            prefixes.get("").map(|resolved_prefix| {
-                [resolved_prefix.value().as_str(), abbreviated_iri.as_str()]
-                    .join("")
-                    .to_iri()
-            })
-        }
+        abbreviated_iri.try_to_full(&self.prefixes)
     }
 
     // TODO this is still slow (50ms on oeo-full)
@@ -982,27 +954,27 @@ impl QueriedDocument {
         range: Range,
     ) -> Vec<RangeBox<Annotation>> {
         parsed_document
-            .query_range(&ALL_QUERIES.annotation_query, range)
+            .query_range(&OMN_ALL_QUERIES.annotation_query, range)
             .iter()
             .map(|m| {
                 let frame_iri_capture =
-                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "frame_iri")
+                    capture_by_name(&OMN_ALL_QUERIES.annotation_query, &m.captures, "frame_iri")
                         .expect("frame capture");
                 let annotation_iri_capture =
-                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "iri")
+                    capture_by_name(&OMN_ALL_QUERIES.annotation_query, &m.captures, "iri")
                         .expect("iri capture");
                 let value_capture =
-                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "literal")
+                    capture_by_name(&OMN_ALL_QUERIES.annotation_query, &m.captures, "literal")
                         .expect("value capture");
                 let frame_capture =
-                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "frame")
+                    capture_by_name(&OMN_ALL_QUERIES.annotation_query, &m.captures, "frame")
                         .expect("frame_capture");
 
                 let datatype_capture =
-                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "datatype");
+                    capture_by_name(&OMN_ALL_QUERIES.annotation_query, &m.captures, "datatype");
 
                 let language_capture =
-                    capture_by_name(&ALL_QUERIES.annotation_query, &m.captures, "language");
+                    capture_by_name(&OMN_ALL_QUERIES.annotation_query, &m.captures, "language");
 
                 let frame_iri = trim_full_iri_rope_slice(frame_iri_capture.node.text).to_iri();
                 let frame_iri = self
@@ -1067,7 +1039,7 @@ impl QueriedDocument {
         range: Range,
     ) -> Vec<RangeBox<IriDefinition>> {
         parsed_document
-            .query_range(&ALL_QUERIES.frame_query, range)
+            .query_range(&OMN_ALL_QUERIES.frame_query, range)
             .iter()
             .map(|m| match &m.captures[..] {
                 [frame_iri_capture, frame_capture] => {
@@ -1105,7 +1077,7 @@ impl QueriedDocument {
         range: Range,
     ) -> Vec<RangeBox<Iri>> {
         parsed_document
-            .query_range(&ALL_QUERIES.iri_query_references, range)
+            .query_range(&OMN_ALL_QUERIES.iri_query_references, range)
             .iter()
             .map(|m| match &m.captures[..] {
                 [iri_capture] => {

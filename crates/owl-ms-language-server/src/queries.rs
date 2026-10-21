@@ -3,9 +3,9 @@ use std::{collections::HashMap, sync::LazyLock};
 use serde::{Deserialize, Serialize};
 use tree_sitter_c2rust::Query;
 
-use crate::LANGUAGE_OMN;
+use crate::{functional::LANGUAGE_OFN, LANGUAGE_OMN};
 
-pub static NODE_TYPES: LazyLock<HashMap<String, StaticNode>> = LazyLock::new(|| {
+pub static OMN_NODE_TYPES: LazyLock<HashMap<String, StaticNode>> = LazyLock::new(|| {
     let node_types: Vec<StaticNode> =
         serde_json::from_str(tree_sitter_owl_ms::NODE_TYPES).expect("valid node types");
 
@@ -33,14 +33,14 @@ pub struct StaticNodeChildren {
     pub types: Vec<StaticNode>,
 }
 
-pub static GRAMMAR: LazyLock<Grammar> = LazyLock::new(|| {
+pub static OMN_GRAMMAR: LazyLock<Grammar> = LazyLock::new(|| {
     serde_json::from_str(tree_sitter_owl_ms::GRAMMAR).expect("valid grammar json")
 });
 
 /// Maps keyword rule names to keyword texts
 /// Example: "keyword functional" => "Functional:"
-pub static KEYWORDS_MAP: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
-    GRAMMAR
+pub static OMN_KEYWORDS_MAP: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+    OMN_GRAMMAR
         .rules
         .iter()
         .filter_map(|item| match item {
@@ -52,7 +52,7 @@ pub static KEYWORDS_MAP: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
         .collect()
 });
 
-pub struct AllQueries {
+pub struct OmnAllQueries {
     pub import_query: Query,
     pub iri_query_all: Query,
     pub iri_query_references: Query,
@@ -63,7 +63,7 @@ pub struct AllQueries {
 }
 
 // All queries are in one struct for easy testing. Invalid ones are detected by unit tests.
-pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
+pub static OMN_ALL_QUERIES: LazyLock<OmnAllQueries> = LazyLock::new(|| OmnAllQueries {
     import_query: Query::new(&LANGUAGE_OMN, "(import (iri)@iri)").expect("valid query"),
     iri_query_all: Query::new(&LANGUAGE_OMN, "(iri)@iri").expect("valid query"),
     // Just IRIs that are references to frames
@@ -132,6 +132,43 @@ pub static ALL_QUERIES: LazyLock<AllQueries> = LazyLock::new(|| AllQueries {
         "
             (ontology iri: (_)@iri version_iri: (_)@version_iri ? )
         ",
+    )
+    .expect("valid query"),
+});
+
+pub struct OfnAllQueries {
+    pub iri_query_all: Query,
+    pub prefix: Query,
+    pub definition: Query,
+}
+
+// All queries are in one struct for easy testing. Invalid ones are detected by unit tests.
+pub static OFN_ALL_QUERIES: LazyLock<OfnAllQueries> = LazyLock::new(|| OfnAllQueries {
+    iri_query_all: Query::new(&LANGUAGE_OFN, "(IRI)@iri").expect("valid query"),
+    prefix: Query::new(
+        &LANGUAGE_OFN,
+        "
+        (prefixDeclaration
+            (prefixName)@prefix_name
+            (fullIRI)@full_iri
+        )",
+    )
+    .expect("valid query"),
+    definition: Query::new(
+        &LANGUAGE_OFN,
+        "
+        (Declaration
+            (Entity
+                [
+                    (Class (IRI)@iri)
+                    (Datatype (IRI)@iri)
+                    (ObjectProperty (IRI)@iri)
+                    (DataProperty (IRI)@iri)
+                    (AnnotationProperty (IRI)@iri)
+                    (NamedIndividual (IRI)@iri)
+                ]
+            )
+        )",
     )
     .expect("valid query"),
 });
@@ -432,6 +469,16 @@ mod tests {
     use tree_sitter_c2rust::{QueryCursor, StreamingIterator};
 
     #[test]
+    /// This test should initilize all queries and therefore check if they are valid
+    fn deref_omn_all_queries_should_be_valid() {
+        let _ = *OMN_ALL_QUERIES;
+    }
+
+    fn deref_ofn_all_queries_should_be_valid() {
+        let _ = *OFN_ALL_QUERIES;
+    }
+
+    #[test]
     fn query_frame_query() {
         // Arrange
         let text = r#"
@@ -449,7 +496,7 @@ mod tests {
         let mut query_cursor = QueryCursor::new();
 
         // Act
-        let q = &ALL_QUERIES.frame_query;
+        let q = &OMN_ALL_QUERIES.frame_query;
         let matches = query_cursor.matches(q, tree.root_node(), text.as_bytes());
 
         // Assert
@@ -468,7 +515,7 @@ mod tests {
         let mut query_cursor = QueryCursor::new();
 
         // Act
-        let q = &ALL_QUERIES.ontology;
+        let q = &OMN_ALL_QUERIES.ontology;
         let matches = query_cursor.matches(q, tree.root_node(), text.as_bytes());
 
         // Assert
@@ -535,7 +582,7 @@ mod tests {
 
     #[test]
     fn keywords_clone_should_return_all_keywords() {
-        let kws = KEYWORDS_MAP.clone();
+        let kws = OMN_KEYWORDS_MAP.clone();
 
         assert!(!kws.is_empty());
     }

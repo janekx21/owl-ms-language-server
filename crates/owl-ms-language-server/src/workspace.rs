@@ -6,12 +6,12 @@ use crate::iri::Iri;
 use crate::iri::ToIri;
 use crate::manchester::InternalOmnDocument;
 use crate::pos::Position;
-use crate::queries::NODE_TYPES;
+use crate::queries::OMN_NODE_TYPES;
 use crate::range::{Change, RangeBox};
 use crate::turtle::InternalTtlDocument;
 use crate::web::{url_to_filename, HttpClient};
 use crate::{
-    catalog::Catalog, debugging::timeit, queries::ALL_QUERIES, range::Range,
+    catalog::Catalog, debugging::timeit, queries::OMN_ALL_QUERIES, range::Range,
     rope_provider::RopeProvider, LANGUAGE_OMN,
 };
 use cached::{cached, Cached};
@@ -1244,7 +1244,7 @@ impl ParsedDocument {
                 let parent_chain_children = parent_chain
                     .iter()
                     .flat_map(|kind| {
-                        NODE_TYPES
+                        OMN_NODE_TYPES
                             .get(&(*kind).to_string())
                             .iter()
                             .flat_map(|t| {
@@ -1450,7 +1450,7 @@ impl ParsedDocument {
 
     /// Returns the ontology IRI if possible and the version IRI if possible.
     pub fn ontology_id(&self) -> Option<RangeBox<OntologyId>> {
-        match &self.query(&ALL_QUERIES.ontology)[..] {
+        match &self.query(&OMN_ALL_QUERIES.ontology)[..] {
             [] => None,
             [ontology] => match &ontology.captures[..] {
                 [] => None,
@@ -1489,7 +1489,7 @@ impl ParsedDocument {
     /// Prefix: owl: <http://www.w3.org/2002/07/owl#>
     /// ```
     pub fn prefixes(&self) -> HashMap<String, RangeBox<String>> {
-        self.query(&ALL_QUERIES.prefix)
+        self.query(&OMN_ALL_QUERIES.prefix)
             .into_iter()
             .map(|m| match &m.captures[..] {
                 [name_capture, iri_capture] => (
@@ -1517,7 +1517,7 @@ impl ParsedDocument {
     }
 
     pub fn prefixes_in_range(&self, range: Range) -> HashMap<String, RangeBox<String>> {
-        self.query_range(&ALL_QUERIES.prefix, range)
+        self.query_range(&OMN_ALL_QUERIES.prefix, range)
             .into_iter()
             .map(|m| match &m.captures[..] {
                 [name_capture, iri_capture] => (
@@ -1539,7 +1539,7 @@ impl ParsedDocument {
     }
 
     pub fn prefix_parts_in_range(&self, range: Range) -> Option<(Range, Range)> {
-        self.query_range(&ALL_QUERIES.prefix, range)
+        self.query_range(&OMN_ALL_QUERIES.prefix, range)
             .into_iter()
             .map(|m| match &m.captures[..] {
                 [name_capture, iri_capture] => (name_capture.node.range, iri_capture.node.range),
@@ -1549,7 +1549,7 @@ impl ParsedDocument {
     }
 
     pub fn imports(&self) -> Vec<RangeBox<Iri>> {
-        self.query(&ALL_QUERIES.import_query)
+        self.query(&OMN_ALL_QUERIES.import_query)
             .iter()
             .filter_map(|m| match &m.captures[..] {
                 [iri_capture] => {
@@ -1563,7 +1563,7 @@ impl ParsedDocument {
     }
 
     pub fn imports_in_range(&self, range: Range) -> Vec<RangeBox<Iri>> {
-        self.query_range(&ALL_QUERIES.import_query, range)
+        self.query_range(&OMN_ALL_QUERIES.import_query, range)
             .iter()
             .filter_map(|m| match &m.captures[..] {
                 [iri_capture] => {
@@ -2416,14 +2416,18 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
         .collect();
 
     debug!(
-        "semantic_errors / doc {:?} uses {uses:#?} defines {defines:#?}",
+        "semantic_errors / doc {:?} uses {uses:?} defines {defines:?}",
         doc.uri()
     );
 
     let imports_recursive = timeit("semantic errors  reachable", || {
         reachable_docs_recursive(doc, workspace, false)
     });
-    debug!("Imports recursive {} {:#?}", doc.uri(), imports_recursive);
+    debug!(
+        "Document {} imports recursive [{}]",
+        doc.uri(),
+        imports_recursive.iter().join(", ")
+    );
 
     for url in imports_recursive {
         if let Some(doc) = workspace.document_by_url(&url) {
@@ -2538,15 +2542,18 @@ pub enum FrameType {
 impl FrameType {
     pub fn parse(kind: &str) -> FrameType {
         match kind {
-            "datatype_iri" | "datatype_frame" => FrameType::DataType,
+            "datatype_iri" | "datatype_frame" | "Datatype" => FrameType::DataType,
             "annotation_property_iri"
             | "annotation_property_frame"
-            | "annotation_property_iri_annotated_list" => FrameType::AnnotationProperty,
-            "individual_iri" | "individual_frame" => FrameType::Individual,
+            | "annotation_property_iri_annotated_list"
+            | "AnnotationProperty" => FrameType::AnnotationProperty,
+            "individual_iri" | "individual_frame" | "NamedIndividual" => FrameType::Individual,
             "ontology_iri" | "ontology_frame" | "version_iri" => FrameType::Ontology,
-            "data_property_iri" | "data_property_frame" => FrameType::DataProperty,
-            "object_property_iri" | "object_property_frame" => FrameType::ObjectProperty,
-            "class_frame" | "class_iri" => FrameType::Class,
+            "data_property_iri" | "data_property_frame" | "DataProperty" => FrameType::DataProperty,
+            "object_property_iri" | "object_property_frame" | "ObjectProperty" => {
+                FrameType::ObjectProperty
+            }
+            "class_frame" | "class_iri" | "Class" => FrameType::Class,
             kind => {
                 error!("FrameType parse failed: Implement frame type for {kind}");
                 FrameType::Invalid
