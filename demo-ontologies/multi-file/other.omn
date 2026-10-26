@@ -1,4 +1,5 @@
 Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: : <http://a.b/multi-file#>
 
 Ontology: <http://a.b/multi-file/other>
 
