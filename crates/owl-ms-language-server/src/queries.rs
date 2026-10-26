@@ -140,6 +140,7 @@ pub struct OfnAllQueries {
     pub iri_query_all: Query,
     pub prefix: Query,
     pub definition: Query,
+    pub import: Query,
 }
 
 // All queries are in one struct for easy testing. Invalid ones are detected by unit tests.
@@ -171,6 +172,7 @@ pub static OFN_ALL_QUERIES: LazyLock<OfnAllQueries> = LazyLock::new(|| OfnAllQue
         )",
     )
     .expect("valid query"),
+    import: Query::new(&LANGUAGE_OFN, "(Import (IRI)@iri)").expect("valid query"),
 });
 
 pub struct TtlAllQueries {
