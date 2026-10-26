@@ -223,7 +223,7 @@ fn gen_definitions(
         .map(|m| {
             let iri_c = m.captures.iter().next().expect("should be one");
             let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
-            let iri = iri.try_to_full(&prefixes).unwrap_or(iri);
+            let iri = iri.try_to_full(prefixes).unwrap_or(iri);
             RangeBox::new(
                 IriDefinition {
                     iri,
