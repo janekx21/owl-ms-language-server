@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.4.0...v1.5.0) (2026-10-26)
+
+
+### Features
+
+* [#229](https://github.com/janekx21/owl-ms-language-server/issues/229) add rename for ttl files omn -&gt; ttl ([#233](https://github.com/janekx21/owl-ms-language-server/issues/233)) ([ffc79bc](https://github.com/janekx21/owl-ms-language-server/commit/ffc79bc90c3be697dc5dab2a7a406e8dfd077eb9))
+* [#230](https://github.com/janekx21/owl-ms-language-server/issues/230) handle deep imports (parent [#207](https://github.com/janekx21/owl-ms-language-server/issues/207)) ([#238](https://github.com/janekx21/owl-ms-language-server/issues/238)) ([5206c84](https://github.com/janekx21/owl-ms-language-server/commit/5206c8461618c076a3cc21b30fc86c2002cc634d))
+
 ## [1.4.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.3.0...v1.4.0) (2026-10-21)
 
 
