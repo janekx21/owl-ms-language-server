@@ -3361,7 +3361,9 @@ async fn backend_rename_should_work_for_functinal() {
         vec![
             WorkspaceMember::CatalogFile(
                 Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap())
-                    .with_uri("http://example/func", "func.ofn"),
+                    .with_uri("http://example/func", "func.ofn")
+                    .with_uri("http://example/func-2", "func-2.ofn")
+                    .with_uri("http://example/turtle", "turtle.ttl"),
             ),
             WorkspaceMember::OfnFile {
                 name: "func.ofn".into(),
@@ -3372,9 +3374,40 @@ async fn backend_rename_should_work_for_functinal() {
                     Ontology(<http://example/onto>
                     <http://example/onto>
 
+                    Import(<http://example/func-2>)
                     Declaration(Class(:class-in-func))
 
                     )
+                "#}
+                .into(),
+            },
+            WorkspaceMember::OfnFile {
+                name: "func-2.ofn".into(),
+                content: indoc! {r#"
+                    Prefix(:=<http://example/onto#>)
+
+
+                    Ontology(<http://example/onto>
+                    <http://example/onto>
+
+                    Import(<http://example/turtle>)
+                    Declaration(Class(:class-in-func))
+
+                    )
+                "#}
+                .into(),
+            },
+            WorkspaceMember::TtlFile {
+                name: "turtle.ttl".into(),
+                content: indoc! {r#"
+                    @prefix : <http://example/onto#> .
+                    @base <http://example/onto> .
+
+                    <http://example/onto> rdf:type owl:Ontology ;
+                        owl:versionIRI <http://example/onto> .
+
+                    :class-in-turtle rdf:type owl:Class ;
+                                     rdfs:subClassOf :class-in-func .
                 "#}
                 .into(),
             },
@@ -3459,6 +3492,8 @@ async fn backend_rename_should_work_for_functinal() {
     let workspaces = sync.workspaces();
     let workspace = workspaces.iter().exactly_one().unwrap();
     info!("{:#?}", workspace.internal_documents());
+
+    // func
     let doc_func = workspace
         .get_internal_document(&tmp_dir.path().join("func.ofn"))
         .unwrap();
@@ -3473,9 +3508,52 @@ async fn backend_rename_should_work_for_functinal() {
             Ontology(<http://example/onto>
             <http://example/onto>
 
+            Import(<http://example/func-2>)
             Declaration(Class(:class-in-func-2))
 
             )
+        "}
+    );
+
+    // func-2
+    let doc_func_2 = workspace
+        .get_internal_document(&tmp_dir.path().join("func-2.ofn"))
+        .unwrap();
+    let doc_func_2_content = doc_func_2.rope().to_string();
+
+    assert_eq!(
+        doc_func_2_content,
+        indoc! {"
+            Prefix(:=<http://example/onto#>)
+
+
+            Ontology(<http://example/onto>
+            <http://example/onto>
+
+            Import(<http://example/turtle>)
+            Declaration(Class(:class-in-func-2))
+
+            )
+        "}
+    );
+
+    // turtle
+    let doc_turtle = workspace
+        .get_internal_document(&tmp_dir.path().join("turtle.ttl"))
+        .unwrap();
+    let doc_turtle_content = doc_turtle.rope().to_string();
+
+    assert_eq!(
+        doc_turtle_content,
+        indoc! {"
+            @prefix : <http://example/onto#> .
+            @base <http://example/onto> .
+
+            <http://example/onto> rdf:type owl:Ontology ;
+                owl:versionIRI <http://example/onto> .
+
+            :class-in-turtle rdf:type owl:Class ;
+                             rdfs:subClassOf :class-in-func-2 .
         "}
     );
 }

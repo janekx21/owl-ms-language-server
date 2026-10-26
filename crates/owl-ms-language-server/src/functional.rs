@@ -49,9 +49,7 @@ pub struct InternalOfnDocument {
     parsed_document: ParsedDocument,
     prefixes: HashMap<String, RangeBox<String>>,
     definitions: Vec<RangeBox<IriDefinition>>,
-    // TODO
-    // pub queried_document: QueriedDocument,
-    // pub stage2: Stage2Document,
+    imports: Vec<Url>,
 }
 
 impl InternalOfnDocument {
@@ -77,21 +75,15 @@ impl InternalOfnDocument {
         let parsed_document = ParsedDocument::new(tree, rope);
 
         let prefixes = gen_prefixes(&parsed_document);
-
-        // let queried_document: QueriedDocument = parsed_document.into_queried();
-
-        // let stage2: Stage2Document = queried_document.analyze(&parsed_document, &id);
-
-        // debug!("Stage2Document -> InternalDocument");
-
         let definitions = gen_definitions(&parsed_document, &prefixes);
+        let imports = gen_imports(&parsed_document);
 
         Self {
             id,
             parsed_document,
             prefixes,
-            definitions, // queried_document,
-                         // stage2,
+            definitions,
+            imports,
         }
     }
 
@@ -123,6 +115,7 @@ impl InternalOfnDocument {
             parsed_document,
             prefixes: _,    // regenreated for now
             definitions: _, // regenreated for now
+            imports: _,
         } = self;
 
         let changes = changes_from_lsp(params, encoding, parsed_document.rope());
@@ -132,7 +125,7 @@ impl InternalOfnDocument {
             debug!("Updating changed range (pre edit) {change:?}");
         }
 
-        let (parsed_document, old_tree) = OFN_PARSER.with(|parser| {
+        let (parsed_document, _old_tree) = OFN_PARSER.with(|parser| {
             parsed_document.edit_parsed_document(changes.iter(), &mut parser.borrow_mut())
         })?;
 
@@ -142,50 +135,16 @@ impl InternalOfnDocument {
             ..id
         };
 
-        // This is a combination of syntax and text changes
-        // let mut post_change_ranges: &[Range] =
-        //     &post_change_ranges(&changes, &parsed_document, &old_tree);
-
-        // debug!("Post change ranges: {post_change_ranges:#?}");
-
-        // let dirty_prefix = timeit("document.edit / queries", || {
-        //     queried_document.update(&changes, post_change_ranges, &parsed_document)
-        // });
-
-        // // The problem is that the references and definitions (and other stuff) depends on
-        // // prefixes. So the change in a prefix can change a lot of references that are not
-        // // located at the prefix.
-        // // Solution 1: Remove the dependency and move the resolution of abbriv iri -> full iri
-        // // into a later step.
-        // // Solution 2: Mark all references dirty when ever a prefix changes, which is not often.
-        // // ==========
-        // // I Chose Solution 2
-        // // Do a whole new analysis when the prefixes change!
-        // if dirty_prefix {
-        //     info!("document.edit Dirty prefix. New post change range is the max range.");
-        //     post_change_ranges = &[Range::FULL_RANGE];
-        // }
-
-        // timeit("document.edit / analyze", || {
-        //     stage2.update(
-        //         &changes,
-        //         post_change_ranges,
-        //         &parsed_document,
-        //         &queried_document,
-        //         &id,
-        //     );
-        // });
-
         let prefixes = gen_prefixes(&parsed_document);
-
         let definitions = gen_definitions(&parsed_document, &prefixes);
+        let imports = gen_imports(&parsed_document);
 
         let doc = Self {
             id,
             parsed_document,
             prefixes,
-            definitions, // queried_document,
-                         // stage2,
+            definitions,
+            imports,
         };
 
         Ok(doc)
@@ -221,7 +180,7 @@ fn gen_definitions(
         .query(&OFN_ALL_QUERIES.definition)
         .into_iter()
         .map(|m| {
-            let iri_c = m.captures.iter().next().expect("should be one");
+            let iri_c = m.captures.first().expect("should be one");
             let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
             let iri = iri.try_to_full(prefixes).unwrap_or(iri);
             RangeBox::new(
@@ -235,6 +194,18 @@ fn gen_definitions(
         .collect()
 }
 
+fn gen_imports(parsed_document: &ParsedDocument) -> Vec<Url> {
+    parsed_document
+        .query(&OFN_ALL_QUERIES.import)
+        .into_iter()
+        .filter_map(|m| {
+            let iri_c = m.captures.iter().exactly_one().expect("should be one");
+            let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
+            iri.to_string().parse().ok()
+        })
+        .collect()
+}
+
 impl PartialEq for InternalOfnDocument {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -244,22 +215,17 @@ impl PartialEq for InternalOfnDocument {
 impl Eq for InternalOfnDocument {}
 
 impl OntologyDocument for InternalOfnDocument {
-    #[doc = " The file path of this text file"]
     fn path(&self) -> &Path {
         self.id.path.as_path()
     }
 
-    #[doc = " The file url of this text file"]
     fn uri(&self) -> &Url {
         &self.id.uri
     }
 
-    #[doc = " LSP version. Gets incremented when editing. Not to be confused with the ontology version."]
     fn version(&self) -> i32 {
         self.id.version
     }
-
-    #[doc = " Text content stored as a rope"]
     fn rope(&self) -> &Rope {
         self.parsed_document.rope()
     }
@@ -288,38 +254,26 @@ impl OntologyDocument for InternalOfnDocument {
         vec![] // TODO
     }
 
-    #[doc = " OWL ontolgies that are imported by this ontology."]
-    #[doc = " There are also indirect imports, but they need to be resolved in the workspace,"]
-    #[doc = " because a single document has no context of the workspace."]
     fn directly_imports(&self) -> Vec<&Url> {
-        vec![] // TODO
+        self.imports.iter().collect()
     }
 
-    #[doc = " This includes prefixes, references and imports"]
     fn directly_references_doc(&self) -> Vec<&Url> {
-        vec![] // TODO
+        self.imports.iter().collect()
     }
 
-    #[doc = " Errors/Diagnostics that are created by this document alone. This"]
-    #[doc = " includes e.g. syntax errors."]
     fn local_diagnostics(&self) -> &[Diagnostic] {
         &[] // TODO
     }
 
-    #[doc = " Map of IRIs and where to find them"]
     fn iri_locations(&self) -> HashMap<&Iri, &Vec<RangeBox<()>>> {
         HashMap::new() // TODO
     }
 
-    #[doc = " Taking a (relative) abbreviated or simple IRI and resolving the (absolute) full IRI."]
-    #[doc = " The reverse of [`full_iri_to_abbreviated_iri`]."]
     fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<Iri> {
         iri.try_to_full(&self.prefixes)
     }
 
-    #[doc = " Taking a (absolute) full IRI and by prefixing it making it shorter into a (relative)"]
-    #[doc = " abbriviated or simple IRI."]
-    #[doc = " The reverse of [`abbreviated_iri_to_full_iri`]."]
     fn full_iri_to_abbreviated_iri(&self, full_iri: &Iri) -> Option<String> {
         full_iri.try_to_abbriviated(&self.prefixes).map(|s| {
             if s.contains(':') {
@@ -330,12 +284,10 @@ impl OntologyDocument for InternalOfnDocument {
         })
     }
 
-    #[doc = " Prefix map with key prefix and value prefix target"]
     fn prefixes(&self) -> HashMap<String, String> {
         HashMap::new()
     }
 
-    #[doc = " The range of the document content."]
     fn range(&self) -> Range {
         self.parsed_document.tree().root_node().range().into()
     }
@@ -384,27 +336,22 @@ impl OntologyDocument for InternalOfnDocument {
         }
     }
 
-    #[doc = " Get actions for creating keywords at a position"]
     fn keyword_actions_at(&self, pos: Position) -> Vec<KeywordAction> {
         vec![] // TODO
     }
 
-    #[doc = " Get all iris that are in a range"]
     fn all_iris_in_range(&self, range: Range) -> Vec<RangeBox<Iri>> {
         vec![] // TODO
     }
 
-    #[doc = " A formatted version of the document"]
     fn formatted(&self, options: &FormattingSettings) -> String {
         self.parsed_document.rope().to_string() // TODO
     }
 
-    #[doc = " Hover information at a position"]
     fn hover(&self, pos: Position) -> Option<HoverResult> {
         None // TODO
     }
 
-    #[doc = " All highlights"]
     fn highlights(&self, range: Range) -> Highlights {
         let query_source = tree_sitter_owl_fn::HIGHLIGHTS_QUERY;
         let query = Query::new(&LANGUAGE_OFN, query_source).expect("valid query expect");
@@ -431,21 +378,16 @@ impl OntologyDocument for InternalOfnDocument {
             })
             .collect_vec();
 
-        // TODO this is not needed right?
-        // nodes.sort_unstable_by_key(|(n, _)| n.start_byte());
-
         nodes
             .iter()
             .map(|(node, type_index)| RangeBox::new(*type_index, node.range().into()))
             .collect()
     }
 
-    #[doc = " A keyword completion"]
     fn get_keyword_competions_at(&self, pos: Position) -> Vec<String> {
         vec![] // TODO
     }
 
-    #[doc = " An IRI completion at a position"]
     fn get_iri_completions_at(
         &self,
         pos: Position,

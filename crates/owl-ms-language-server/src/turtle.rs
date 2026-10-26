@@ -49,9 +49,6 @@ pub struct InternalTtlDocument {
     parsed_document: ParsedDocument,
     prefixes: HashMap<String, RangeBox<String>>,
     definitions: Vec<RangeBox<IriDefinition>>,
-    // TODO
-    // pub queried_document: QueriedDocument,
-    // pub stage2: Stage2Document,
 }
 
 impl InternalTtlDocument {
@@ -73,15 +70,9 @@ impl InternalTtlDocument {
             })
         });
 
-        // TODO
         let rope = Rope::from(text);
         let parsed_document = ParsedDocument::new(tree, rope);
 
-        // let queried_document: QueriedDocument = parsed_document.into_queried();
-
-        // let stage2: Stage2Document = queried_document.analyze(&parsed_document, &id);
-
-        // debug!("Stage2Document -> InternalDocument");
         let prefixes = gen_prefixes(&parsed_document);
 
         let definitions = gen_definitions(&parsed_document, &prefixes);
@@ -91,8 +82,6 @@ impl InternalTtlDocument {
             parsed_document,
             prefixes,
             definitions,
-            // queried_document,
-            // stage2,
         }
     }
 
@@ -143,39 +132,6 @@ impl InternalTtlDocument {
             ..id
         };
 
-        // This is a combination of syntax and text changes
-        // let mut post_change_ranges: &[Range] =
-        //     &post_change_ranges(&changes, &parsed_document, &old_tree);
-
-        // debug!("Post change ranges: {post_change_ranges:#?}");
-
-        // let dirty_prefix = timeit("document.edit / queries", || {
-        //     queried_document.update(&changes, post_change_ranges, &parsed_document)
-        // });
-
-        // // The problem is that the references and definitions (and other stuff) depends on
-        // // prefixes. So the change in a prefix can change a lot of references that are not
-        // // located at the prefix.
-        // // Solution 1: Remove the dependency and move the resolution of abbriv iri -> full iri
-        // // into a later step.
-        // // Solution 2: Mark all references dirty when ever a prefix changes, which is not often.
-        // // ==========
-        // // I Chose Solution 2
-        // // Do a whole new analysis when the prefixes change!
-        // if dirty_prefix {
-        //     info!("document.edit Dirty prefix. New post change range is the max range.");
-        //     post_change_ranges = &[Range::FULL_RANGE];
-        // }
-
-        // timeit("document.edit / analyze", || {
-        //     stage2.update(
-        //         &changes,
-        //         post_change_ranges,
-        //         &parsed_document,
-        //         &queried_document,
-        //         &id,
-        //     );
-        // });
         let prefixes = gen_prefixes(&parsed_document);
 
         let definitions = gen_definitions(&parsed_document, &prefixes);
@@ -185,8 +141,6 @@ impl InternalTtlDocument {
             parsed_document,
             prefixes,
             definitions,
-            // queried_document,
-            // stage2,
         };
 
         Ok(doc)
@@ -222,15 +176,14 @@ fn gen_definitions(
         .query(&TTL_ALL_QUERIES.definition)
         .into_iter()
         .map(|m| {
-            let iri_c = m.captures.iter().next().expect("should be one");
+            let iri_c = m.captures.first().expect("should be one");
             let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
             let iri = iri.try_to_full(prefixes).unwrap_or(iri);
             debug!("Found ttl {iri}");
             RangeBox::new(
                 IriDefinition {
                     iri,
-                    // kind: FrameType::Unknown, // TODO frame type FrameType::parse(iri_c.node.parent_kind.expect("iri should have parent")),
-                    kind: FrameType::Class, // TODO!!! remove
+                    kind: FrameType::Unknown, // TODO parse frame type
                 },
                 iri_c.node.range,
             )
@@ -247,22 +200,18 @@ impl PartialEq for InternalTtlDocument {
 impl Eq for InternalTtlDocument {}
 
 impl OntologyDocument for InternalTtlDocument {
-    #[doc = " The file path of this text file"]
     fn path(&self) -> &Path {
         self.id.path.as_path()
     }
 
-    #[doc = " The file url of this text file"]
     fn uri(&self) -> &Url {
         &self.id.uri
     }
 
-    #[doc = " LSP version. Gets incremented when editing. Not to be confused with the ontology version."]
     fn version(&self) -> i32 {
         self.id.version
     }
 
-    #[doc = " Text content stored as a rope"]
     fn rope(&self) -> &Rope {
         self.parsed_document.rope()
     }
@@ -291,38 +240,26 @@ impl OntologyDocument for InternalTtlDocument {
         vec![] // TODO
     }
 
-    #[doc = " OWL ontolgies that are imported by this ontology."]
-    #[doc = " There are also indirect imports, but they need to be resolved in the workspace,"]
-    #[doc = " because a single document has no context of the workspace."]
     fn directly_imports(&self) -> Vec<&Url> {
         vec![] // TODO
     }
 
-    #[doc = " This includes prefixes, references and imports"]
     fn directly_references_doc(&self) -> Vec<&Url> {
         vec![] // TODO
     }
 
-    #[doc = " Errors/Diagnostics that are created by this document alone. This"]
-    #[doc = " includes e.g. syntax errors."]
     fn local_diagnostics(&self) -> &[Diagnostic] {
         &[] // TODO
     }
 
-    #[doc = " Map of IRIs and where to find them"]
     fn iri_locations(&self) -> HashMap<&Iri, &Vec<RangeBox<()>>> {
         HashMap::new() // TODO
     }
 
-    #[doc = " Taking a (relative) abbreviated or simple IRI and resolving the (absolute) full IRI."]
-    #[doc = " The reverse of [`full_iri_to_abbreviated_iri`]."]
     fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<Iri> {
         iri.try_to_full(&self.prefixes)
     }
 
-    #[doc = " Taking a (absolute) full IRI and by prefixing it making it shorter into a (relative)"]
-    #[doc = " abbriviated or simple IRI."]
-    #[doc = " The reverse of [`abbreviated_iri_to_full_iri`]."]
     fn full_iri_to_abbreviated_iri(&self, full_iri: &Iri) -> Option<String> {
         full_iri.try_to_abbriviated(&self.prefixes).map(|s| {
             if s.contains(':') {
@@ -333,39 +270,26 @@ impl OntologyDocument for InternalTtlDocument {
         })
     }
 
-    #[doc = " Prefix map with key prefix and value prefix target"]
     fn prefixes(&self) -> HashMap<String, String> {
         HashMap::new()
     }
 
-    #[doc = " The range of the document content."]
     fn range(&self) -> Range {
         self.parsed_document.tree().root_node().range().into()
     }
 
-    #[doc = " Takes a positon and returns an IRI and a range when one is found at that position."]
-    #[doc = " It does not include the \'<\' \'>\' chars of a full iri."]
     fn iri_at(&self, pos: Position) -> Option<RangeBox<IriAtPosition>> {
         None // TODO
     }
 
-    #[doc = " The range of an IRI that can be renamed. Does not include \'<\' \'>\' or prefixes."]
-    #[doc = " So it should trigger like this:"]
-    #[doc = " ```txt"]
-    #[doc = " foo:bar    --->    \"bar\""]
-    #[doc = "   ^"]
-    #[doc = "  Cursor"]
-    #[doc = " ```"]
     fn rename_range(&self, pos: Position) -> Option<Range> {
         None // TODO
     }
 
-    #[doc = " Generate informations for renaming"]
     fn rename_info_at(&self, pos: Position, new_name: &str) -> Result<Option<RenameInfo>> {
         Ok(None) // TODO
     }
 
-    #[doc = " Takes a [`RenameInfo`] and returns the edits that will get performed by the rename"]
     fn rename_edits(&self, rename_info: &RenameInfo) -> Vec<RangeBox<String>> {
         match rename_info {
             RenameInfo::Iri(iri_rename_info) => {
@@ -373,13 +297,12 @@ impl OntologyDocument for InternalTtlDocument {
                     .query(&TTL_ALL_QUERIES.iri_query_all)
                     .into_iter()
                     .filter_map(|ele| {
-                        let iri_c = ele.captures.iter().next().expect("should match once"); // TODO trim and to full iri
+                        let iri_c = ele.captures.first().expect("should match once"); // TODO trim and to full iri
 
                         let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
                         let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
-                        // iri.node.range
-
+                        // TODO node frame type check?
                         if iri == iri_rename_info.full_iri {
                             let value = iri_rename_info
                                 .new_iri
@@ -398,27 +321,22 @@ impl OntologyDocument for InternalTtlDocument {
         }
     }
 
-    #[doc = " Get actions for creating keywords at a position"]
     fn keyword_actions_at(&self, pos: Position) -> Vec<KeywordAction> {
         vec![] // TODO
     }
 
-    #[doc = " Get all iris that are in a range"]
     fn all_iris_in_range(&self, range: Range) -> Vec<RangeBox<Iri>> {
         vec![] // TODO
     }
 
-    #[doc = " A formatted version of the document"]
     fn formatted(&self, options: &FormattingSettings) -> String {
         self.parsed_document.rope().to_string() // TODO
     }
 
-    #[doc = " Hover information at a position"]
     fn hover(&self, pos: Position) -> Option<HoverResult> {
         None // TODO
     }
 
-    #[doc = " All highlights"]
     fn highlights(&self, range: Range) -> Highlights {
         let query_source = tree_sitter_turtle::HIGHLIGHTS_QUERY;
         let query = Query::new(&LANGUAGE_TTL, query_source).expect("valid query expect");
@@ -445,21 +363,16 @@ impl OntologyDocument for InternalTtlDocument {
             })
             .collect_vec();
 
-        // TODO this is not needed right?
-        // nodes.sort_unstable_by_key(|(n, _)| n.start_byte());
-
         nodes
             .iter()
             .map(|(node, type_index)| RangeBox::new(*type_index, node.range().into()))
             .collect()
     }
 
-    #[doc = " A keyword completion"]
     fn get_keyword_competions_at(&self, pos: Position) -> Vec<String> {
         vec![] // TODO
     }
 
-    #[doc = " An IRI completion at a position"]
     fn get_iri_completions_at(
         &self,
         pos: Position,
