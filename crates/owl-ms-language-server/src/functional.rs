@@ -263,8 +263,8 @@ impl OntologyDocument for InternalOfnDocument {
     }
 
     fn local_diagnostics(&self) -> &[Diagnostic] {
-        &[] // TODO
-    }
+    &[] // TODO
+}
 
     fn iri_locations(&self) -> HashMap<&Iri, &Vec<RangeBox<()>>> {
         HashMap::new() // TODO

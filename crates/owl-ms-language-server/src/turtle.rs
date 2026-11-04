@@ -250,8 +250,8 @@ impl OntologyDocument for InternalTtlDocument {
     }
 
     fn local_diagnostics(&self) -> &[Diagnostic] {
-        &[] // TODO
-    }
+    &[] // TODO
+}
 
     fn iri_locations(&self) -> HashMap<&Iri, &Vec<RangeBox<()>>> {
         HashMap::new() // TODO
