@@ -134,12 +134,14 @@ pub trait OntologyDocument {
     fn version_iri(&self) -> Option<Iri>;
     fn definitions(&self) -> Vec<&RangeBox<IriDefinition>>;
     fn references(&self) -> Vec<&RangeBox<Iri>>;
+
     /// OWL ontolgies that are imported by this ontology.
     /// There are also indirect imports, but they need to be resolved in the workspace,
     /// because a single document has no context of the workspace.
-    fn directly_imports(&self) -> Vec<&Url>;
+    fn directly_imports(&self) -> Vec<&Iri>;
+
     /// This includes prefixes, references and imports
-    fn directly_references_doc(&self) -> Vec<&Url>;
+    fn directly_references_doc(&self) -> Vec<&Iri>;
 
     /// Errors/Diagnostics that are created by this document alone. This
     /// includes e.g. syntax errors.
@@ -152,6 +154,7 @@ pub trait OntologyDocument {
     /// Taking a (relative) abbreviated or simple IRI and resolving the (absolute) full IRI.
     /// The reverse of [`full_iri_to_abbreviated_iri`].
     fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<Iri>;
+
     /// Taking a (absolute) full IRI and by prefixing it making it shorter into a (relative)
     /// abbriviated or simple IRI.
     /// The reverse of [`abbreviated_iri_to_full_iri`].
@@ -1099,8 +1102,9 @@ fn reachable_docs_recursive_helper(
     let docs = urls
         .iter()
         .inspect(|u| trace!("{u}"))
-        .filter_map(|url| {
-            workspace.document_by_url(url)
+        .filter_map(|iri| {
+            let url = Url::parse(iri).unwrap(); // TODO!!! this should be normaized
+            workspace.document_by_url(&url)
             // TODO maybe reactivate but for now lets not log here
             // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&doc.try_get_workspace()?, &url)
             // .inspect_log()
@@ -1667,8 +1671,8 @@ pub struct ExternalDocument {
     pub uri: Url,
     pub text: String,
     pub graph: InfoGraph,
-    reachable_urls: Vec<Url>,
-    imports: Vec<Url>,
+    reachable_urls: Vec<Iri>,
+    imports: Vec<Iri>,
     definitions: HashSet<Iri>,
 }
 
@@ -1867,7 +1871,7 @@ impl ExternalDocument {
         Ok(graph)
     }
 
-    fn gen_imports(graph: &InfoGraph) -> Box<dyn Iterator<Item = Url> + '_> {
+    fn gen_imports(graph: &InfoGraph) -> Box<dyn Iterator<Item = Iri> + '_> {
         let graph = &graph.0;
 
         // `graph.triples_matching` will exceed the stack size (Stack Overflow) on large graphs
@@ -1879,13 +1883,13 @@ impl ExternalDocument {
                     .is_some_and(|iri| iri.as_str() == "http://www.w3.org/2002/07/owl#imports")
             })
             .filter_map(|[_, _, o]| o.iri())
-            .flat_map(|iri| Url::parse(&iri))
+            .map(|iri| iri.as_str().to_iri())
             .unique();
 
         Box::new(iris)
     }
 
-    pub fn imports(&self) -> &Vec<Url> {
+    pub fn imports(&self) -> &Vec<Iri> {
         &self.imports
     }
 
@@ -1936,8 +1940,9 @@ impl ExternalDocument {
         result.insert(self.uri.clone());
 
         // TODO shitty child urls :<
-        let docs = urls.iter().filter_map(|url| {
-            workspace.document_by_url(url)
+        let docs = urls.iter().filter_map(|iri| {
+            workspace.document_by_url(&Url::parse(iri).unwrap()) // TODO!! normilize
+
             // TODO maybe reactivate but for now lets not log here
             // .ok_or(Error::DocumentNotLoaded(url.clone()))
             // Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
@@ -1972,8 +1977,8 @@ impl ExternalDocument {
     fn gen_reachable_urls<'a>(
         uri: &'a Url,
         graph: &'a InfoGraph,
-        imports: &'a [Url],
-    ) -> Box<dyn Iterator<Item = Url> + 'a> {
+        imports: &'a [Iri],
+    ) -> Box<dyn Iterator<Item = Iri> + 'a> {
         // TODO this is not that stable yet
         let child_urls = graph
             .0
@@ -1981,7 +1986,7 @@ impl ExternalDocument {
             .filter_map(std::result::Result::ok)
             .filter_map(|term| term.iri())
             .unique()
-            .filter_map(|iri| Url::parse(&iri).ok())
+            .map(|iri| iri.as_str().to_iri())
             // Filter out IRI's that point to this ontology
             .filter(|url| {
                 // This should be faster than url.make_relative, because url contains a serialized version
@@ -1995,7 +2000,7 @@ impl ExternalDocument {
         Box::new(imports.iter().cloned().chain(child_urls).unique())
     }
 
-    pub fn reachable_urls(&self) -> &Vec<Url> {
+    pub fn reachable_urls(&self) -> &Vec<Iri> {
         &self.reachable_urls
     }
 
@@ -2014,7 +2019,8 @@ pub fn iri_to_parent_url_str(iri: &str) -> Option<&str> {
 }
 
 /// Convert some IRI (here in URL type) into a URL where the IRI can be fetched from
-pub fn iri_to_onology_url(mut url: Url) -> Url {
+pub fn iri_to_onology_url(mut url: Iri) -> Iri {
+    todo!("implement");
     if url.fragment().is_some() {
         url.set_fragment(Some(""));
     } else if let Ok(mut seg) = url.path_segments_mut() {
@@ -2457,7 +2463,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
     let import_iris: Vec<&str> = doc
         .directly_imports()
         .into_iter()
-        .map(Url::as_str)
+        .map(|i| i.as_str())
         .collect();
 
     let ontology_iri = doc.ontology_iri();

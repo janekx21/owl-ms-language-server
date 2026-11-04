@@ -104,8 +104,9 @@ impl Backend {
 
                 // Create diagnostics for files that depend on this file
                 for other_internal_doc in workspace.internal_documents() {
-                    let depends_on_me = other_internal_doc.directly_imports().iter().any(|u| {
-                        workspace.document_by_url(u) == Some(DocumentReference::Internal(document))
+                    let depends_on_me = other_internal_doc.directly_imports().iter().any(|iri| {
+                        workspace.document_by_url(&Url::parse(iri.as_str()).unwrap()) // TODO!! normaize
+                            == Some(DocumentReference::Internal(document))
                     });
 
                     if depends_on_me {
@@ -126,9 +127,9 @@ impl Backend {
         let mini_backend = self.clone();
         let path = path.to_owned();
         tokio::spawn(async move {
-            let mut todo: LinkedList<(Url, u32)> = { build_todo_list(&mini_backend, &path).await };
+            let mut todo: LinkedList<(_, u32)> = { build_todo_list(&mini_backend, &path).await };
 
-            let mut done = HashSet::<Url>::new();
+            let mut done = HashSet::<_>::new();
 
             debug!(
                 "Loading dependencies of {} len = {}",
@@ -136,14 +137,14 @@ impl Backend {
                 todo.len()
             );
 
-            while let Some((url, depth)) = todo.pop_front() {
-                debug!("Indexing {url} ...");
-                if done.contains(&url) {
-                    debug!("URL {url} was indexed. Skip");
+            while let Some((iri, depth)) = todo.pop_front() {
+                debug!("Indexing {iri} ...");
+                if done.contains(&iri) {
+                    debug!("URL {iri} was indexed. Skip");
                     continue;
                 }
                 if depth > 2 {
-                    debug!("Depth {depth} exceeded 2 for {url}. Skip");
+                    debug!("Depth {depth} exceeded 2 for {iri}. Skip");
                     continue;
                 }
 
@@ -159,7 +160,7 @@ impl Backend {
                     // TODO well the Error is not Send. That's why we convert to Option
                     Workspace::resolve_url_to_document(
                         workspace,
-                        &url,
+                        &Url::parse(iri.as_str()).unwrap(), // TODO!! normaize
                         mini_backend.http_client.clone(),
                     )
                     .await
@@ -171,7 +172,7 @@ impl Backend {
                     resolved_doc
                 } else {
                     // This is the error case
-                    warn!("Resolving {url} did not work");
+                    warn!("Resolving {iri} did not work");
                     None
                 };
 
@@ -217,7 +218,7 @@ impl Backend {
                 // Refresh the inline hints, because we got new information now
                 refresh_inlay_hints(&mini_backend).await;
 
-                done.insert(url);
+                done.insert(iri);
             }
 
             // Every dependency is loaded
@@ -368,7 +369,7 @@ async fn refresh_inlay_hints(mini_backend: &Backend) {
 async fn build_todo_list(
     mini_backend: &Backend,
     path: &std::path::PathBuf,
-) -> LinkedList<(Url, u32)> {
+) -> LinkedList<(Iri, u32)> {
     let sync = mini_backend.sync.read().await;
     let workspace = sync
         .get_workspace(&Url::from_file_path(path).expect("File path should be convertable to URL"))

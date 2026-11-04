@@ -240,11 +240,11 @@ impl OntologyDocument for InternalTtlDocument {
         vec![] // TODO
     }
 
-    fn directly_imports(&self) -> Vec<&Url> {
+    fn directly_imports(&self) -> Vec<&Iri> {
         vec![] // TODO
     }
 
-    fn directly_references_doc(&self) -> Vec<&Url> {
+    fn directly_references_doc(&self) -> Vec<&Iri> {
         vec![] // TODO
     }
 

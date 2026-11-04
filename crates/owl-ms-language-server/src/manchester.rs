@@ -20,7 +20,7 @@ use crate::{
 };
 use crate::{split_iri, USizeextra};
 use itertools::Itertools;
-use log::{debug, error, info, trace};
+use log::{debug, info, trace};
 use pretty::RcDoc;
 use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
@@ -131,12 +131,11 @@ impl OntologyDocument for InternalOmnDocument {
         self.stage2.references.iter().collect()
     }
 
-    fn directly_imports(&self) -> Vec<&Url> {
+    fn directly_imports(&self) -> Vec<&Iri> {
         self.stage2.directly_reachable_import_urls.iter().collect()
     }
 
-    #[doc = " This includes prefixes, references and imports"]
-    fn directly_references_doc(&self) -> Vec<&Url> {
+    fn directly_references_doc(&self) -> Vec<&Iri> {
         self.stage2
             .directly_reachable_import_urls
             .iter()
@@ -835,16 +834,12 @@ impl QueriedDocument {
     pub fn reachable_urls(
         &self,
         document_references: &[RangeBox<Iri>],
-        own_uri: &Url,
-    ) -> (Vec<Url>, Vec<Url>) {
+        own_iri: &Iri,
+    ) -> (Vec<Iri>, Vec<Iri>) {
         let imports = self
             .imports
             .iter()
-            .filter_map(|rb| {
-                Url::parse(rb.value().as_str())
-                    .inspect_err(|url_err| error!("Import URL invalid {url_err}"))
-                    .ok()
-            })
+            .map(|rb| rb.value().clone())
             .collect_vec();
 
         // Other urls include prefixes
@@ -852,25 +847,29 @@ impl QueriedDocument {
             .prefixes
             .iter()
             // Filter out the empty prefix ":"
-            .filter_map(|(prefix, url)| {
+            .filter_map(|(prefix, iri)| {
                 if prefix.is_empty() {
                     None
                 } else {
-                    Some(url.value())
+                    Some(iri.value())
                 }
             })
-            .filter_map(|url| Url::parse(url).ok())
+            .map(|url| url.to_iri())
             // Filter out the current document as a prefix (most likely the empty prefix ":")
-            .filter(|url| url != own_uri)
-            .map(|url| {
+            .filter(|iri| iri != own_iri)
+            .map(|iri| {
                 // Remove fragments from prefixes
-                if url.fragment().is_some() {
-                    let mut url = url.clone();
-                    url.set_fragment(Some(""));
-                    url
-                } else {
-                    url
-                }
+                iri.rsplit_once("#")
+                    .map(|(a, _)| a)
+                    .unwrap_or(&iri)
+                    .to_iri()
+                // if iri.fragment().is_some() {
+                //     let mut url = iri.clone();
+                //     url.set_fragment(Some(""));
+                //     url
+                // } else {
+                //     iri
+                // }
             })
             .collect_vec();
 
@@ -878,7 +877,7 @@ impl QueriedDocument {
             .iter()
             .filter_map(|iri| iri_to_parent_url_str(iri.value()))
             .unique()
-            .flat_map(str::parse);
+            .map(|s| s.to_iri());
 
         // debug!(
         //     "Extending {} with {}",
@@ -1111,7 +1110,7 @@ impl QueriedDocument {
 
         let (directly_reachable_import_urls, directly_reachable_other_urls) =
             timeit("reachable urls", || {
-                self.reachable_urls(&references, &id.uri)
+                self.reachable_urls(&references, &id.uri.as_str().to_iri()) // TODO!! use id.iri
             });
 
         let iri_locations = build_iri_locations(&references);
@@ -1513,9 +1512,9 @@ pub struct Stage2Document {
     all_frame_infos: HashMap<Iri, FrameInfo>,
     local_diagnostics: Vec<Diagnostic>,
     /// These include only URL's from the imports
-    directly_reachable_import_urls: Vec<Url>,
+    directly_reachable_import_urls: Vec<Iri>,
     /// These include all other URL's that can be found in this document
-    directly_reachable_other_urls: Vec<Url>,
+    directly_reachable_other_urls: Vec<Iri>,
     iri_locations: HashMap<Iri, Vec<RangeBox<()>>>,
 }
 
@@ -1627,7 +1626,7 @@ impl Stage2Document {
 
             // TODO split into seperate functions
             let (directly_reachable_import_urls, directly_reachable_other_urls) =
-                queried_document.reachable_urls(&self.references, &id.uri);
+                queried_document.reachable_urls(&self.references, &id.uri.as_str().to_iri()); // TODO!! use id.iri
             self.directly_reachable_import_urls = directly_reachable_import_urls;
             self.directly_reachable_other_urls = directly_reachable_other_urls;
 
