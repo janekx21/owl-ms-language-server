@@ -122,8 +122,8 @@ impl InternalTtlDocument {
         let InternalTtlDocument {
             id,
             parsed_document,
-            prefixes,
-            definitions,
+            prefixes: _,
+            definitions: _,
         } = self;
 
         let changes = changes_from_lsp(params, encoding, parsed_document.rope());
@@ -133,7 +133,7 @@ impl InternalTtlDocument {
             debug!("Updating changed range (pre edit) {change:?}");
         }
 
-        let (parsed_document, old_tree) = TTL_PARSER.with(|parser| {
+        let (parsed_document, _old_tree) = TTL_PARSER.with(|parser| {
             parsed_document.edit_parsed_document(changes.iter(), &mut parser.borrow_mut())
         })?;
 
@@ -222,7 +222,7 @@ fn gen_definitions(
         .query(&TTL_ALL_QUERIES.definition)
         .into_iter()
         .map(|m| {
-            let iri_c = m.captures.iter().next().expect("should be one");
+            let iri_c = m.captures.first().expect("should be one");
             let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
             let iri = iri.try_to_full(prefixes).unwrap_or(iri);
             debug!("Found ttl {iri}");
@@ -247,22 +247,18 @@ impl PartialEq for InternalTtlDocument {
 impl Eq for InternalTtlDocument {}
 
 impl OntologyDocument for InternalTtlDocument {
-    #[doc = " The file path of this text file"]
     fn path(&self) -> &Path {
         self.id.path.as_path()
     }
 
-    #[doc = " The file url of this text file"]
     fn uri(&self) -> &Url {
         &self.id.uri
     }
 
-    #[doc = " LSP version. Gets incremented when editing. Not to be confused with the ontology version."]
     fn version(&self) -> i32 {
         self.id.version
     }
 
-    #[doc = " Text content stored as a rope"]
     fn rope(&self) -> &Rope {
         self.parsed_document.rope()
     }
@@ -271,7 +267,7 @@ impl OntologyDocument for InternalTtlDocument {
         vec![] // TODO
     }
 
-    fn find_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
+    fn find_frame_info(&self, _iri: &Iri) -> Option<FrameInfo> {
         None // TODO
     }
 
@@ -291,38 +287,26 @@ impl OntologyDocument for InternalTtlDocument {
         vec![] // TODO
     }
 
-    #[doc = " OWL ontolgies that are imported by this ontology."]
-    #[doc = " There are also indirect imports, but they need to be resolved in the workspace,"]
-    #[doc = " because a single document has no context of the workspace."]
     fn directly_imports(&self) -> Vec<&Url> {
         vec![] // TODO
     }
 
-    #[doc = " This includes prefixes, references and imports"]
     fn directly_references_doc(&self) -> Vec<&Url> {
         vec![] // TODO
     }
 
-    #[doc = " Errors/Diagnostics that are created by this document alone. This"]
-    #[doc = " includes e.g. syntax errors."]
     fn local_diagnostics(&self) -> &[Diagnostic] {
         &[] // TODO
     }
 
-    #[doc = " Map of IRIs and where to find them"]
     fn iri_locations(&self) -> HashMap<&Iri, &Vec<RangeBox<()>>> {
         HashMap::new() // TODO
     }
 
-    #[doc = " Taking a (relative) abbreviated or simple IRI and resolving the (absolute) full IRI."]
-    #[doc = " The reverse of [`full_iri_to_abbreviated_iri`]."]
     fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<Iri> {
         iri.try_to_full(&self.prefixes)
     }
 
-    #[doc = " Taking a (absolute) full IRI and by prefixing it making it shorter into a (relative)"]
-    #[doc = " abbriviated or simple IRI."]
-    #[doc = " The reverse of [`abbreviated_iri_to_full_iri`]."]
     fn full_iri_to_abbreviated_iri(&self, full_iri: &Iri) -> Option<String> {
         full_iri.try_to_abbriviated(&self.prefixes).map(|s| {
             if s.contains(':') {
@@ -333,39 +317,26 @@ impl OntologyDocument for InternalTtlDocument {
         })
     }
 
-    #[doc = " Prefix map with key prefix and value prefix target"]
     fn prefixes(&self) -> HashMap<String, String> {
         HashMap::new()
     }
 
-    #[doc = " The range of the document content."]
     fn range(&self) -> Range {
         self.parsed_document.tree().root_node().range().into()
     }
 
-    #[doc = " Takes a positon and returns an IRI and a range when one is found at that position."]
-    #[doc = " It does not include the \'<\' \'>\' chars of a full iri."]
-    fn iri_at(&self, pos: Position) -> Option<RangeBox<IriAtPosition>> {
+    fn iri_at(&self, _pos: Position) -> Option<RangeBox<IriAtPosition>> {
         None // TODO
     }
 
-    #[doc = " The range of an IRI that can be renamed. Does not include \'<\' \'>\' or prefixes."]
-    #[doc = " So it should trigger like this:"]
-    #[doc = " ```txt"]
-    #[doc = " foo:bar    --->    \"bar\""]
-    #[doc = "   ^"]
-    #[doc = "  Cursor"]
-    #[doc = " ```"]
-    fn rename_range(&self, pos: Position) -> Option<Range> {
+    fn rename_range(&self, _pos: Position) -> Option<Range> {
         None // TODO
     }
 
-    #[doc = " Generate informations for renaming"]
-    fn rename_info_at(&self, pos: Position, new_name: &str) -> Result<Option<RenameInfo>> {
+    fn rename_info_at(&self, _pos: Position, _new_name: &str) -> Result<Option<RenameInfo>> {
         Ok(None) // TODO
     }
 
-    #[doc = " Takes a [`RenameInfo`] and returns the edits that will get performed by the rename"]
     fn rename_edits(&self, rename_info: &RenameInfo) -> Vec<RangeBox<String>> {
         match rename_info {
             RenameInfo::Iri(iri_rename_info) => {
@@ -373,7 +344,7 @@ impl OntologyDocument for InternalTtlDocument {
                     .query(&TTL_ALL_QUERIES.iri_query_all)
                     .into_iter()
                     .filter_map(|ele| {
-                        let iri_c = ele.captures.iter().next().expect("should match once"); // TODO trim and to full iri
+                        let iri_c = ele.captures.first().expect("should match once"); // TODO trim and to full iri
 
                         let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
                         let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
@@ -398,27 +369,22 @@ impl OntologyDocument for InternalTtlDocument {
         }
     }
 
-    #[doc = " Get actions for creating keywords at a position"]
-    fn keyword_actions_at(&self, pos: Position) -> Vec<KeywordAction> {
+    fn keyword_actions_at(&self, _pos: Position) -> Vec<KeywordAction> {
         vec![] // TODO
     }
 
-    #[doc = " Get all iris that are in a range"]
-    fn all_iris_in_range(&self, range: Range) -> Vec<RangeBox<Iri>> {
+    fn all_iris_in_range(&self, _range: Range) -> Vec<RangeBox<Iri>> {
         vec![] // TODO
     }
 
-    #[doc = " A formatted version of the document"]
-    fn formatted(&self, options: &FormattingSettings) -> String {
+    fn formatted(&self, _options: &FormattingSettings) -> String {
         self.parsed_document.rope().to_string() // TODO
     }
 
-    #[doc = " Hover information at a position"]
-    fn hover(&self, pos: Position) -> Option<HoverResult> {
+    fn hover(&self, _pos: Position) -> Option<HoverResult> {
         None // TODO
     }
 
-    #[doc = " All highlights"]
     fn highlights(&self, range: Range) -> Highlights {
         let query_source = tree_sitter_turtle::HIGHLIGHTS_QUERY;
         let query = Query::new(&LANGUAGE_TTL, query_source).expect("valid query expect");
@@ -454,16 +420,14 @@ impl OntologyDocument for InternalTtlDocument {
             .collect()
     }
 
-    #[doc = " A keyword completion"]
-    fn get_keyword_competions_at(&self, pos: Position) -> Vec<String> {
+    fn get_keyword_competions_at(&self, _pos: Position) -> Vec<String> {
         vec![] // TODO
     }
 
-    #[doc = " An IRI completion at a position"]
     fn get_iri_completions_at(
         &self,
-        pos: Position,
-        workspace: &Workspace,
+        _pos: Position,
+        _workspace: &Workspace,
     ) -> Vec<(String, String, String, bool)> {
         vec![] // TODO
     }
@@ -472,7 +436,7 @@ impl OntologyDocument for InternalTtlDocument {
         "Not implemented".into()
     }
 
-    fn add_annotation_edits(&self, annotation: Annotation) -> Vec<RangeBox<String>> {
+    fn add_annotation_edits(&self, _annotation: Annotation) -> Vec<RangeBox<String>> {
         vec![]
     }
 }

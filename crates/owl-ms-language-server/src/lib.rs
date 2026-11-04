@@ -231,7 +231,7 @@ impl Backend {
         let mut all_handles = Vec::<JoinHandle<()>>::new();
         for workspace in sync.workspaces_mut() {
             let handles = std::mem::take(&mut workspace.index_handles);
-            all_handles.extend(handles.into_iter());
+            all_handles.extend(handles);
         }
         drop(sync);
         for handle in all_handles {
@@ -450,7 +450,7 @@ impl LanguageServer for Backend {
         async {
             let file_url = params.text_document.uri;
             let language_id = params.text_document.language_id;
-            info!("Did open {file_url} {language_id} ...",);
+            info!("Did open {file_url} {language_id} ...");
 
             let lang = match &language_id[..] {
                 "manchester" => Some(Lang::Omn),
@@ -663,14 +663,14 @@ impl LanguageServer for Backend {
             .preferred_languages
             .iter()
             .filter_map(|lang_str| language::Language::try_from(lang_str.as_str()).ok())
-            .collect();
+            .collect_vec();
 
         let hints = document_inlay_hint(
             document,
             range,
             self.encoding(),
             workspace,
-            preferred_languages,
+            &preferred_languages,
         );
 
         Ok(Some(hints))
@@ -754,8 +754,8 @@ impl LanguageServer for Backend {
         let mut actions = vec![];
 
         actions.extend(missin_iri_actions(pos, doc, ws, self.encoding())?);
-        actions.extend(create_prefix_from_iri(pos, doc, ws, self.encoding())?);
-        actions.extend(create_label_code_action(pos, doc, ws, self.encoding())?);
+        actions.extend(create_prefix_from_iri(pos, doc, self.encoding())?);
+        actions.extend(create_label_code_action(pos, doc, self.encoding())?);
         actions.extend(keyword_actions(pos, doc, self.encoding())?);
 
         Ok(Some(actions))
@@ -1134,8 +1134,8 @@ impl LanguageServer for Backend {
                         ws.internal_documents().map(|ele| {
                             let edits = ele
                                 .prefixes()
-                                .iter()
-                                .flat_map(|(p, _)| {
+                                .keys()
+                                .flat_map(|p| {
                                     // Rename each prefix to itself
                                     ele.rename_edits(&workspace::RenameInfo::Prefix(
                                         p.into(),
@@ -1247,7 +1247,6 @@ fn missin_iri_actions(
 fn create_prefix_from_iri(
     pos: Position,
     doc: &InternalDocument,
-    ws: &Workspace,
     encoding: &PositionEncodingKind,
 ) -> Result<Vec<CodeActionOrCommand>> {
     let Some(iri_under_cursor) = doc.iri_at(pos) else {
@@ -1317,7 +1316,6 @@ fn split_iri(iri: &Iri) -> Result<(&str, &str, char)> {
 fn create_label_code_action(
     pos: Position,
     doc: &InternalDocument,
-    ws: &Workspace,
     encoding: &PositionEncodingKind,
 ) -> Result<Vec<CodeActionOrCommand>> {
     let Some(iri_under_cursor) = doc.iri_at(pos) else {
@@ -1364,7 +1362,7 @@ fn create_label_code_action(
         .collect_vec();
 
     let code_action = CodeActionOrCommand::CodeAction(CodeAction {
-        title: format!("Create label \"{label}\" for {kind} `{shorter_iri_under_cursor}`",),
+        title: format!("Create label \"{label}\" for {kind} `{shorter_iri_under_cursor}`"),
         edit: Some(WorkspaceEdit {
             changes: Some(HashMap::from([(doc.uri().clone(), text_edits)])),
             ..Default::default()

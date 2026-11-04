@@ -99,12 +99,13 @@ pub struct Workspace {
 }
 
 /// This enum is a proxy for dispatching [`OntologyDocument`] methods
+#[allow(clippy::large_enum_variant)] // Size differs by 2x but that is ok
 #[enum_dispatch(OntologyDocument)]
 #[derive(Debug, PartialEq, Eq)]
 pub enum InternalDocument {
-    InternalOmn(InternalOmnDocument),
-    InternalOfn(InternalOfnDocument),
-    InternalTtl(InternalTtlDocument),
+    Omn(InternalOmnDocument),
+    Ofn(InternalOfnDocument),
+    Ttl(InternalTtlDocument),
 }
 
 /// The read/write internal document trait.
@@ -303,15 +304,9 @@ pub enum Lang {
 impl InternalDocument {
     pub fn new(url: Url, version: i32, text: String, lang: &Lang) -> InternalDocument {
         match lang {
-            Lang::Omn => {
-                InternalDocument::InternalOmn(InternalOmnDocument::new(url, version, text))
-            }
-            Lang::Ofn => {
-                InternalDocument::InternalOfn(InternalOfnDocument::new(url, version, text))
-            }
-            Lang::Ttl => {
-                InternalDocument::InternalTtl(InternalTtlDocument::new(url, version, text))
-            }
+            Lang::Omn => InternalDocument::Omn(InternalOmnDocument::new(url, version, text)),
+            Lang::Ofn => InternalDocument::Ofn(InternalOfnDocument::new(url, version, text)),
+            Lang::Ttl => InternalDocument::Ttl(InternalTtlDocument::new(url, version, text)),
         }
     }
 
@@ -321,15 +316,15 @@ impl InternalDocument {
         encoding: &PositionEncodingKind,
     ) -> Result<InternalDocument> {
         match self {
-            InternalDocument::InternalOmn(doc) => doc
-                .edit_inner(params, encoding)
-                .map(InternalDocument::InternalOmn),
-            InternalDocument::InternalOfn(doc) => doc
-                .edit_inner(params, encoding)
-                .map(InternalDocument::InternalOfn),
-            InternalDocument::InternalTtl(doc) => doc
-                .edit_inner(params, encoding)
-                .map(InternalDocument::InternalTtl),
+            InternalDocument::Omn(doc) => {
+                doc.edit_inner(params, encoding).map(InternalDocument::Omn)
+            }
+            InternalDocument::Ofn(doc) => {
+                doc.edit_inner(params, encoding).map(InternalDocument::Ofn)
+            }
+            InternalDocument::Ttl(doc) => {
+                doc.edit_inner(params, encoding).map(InternalDocument::Ttl)
+            }
         }
     }
 }
@@ -800,7 +795,7 @@ fn read_cached_doc(workspace: &Workspace, url: &Url) -> Result<Option<Document>>
     let mut cache_valid = true;
     if let Ok(file) = fs::File::open(web_cache.join(&file_name)) {
         let modified_time = file.metadata()?.modified()?;
-        if modified_time + Duration::from_secs(60 * 60 * 24 * 30) < SystemTime::now() {
+        if modified_time + Duration::from_hours(720) < SystemTime::now() {
             // invalidate cache
             warn!("Cached document is stale (older then 30 days) {url}");
             cache_valid = false;
@@ -1030,7 +1025,7 @@ pub fn inlay_hint(
     range: Range,
     encoding: &PositionEncodingKind,
     workspace: &Workspace,
-    prefered_language: Vec<Language>,
+    prefered_language: &[Language],
 ) -> Vec<InlayHint> {
     let reachable_docs = reachable_docs_recursive(doc, workspace, true);
     debug!("Reachable docs for {} are {reachable_docs:#?}", doc.uri());
@@ -1042,7 +1037,7 @@ pub fn inlay_hint(
 
             let label = Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs)
                 .ok_or(Error::FrameInfoNotFound(iri.to_string()))?
-                .label_with_lang(workspace, &prefered_language)
+                .label_with_lang(workspace, prefered_language)
                 .unwrap_or_default();
 
             trace!("Found {label} for {iri}");
@@ -2181,13 +2176,13 @@ impl FrameInfo {
     ///
     /// TODO this can be replaced with [`label_with_lang`]
     pub fn label(&self, workspace: &Workspace) -> Option<String> {
-        self.annotation_display(&LABEL_IRI.into(), workspace, &vec![])
+        self.annotation_display(&LABEL_IRI.into(), workspace, &[])
     }
 
     pub fn label_with_lang(
         &self,
         workspace: &Workspace,
-        prefered_language: &Vec<Language>,
+        prefered_language: &[Language],
     ) -> Option<String> {
         self.annotation_display(&LABEL_IRI.into(), workspace, prefered_language)
     }
@@ -2211,7 +2206,7 @@ impl FrameInfo {
         &self,
         iri: &Iri,
         workspace: &Workspace,
-        prefered_language: &Vec<Language>,
+        prefered_language: &[Language],
     ) -> Option<String> {
         let annotations = self
             .annotations
@@ -2239,10 +2234,10 @@ impl FrameInfo {
                 if let Some(language) = &annotation.language {
                     // english is implied
                     if language == &Language::En {
-                        annotation.string_value.to_string()
+                        annotation.string_value.clone()
                     } else {
                         // TODO the "...@ Language" suffix could be removed when just one lang matches
-                        format!("{} @ {}", &annotation.string_value, &language.name())
+                        format!("{} @ {}", annotation.string_value, language.name())
                     }
                 } else if annotation.datatype != STRING_IRI.into() && iri != &LABEL_IRI.into()
                 // Endless recursion if label is a valid iri
@@ -2293,7 +2288,7 @@ impl FrameInfo {
                     .unwrap_or(annotation.iri.to_string());
                 // TODO #28 use values directly
                 let mut annotation_display = self
-                    .annotation_display(&annotation.iri, workspace, &vec![])
+                    .annotation_display(&annotation.iri, workspace, &[])
                     .unwrap_or(annotation.iri.to_string());
 
                 // If this is a multiline string then give it some space to work with

@@ -363,7 +363,7 @@ async fn backend_did_open_ofn_should_create_document() {
         .unwrap_or_else(|_| panic!("Should be exactly one"));
 
     let _ofn = match doc {
-        InternalDocument::InternalOfn(internal_fn_document) => internal_fn_document,
+        InternalDocument::Ofn(internal_fn_document) => internal_fn_document,
         _ => panic!("Should be ofn"),
     };
     // TODO ofn do stuff
@@ -410,7 +410,7 @@ async fn backend_did_open_ttl_should_create_document() {
         .unwrap_or_else(|_| panic!("Should be exactly one"));
 
     let _doc = match doc {
-        InternalDocument::InternalTtl(doc) => doc,
+        InternalDocument::Ttl(doc) => doc,
         _ => panic!("Should be ttl"),
     };
     // TODO ofn do stuff
