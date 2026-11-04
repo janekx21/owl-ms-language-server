@@ -858,8 +858,18 @@ impl QueriedDocument {
             // Filter out the current document as a prefix (most likely the empty prefix ":")
             .filter(|iri| iri != own_iri)
             .map(|iri| {
-                // Sets fragment to always be there but empty
-                iri.rsplit_once('#').map(|(a, _)| a.to_iri()).unwrap_or(iri)
+                // Remove fragments from prefixes
+                iri.rsplit_once("#")
+                    .map(|(a, _)| a)
+                    .unwrap_or(&iri)
+                    .to_iri()
+                // if iri.fragment().is_some() {
+                //     let mut url = iri.clone();
+                //     url.set_fragment(Some(""));
+                //     url
+                // } else {
+                //     iri
+                // }
             })
             .collect_vec();
 
