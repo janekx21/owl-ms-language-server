@@ -111,8 +111,8 @@ impl InternalTtlDocument {
         let InternalTtlDocument {
             id,
             parsed_document,
-            prefixes,
-            definitions,
+            prefixes: _,
+            definitions: _,
         } = self;
 
         let changes = changes_from_lsp(params, encoding, parsed_document.rope());
@@ -122,7 +122,7 @@ impl InternalTtlDocument {
             debug!("Updating changed range (pre edit) {change:?}");
         }
 
-        let (parsed_document, old_tree) = TTL_PARSER.with(|parser| {
+        let (parsed_document, _old_tree) = TTL_PARSER.with(|parser| {
             parsed_document.edit_parsed_document(changes.iter(), &mut parser.borrow_mut())
         })?;
 
@@ -220,7 +220,7 @@ impl OntologyDocument for InternalTtlDocument {
         vec![] // TODO
     }
 
-    fn find_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
+    fn find_frame_info(&self, _iri: &Iri) -> Option<FrameInfo> {
         None // TODO
     }
 
@@ -278,15 +278,15 @@ impl OntologyDocument for InternalTtlDocument {
         self.parsed_document.tree().root_node().range().into()
     }
 
-    fn iri_at(&self, pos: Position) -> Option<RangeBox<IriAtPosition>> {
+    fn iri_at(&self, _pos: Position) -> Option<RangeBox<IriAtPosition>> {
         None // TODO
     }
 
-    fn rename_range(&self, pos: Position) -> Option<Range> {
+    fn rename_range(&self, _pos: Position) -> Option<Range> {
         None // TODO
     }
 
-    fn rename_info_at(&self, pos: Position, new_name: &str) -> Result<Option<RenameInfo>> {
+    fn rename_info_at(&self, _pos: Position, _new_name: &str) -> Result<Option<RenameInfo>> {
         Ok(None) // TODO
     }
 
@@ -321,19 +321,19 @@ impl OntologyDocument for InternalTtlDocument {
         }
     }
 
-    fn keyword_actions_at(&self, pos: Position) -> Vec<KeywordAction> {
+    fn keyword_actions_at(&self, _pos: Position) -> Vec<KeywordAction> {
         vec![] // TODO
     }
 
-    fn all_iris_in_range(&self, range: Range) -> Vec<RangeBox<Iri>> {
+    fn all_iris_in_range(&self, _range: Range) -> Vec<RangeBox<Iri>> {
         vec![] // TODO
     }
 
-    fn formatted(&self, options: &FormattingSettings) -> String {
+    fn formatted(&self, _options: &FormattingSettings) -> String {
         self.parsed_document.rope().to_string() // TODO
     }
 
-    fn hover(&self, pos: Position) -> Option<HoverResult> {
+    fn hover(&self, _pos: Position) -> Option<HoverResult> {
         None // TODO
     }
 
@@ -369,23 +369,23 @@ impl OntologyDocument for InternalTtlDocument {
             .collect()
     }
 
-    fn get_keyword_competions_at(&self, pos: Position) -> Vec<String> {
+    fn get_keyword_competions_at(&self, _pos: Position) -> Vec<String> {
         vec![] // TODO
     }
 
     fn get_iri_completions_at(
-        &self,
-        pos: Position,
-        workspace: &Workspace,
-    ) -> Vec<(String, String, String, bool)> {
-        vec![] // TODO
-    }
+    &self,
+    _pos: Position,
+    _workspace: &Workspace,
+) -> Vec<(String, String, String, bool)> {
+    vec![] // TODO
+}
 
     fn statistic(&self) -> String {
         "Not implemented".into()
     }
 
-    fn add_annotation_edits(&self, annotation: Annotation) -> Vec<RangeBox<String>> {
+    fn add_annotation_edits(&self, _annotation: Annotation) -> Vec<RangeBox<String>> {
         vec![]
     }
 }

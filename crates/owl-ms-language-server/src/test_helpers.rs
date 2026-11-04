@@ -174,7 +174,7 @@ pub async fn arrange_backend_with_client(
             ("http://www.w3.org/2000/01/rdf-schema#", "dummy"),
         ]
         .into_iter()
-        .chain(data.into_iter())
+        .chain(data)
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect(),
     });

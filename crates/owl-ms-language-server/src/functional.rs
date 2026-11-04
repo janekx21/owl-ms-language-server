@@ -234,7 +234,7 @@ impl OntologyDocument for InternalOfnDocument {
         vec![] // TODO
     }
 
-    fn find_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
+    fn find_frame_info(&self, _iri: &Iri) -> Option<FrameInfo> {
         None // TODO
     }
 
@@ -292,15 +292,15 @@ impl OntologyDocument for InternalOfnDocument {
         self.parsed_document.tree().root_node().range().into()
     }
 
-    fn iri_at(&self, pos: Position) -> Option<RangeBox<IriAtPosition>> {
+    fn iri_at(&self, _pos: Position) -> Option<RangeBox<IriAtPosition>> {
         None // TODO
     }
 
-    fn rename_range(&self, pos: Position) -> Option<Range> {
+    fn rename_range(&self, _pos: Position) -> Option<Range> {
         None // TODO
     }
 
-    fn rename_info_at(&self, pos: Position, new_name: &str) -> Result<Option<RenameInfo>> {
+    fn rename_info_at(&self, _pos: Position, _new_name: &str) -> Result<Option<RenameInfo>> {
         Ok(None) // TODO
     }
 
@@ -311,7 +311,7 @@ impl OntologyDocument for InternalOfnDocument {
                     .query(&OFN_ALL_QUERIES.iri_query_all)
                     .into_iter()
                     .filter_map(|ele| {
-                        let iri_c = ele.captures.iter().next().expect("should match once"); // TODO trim and to full iri
+                        let iri_c = ele.captures.first().expect("should match once"); // TODO trim and to full iri
 
                         let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
                         let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
@@ -336,71 +336,71 @@ impl OntologyDocument for InternalOfnDocument {
         }
     }
 
-    fn keyword_actions_at(&self, pos: Position) -> Vec<KeywordAction> {
+    fn keyword_actions_at(&self, _pos: Position) -> Vec<KeywordAction> {
         vec![] // TODO
     }
 
-    fn all_iris_in_range(&self, range: Range) -> Vec<RangeBox<Iri>> {
-        vec![] // TODO
-    }
+    fn all_iris_in_range(&self, _range: Range) -> Vec<RangeBox<Iri>> {
+    vec![] // TODO
+}
 
-    fn formatted(&self, options: &FormattingSettings) -> String {
+    fn formatted(&self, _options: &FormattingSettings) -> String {
         self.parsed_document.rope().to_string() // TODO
     }
 
-    fn hover(&self, pos: Position) -> Option<HoverResult> {
+    fn hover(&self, _pos: Position) -> Option<HoverResult> {
         None // TODO
     }
 
     fn highlights(&self, range: Range) -> Highlights {
-        let query_source = tree_sitter_owl_fn::HIGHLIGHTS_QUERY;
-        let query = Query::new(&LANGUAGE_OFN, query_source).expect("valid query expect");
-        let mut query_cursor = QueryCursor::new();
-        if range != Range::FULL_RANGE {
-            query_cursor.set_point_range(range.into());
-        }
-        let matches = query_cursor.matches(
-            &query,
-            self.parsed_document.tree().root_node(),
-            RopeProvider::new(self.rope()),
-        );
-
-        let nodes = matches
-            .map_deref(|m| m.captures)
-            .flatten()
-            .map(|c| {
-                (
-                    c.node,
-                    treesitter_highlight_capture_into_semantic_token_type_index(
-                        query.capture_names()[c.index as usize],
-                    ),
-                )
-            })
-            .collect_vec();
-
-        nodes
-            .iter()
-            .map(|(node, type_index)| RangeBox::new(*type_index, node.range().into()))
-            .collect()
+    let query_source = tree_sitter_owl_fn::HIGHLIGHTS_QUERY;
+    let query = Query::new(&LANGUAGE_OFN, query_source).expect("valid query expect");
+    let mut query_cursor = QueryCursor::new();
+    if range != Range::FULL_RANGE {
+        query_cursor.set_point_range(range.into());
     }
+    let matches = query_cursor.matches(
+        &query,
+        self.parsed_document.tree().root_node(),
+        RopeProvider::new(self.rope()),
+    );
 
-    fn get_keyword_competions_at(&self, pos: Position) -> Vec<String> {
+    let nodes = matches
+        .map_deref(|m| m.captures)
+        .flatten()
+        .map(|c| {
+            (
+                c.node,
+                treesitter_highlight_capture_into_semantic_token_type_index(
+                    query.capture_names()[c.index as usize],
+                ),
+            )
+        })
+        .collect_vec();
+
+    nodes
+        .iter()
+        .map(|(node, type_index)| RangeBox::new(*type_index, node.range().into()))
+        .collect()
+}
+
+    fn get_keyword_competions_at(&self, _pos: Position) -> Vec<String> {
         vec![] // TODO
     }
 
     fn get_iri_completions_at(
-        &self,
-        pos: Position,
-        workspace: &Workspace,
-    ) -> Vec<(String, String, String, bool)> {
-        vec![] // TODO
-    }
+    &self,
+    _pos: Position,
+    _workspace: &Workspace,
+) -> Vec<(String, String, String, bool)> {
+    vec![] // TODO
+}
 
     fn statistic(&self) -> String {
         "Not implemented".into()
     }
 
-    fn add_annotation_edits(&self, annotation: Annotation) -> Vec<RangeBox<String>> {
+    fn add_annotation_edits(&self, _annotation: Annotation) -> Vec<RangeBox<String>> {
         vec![]
     }
 }

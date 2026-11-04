@@ -54,8 +54,8 @@ pub static GLOBAL_OMN_PARSER: LazyLock<RefCell<Parser>> = LazyLock::new(|| {
 pub struct InternalOmnDocument {
     id: DocumentId,
     parsed_document: ParsedDocument,
-    pub queried_document: QueriedDocument,
-    pub stage2: Stage2Document,
+    queried_document: QueriedDocument,
+    stage2: Stage2Document,
 }
 
 impl Display for InternalOmnDocument {
@@ -421,7 +421,7 @@ impl OntologyDocument for InternalOmnDocument {
                                 new_iri
                                     .clone()
                                     .map(|new_iri| self.full_iri_to_shorter_iri(&new_iri))
-                                    .unwrap_or(original.to_string()),
+                                    .unwrap_or(original.clone()),
                                 range,
                             )))
                         } else {
