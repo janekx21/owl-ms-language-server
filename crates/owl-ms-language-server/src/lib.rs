@@ -105,7 +105,7 @@ impl Backend {
                 // Create diagnostics for files that depend on this file
                 for other_internal_doc in workspace.internal_documents() {
                     let depends_on_me = other_internal_doc.directly_imports().iter().any(|iri| {
-                        workspace.document_by_url(&Url::parse(iri.as_str()).unwrap()) // TODO!! normaize
+                        workspace.document_by_url(&iri.to_url().unwrap())
                             == Some(DocumentReference::Internal(document))
                     });
 
@@ -158,14 +158,7 @@ impl Backend {
                         .expect("Workspace for document should exist");
 
                     // TODO well the Error is not Send. That's why we convert to Option
-                    let url = iri
-                        .clone()
-                        .try_into()
-                        .map_err(|_| Error::InvalidIri(iri.to_string()))
-                        .inspect_log()
-                        .ok(); // TODO!! normaize
-
-                    if let Some(url) = url {
+                    if let Some(url) = iri.to_url() {
                         Workspace::resolve_url_to_document(
                             workspace,
                             &url,

@@ -183,7 +183,8 @@ fn gen_definitions(
             RangeBox::new(
                 IriDefinition {
                     iri,
-                    kind: FrameType::Unknown, // TODO parse frame type
+                    // kind: FrameType::Unknown, // TODO frame type FrameType::parse(iri_c.node.parent_kind.expect("iri should have parent")),
+                    kind: FrameType::Unknown,
                 },
                 iri_c.node.range,
             )

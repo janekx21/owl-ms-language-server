@@ -1103,7 +1103,7 @@ fn reachable_docs_recursive_helper(
         .iter()
         .inspect(|u| trace!("{u}"))
         .filter_map(|iri| {
-            let url = Url::parse(iri).unwrap(); // TODO!!! this should be normaized
+            let url = iri.to_url().unwrap();
             workspace.document_by_url(&url)
             // TODO maybe reactivate but for now lets not log here
             // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&doc.try_get_workspace()?, &url)
@@ -1941,8 +1941,7 @@ impl ExternalDocument {
 
         // TODO shitty child urls :<
         let docs = urls.iter().filter_map(|iri| {
-            workspace.document_by_url(&Url::parse(iri).unwrap()) // TODO!! normilize
-
+            workspace.document_by_url(&iri.to_url().unwrap())
             // TODO maybe reactivate but for now lets not log here
             // .ok_or(Error::DocumentNotLoaded(url.clone()))
             // Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
