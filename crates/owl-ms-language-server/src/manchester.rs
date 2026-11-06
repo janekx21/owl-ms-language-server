@@ -854,15 +854,13 @@ impl QueriedDocument {
                     Some(iri.value())
                 }
             })
-            .map(|url| url.to_iri())
+            .map(super::iri::ToIri::to_iri)
             // Filter out the current document as a prefix (most likely the empty prefix ":")
             .filter(|iri| iri != own_iri)
             .map(|iri| {
-                // Remove fragments from prefixes
-                iri.rsplit_once("#")
-                    .map(|(a, _)| a)
-                    .unwrap_or(&iri)
-                    .to_iri()
+                // Sets fragment to always be there but empty
+                iri.rsplit_once('#').map(|(a, _)| a.to_iri()).unwrap_or(iri)
+
                 // if iri.fragment().is_some() {
                 //     let mut url = iri.clone();
                 //     url.set_fragment(Some(""));
