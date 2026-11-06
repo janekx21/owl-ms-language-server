@@ -1002,7 +1002,6 @@ pub async fn publish_lsp_diagnostics(
         .filter_and_log()
         .collect_vec();
 
-    // TODO create diagnostics for files that depend on this file
     debug!(
         "Publish diagnostics for {} {:#?}",
         doc.path().display(),
@@ -1103,12 +1102,8 @@ fn reachable_docs_recursive_helper(
         .iter()
         .inspect(|u| trace!("{u}"))
         .filter_map(|iri| {
-            let url = iri.to_url().unwrap();
+            let url = iri.to_url()?;
             workspace.document_by_url(&url)
-            // TODO maybe reactivate but for now lets not log here
-            // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&doc.try_get_workspace()?, &url)
-            // .inspect_log()
-            // .ok()
         })
         .collect_vec();
 
