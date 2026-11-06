@@ -105,7 +105,7 @@ impl Backend {
                 // Create diagnostics for files that depend on this file
                 for other_internal_doc in workspace.internal_documents() {
                     let depends_on_me = other_internal_doc.directly_imports().iter().any(|iri| {
-                        workspace.document_by_url(u) // TODO!! normaize
+                        workspace.document_by_url(&iri.to_url().unwrap())
                             == Some(DocumentReference::Internal(document))
                     });
 
