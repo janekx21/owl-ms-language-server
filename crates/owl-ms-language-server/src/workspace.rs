@@ -1102,7 +1102,7 @@ fn reachable_docs_recursive_helper(
         .iter()
         .inspect(|u| trace!("{u}"))
         .filter_map(|iri| {
-            let url = iri.to_url().unwrap();
+            let url = iri.to_url()?;
             workspace.document_by_url(&url)
         })
         .collect_vec();
