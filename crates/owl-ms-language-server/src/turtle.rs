@@ -230,7 +230,7 @@ fn gen_definitions(
                 IriDefinition {
                     iri,
                     // kind: FrameType::Unknown, // TODO frame type FrameType::parse(iri_c.node.parent_kind.expect("iri should have parent")),
-                    kind: FrameType::Class, // TODO!!! remove
+                    kind: FrameType::Unknown,
                 },
                 iri_c.node.range,
             )

@@ -1,5 +1,6 @@
 use itertools::Itertools;
 use lasso::{Spur, ThreadedRodeo};
+use log::warn;
 use ropey::RopeSlice;
 use std::{borrow::Borrow, collections::HashMap, fmt::Display, ops::Deref, sync::LazyLock};
 use tower_lsp::lsp_types::Url;
@@ -83,6 +84,13 @@ impl Iri {
             )
             .sorted_by_key(String::len)
             .next()
+    }
+
+    /// This normalizes the IRI into a URL
+    pub fn to_url(&self) -> Option<Url> {
+        Url::parse(self.as_str())
+            .inspect_err(|e| warn!("Url Parse Error: {e}"))
+            .ok()
     }
 }
 
