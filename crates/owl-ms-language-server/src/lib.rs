@@ -161,7 +161,7 @@ impl Backend {
                     if let Some(url) = iri.to_url() {
                         Workspace::resolve_url_to_document(
                             workspace,
-                            &Url::parse(iri.as_str()).unwrap(), // TODO!! normaize
+                            &url,
                             mini_backend.http_client.clone(),
                         )
                         .await
