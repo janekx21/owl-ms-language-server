@@ -2,6 +2,7 @@ use itertools::Itertools;
 use lasso::{Spur, ThreadedRodeo};
 use ropey::RopeSlice;
 use std::{borrow::Borrow, collections::HashMap, fmt::Display, ops::Deref, sync::LazyLock};
+use tower_lsp::lsp_types::Url;
 
 use crate::range::RangeBox;
 
@@ -131,9 +132,17 @@ impl Deref for Iri {
         self.as_str()
     }
 }
+
 impl Borrow<str> for Iri {
     fn borrow(&self) -> &str {
         REUSE_IRI.str(self)
+    }
+}
+
+impl TryFrom<Iri> for Url {
+    type Error = ();
+    fn try_from(value: Iri) -> Result<Self, Self::Error> {
+        Url::parse(value.as_str()).map_err(|_| ())
     }
 }
 
@@ -150,5 +159,11 @@ mod tests {
 
         // This is 4, because the resuse set holds one of the strong reference counts
         assert_eq!(REUSE_IRI.0.len(), 1);
+    }
+
+    #[test]
+    fn iri_is_url() {
+        let u = Url::parse("http://jänek.de/öntology").unwrap();
+        assert_eq!(&u.to_string(), "http://xn--jnek-loa.de/%C3%B6ntology");
     }
 }

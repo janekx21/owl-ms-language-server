@@ -1787,7 +1787,7 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
         let graph_name = ontology_iri
             .as_ref()
             .and_then(|s| s.iri().clone())
-            .map_or("???".into(), |i| i.to_string()); //TODO what default graph name?
+            .map_or("???".into(), |i| i.to_string()); // TODO what default graph name?
 
         Self(graph, graph_name)
     }
@@ -1852,7 +1852,7 @@ impl ExternalDocument {
                     .flatten()
                     .next()
                     .and_then(|[s, _, _]| s.iri())
-                    .map_or("???".into(), |i| i.to_string()); //TODO default case
+                    .map_or("???".into(), |i| i.to_string()); // TODO default case
 
                 InfoGraph(g, ontology_id.clone())
             })

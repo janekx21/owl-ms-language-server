@@ -158,7 +158,9 @@ impl Backend {
                         .expect("Workspace for document should exist");
 
                     // TODO well the Error is not Send. That's why we convert to Option
-                    let url = &Url::parse(iri.as_str())
+                    let url = iri
+                        .clone()
+                        .try_into()
                         .map_err(|_| Error::InvalidIri(iri.to_string()))
                         .inspect_log()
                         .ok(); // TODO!! normaize
@@ -166,7 +168,7 @@ impl Backend {
                     if let Some(url) = url {
                         Workspace::resolve_url_to_document(
                             workspace,
-                            url,
+                            &url,
                             mini_backend.http_client.clone(),
                         )
                         .await
