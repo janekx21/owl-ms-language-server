@@ -53,6 +53,9 @@ pub enum Error {
     Web(#[from] crate::web::Error),
 }
 
+// This Error type should be send I think
+unsafe impl Send for Error {}
+
 impl From<Error> for tower_lsp::jsonrpc::Error {
     fn from(value: Error) -> Self {
         match value {

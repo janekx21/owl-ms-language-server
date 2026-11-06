@@ -165,19 +165,17 @@ impl Backend {
                             mini_backend.http_client.clone(),
                         )
                         .await
-                        .inspect_log()
-                        .ok()
                     } else {
-                        None
+                        Ok(None)
                     }
                 };
 
-                let resolved_doc = if let Some(resolved_doc) = resolved_doc_or_err {
-                    resolved_doc
-                } else {
-                    // This is the error case
-                    warn!("Resolving {iri} did not work");
-                    None
+                let resolved_doc = match resolved_doc_or_err {
+                    Ok(resolved_doc) => resolved_doc,
+                    Err(e) => {
+                        warn!("Resolving {iri} did not work: {e}");
+                        None
+                    }
                 };
 
                 if let Some(doc) = resolved_doc {
