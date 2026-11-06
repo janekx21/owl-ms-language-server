@@ -2020,15 +2020,14 @@ pub fn iri_to_parent_url_str(iri: &str) -> Option<&str> {
 
 /// Convert some IRI (here in URL type) into a URL where the IRI can be fetched from
 pub fn iri_to_onology_url(mut url: Iri) -> Iri {
-    todo!("implement");
-    if url.fragment().is_some() {
-        url.set_fragment(Some(""));
-    } else if let Ok(mut seg) = url.path_segments_mut() {
-        // TODO check for obo ontology
-        // See https://obofoundry.org/principles/fp-003-uris.html
-
-        seg.pop();
+    // TODO check for obo ontology
+    // See https://obofoundry.org/principles/fp-003-uris.html
+    if let Some((l, _)) = url.rsplit_once('#') {
+        url = l.to_iri();
+    } else if let Some((l, _)) = url.rsplit_once('/') {
+        url = l.to_iri();
     }
+
     url
 }
 
@@ -2463,7 +2462,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
     let import_iris: Vec<&str> = doc
         .directly_imports()
         .into_iter()
-        .map(|i| i.as_str())
+        .map(super::iri::Iri::as_str)
         .collect();
 
     let ontology_iri = doc.ontology_iri();
@@ -3020,8 +3019,8 @@ mod tests {
         let urls = external_doc.imports();
 
         // Assert
-        assert!(urls.contains(&Url::parse("http://www.example.com/other-property").unwrap()));
-        assert!(urls.contains(&tmp_url.url()));
+        assert!(urls.contains(&"http://www.example.com/other-property".to_iri()));
+        assert!(urls.contains(&tmp_url.url().as_str().to_iri()));
     }
 
     #[test]
