@@ -2,7 +2,7 @@ use crate::consts::{
     child_keywords_for_kind, keyword_hover_info, DECIMAL_IRI, FLOAT_IRI, INTEGER_IRI, STRING_IRI,
 };
 use crate::error::{Error, Result, ResultIterator};
-use crate::iri::{Iri, ToIri};
+use crate::iri::{Iri, ToIriUnchecked, TryToIri};
 use crate::pos::Position;
 use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type_index};
 use crate::range::{Change, RangeBox};
@@ -182,14 +182,14 @@ impl OntologyDocument for InternalOmnDocument {
         let range: Range = node.range().into();
         match node.kind() {
             "full_iri" => Some(HoverResult::Iri {
-                iri: trim_full_iri_rope_slice(node_text(&node, self.rope())).to_iri(),
+                iri: trim_full_iri_rope_slice(node_text(&node, self.rope()))
+                    .try_to_iri()
+                    .ok()?,
                 range,
             }),
             "simple_iri" | "abbreviated_iri" => {
-                let iri = node_text(&node, self.rope());
-                let full_iri = self
-                    .abbreviated_iri_to_full_iri(&iri.to_iri())
-                    .unwrap_or(iri.to_iri());
+                let iri = node_text(&node, self.rope()).try_to_iri().ok()?;
+                let full_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
                 Some(HoverResult::Iri {
                     iri: full_iri,
                     range,
@@ -230,7 +230,9 @@ impl OntologyDocument for InternalOmnDocument {
         match node.kind() {
             "full_iri" => Some(RangeBox::new(
                 IriAtPosition {
-                    full_iri: trim_full_iri_rope_slice(node_text(&node, self.rope())).to_iri(),
+                    full_iri: trim_full_iri_rope_slice(node_text(&node, self.rope()))
+                        .try_to_iri()
+                        .ok()?,
                     is_import,
                     is_ontology,
                     frame_type,
@@ -238,10 +240,8 @@ impl OntologyDocument for InternalOmnDocument {
                 range,
             )),
             "simple_iri" | "abbreviated_iri" => {
-                let iri = node_text(&node, self.rope());
-                let full_iri = self
-                    .abbreviated_iri_to_full_iri(&iri.to_iri())
-                    .unwrap_or(iri.to_iri());
+                let iri = node_text(&node, self.rope()).try_to_iri().ok()?;
+                let full_iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
                 Some(RangeBox::new(
                     IriAtPosition {
                         full_iri,
@@ -329,16 +329,17 @@ impl OntologyDocument for InternalOmnDocument {
         }
         Ok(match node.kind() {
             "full_iri" => {
-                let full_iri = trim_full_iri_rope_slice(node_text(&node, self.rope())).to_iri();
+                let full_iri =
+                    trim_full_iri_rope_slice(node_text(&node, self.rope())).try_to_iri()?;
                 Some(RenameInfo::Iri(IriRenameInfo {
                     full_iri,
-                    new_iri: Some(new_name.to_iri()),
+                    new_iri: Some(new_name.parse()?),
                     frame_type,
                     original: new_name.to_string(),
                 }))
             }
             "simple_iri" => {
-                let iri = node_text(&node, self.rope()).to_iri();
+                let iri = node_text(&node, self.rope()).try_to_iri()?;
                 Some(RenameInfo::Iri(IriRenameInfo {
                     full_iri: self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri),
                     new_iri: self.abbreviated_iri_to_full_iri(&new_name.into()),
@@ -366,9 +367,9 @@ impl OntologyDocument for InternalOmnDocument {
                     let new_original = format!("{prefix}:{new_name}");
                     Some(RenameInfo::Iri(IriRenameInfo {
                         full_iri: self
-                            .abbreviated_iri_to_full_iri(&text.to_iri())
-                            .unwrap_or(text.to_iri()),
-                        new_iri: self.abbreviated_iri_to_full_iri(&new_original.to_iri()),
+                            .abbreviated_iri_to_full_iri(&text.parse()?)
+                            .unwrap_or(text.parse()?),
+                        new_iri: self.abbreviated_iri_to_full_iri(&new_original.parse()?),
                         frame_type,
                         original: new_original,
                     }))
@@ -392,30 +393,27 @@ impl OntologyDocument for InternalOmnDocument {
                     .query(&OMN_ALL_QUERIES.iri_query_all)
                     .into_iter()
                     .map(|m| {
-                        let (iri, range, node_frame_type) = match &m.captures[..] {
-                            [iri_capture] => (
-                                match iri_capture.node.kind {
-                                    "full_iri" => {
-                                        trim_full_iri_rope_slice(iri_capture.node.text).to_iri()
-                                    }
-                                    "simple_iri" | "abbreviated_iri" => self
-                                        .abbreviated_iri_to_full_iri(
-                                            &iri_capture.node.text.to_iri(),
-                                        )
-                                        .unwrap_or(iri_capture.node.text.to_iri()),
-                                    _ => unreachable!(),
-                                },
-                                iri_capture.node.range,
-                                FrameType::parse(
-                                    iri_capture
-                                        .node
-                                        .parent_kind
-                                        .expect("iris should have parents"),
-                                ),
-                            ),
+                        let iri_capture = m.captures.first().expect("one capture");
+
+                        let iri = match iri_capture.node.kind {
+                            "full_iri" => trim_full_iri_rope_slice(iri_capture.node.text)
+                                .try_to_iri()
+                                .ok(),
+                            "simple_iri" | "abbreviated_iri" => {
+                                let iri = iri_capture.node.text.try_to_iri()?;
+                                Some(self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri))
+                            }
                             _ => unreachable!(),
                         };
-                        if &iri == full_iri && &node_frame_type == frame_type {
+                        let range = iri_capture.node.range;
+                        let node_frame_type = FrameType::parse(
+                            iri_capture
+                                .node
+                                .parent_kind
+                                .expect("iris should have parents"),
+                        );
+
+                        if iri.as_ref() == Some(full_iri) && &node_frame_type == frame_type {
                             Ok(Some(RangeBox::new(
                                 new_iri
                                     .clone()
@@ -494,10 +492,12 @@ impl OntologyDocument for InternalOmnDocument {
         self.query_range(&OMN_ALL_QUERIES.iri_query_all, range)
             .into_iter()
             .flat_map(|match_| match_.captures)
-            .map(|capture| {
-                let iri = trim_full_iri_rope_slice(capture.node.text).to_iri();
+            .filter_map(|capture| {
+                let iri = trim_full_iri_rope_slice(capture.node.text)
+                    .try_to_iri()
+                    .ok()?;
                 let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-                RangeBox::new(iri, capture.node.range)
+                Some(RangeBox::new(iri, capture.node.range))
             })
             .collect()
     }
@@ -854,7 +854,7 @@ impl QueriedDocument {
                     Some(iri.value())
                 }
             })
-            .map(super::iri::ToIri::to_iri)
+            .map(super::iri::ToIriUnchecked::to_iri)
             // Filter out the current document as a prefix (most likely the empty prefix ":")
             .filter(|iri| iri != own_iri)
             .map(|iri| {

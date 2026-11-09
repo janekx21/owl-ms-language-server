@@ -3,7 +3,10 @@ use itertools::Itertools;
 use lasso::{Spur, ThreadedRodeo};
 use log::warn;
 use ropey::RopeSlice;
-use std::{borrow::Borrow, collections::HashMap, fmt::Display, ops::Deref, sync::LazyLock};
+use sophia::iri::resolve::{IriParseError, OxiriRef};
+use std::{
+    borrow::Borrow, collections::HashMap, fmt::Display, ops::Deref, str::FromStr, sync::LazyLock,
+};
 use tower_lsp::lsp_types::Url;
 
 use crate::range::RangeBox;
@@ -16,20 +19,18 @@ impl ReusedIriSet {
         Self(ThreadedRodeo::new())
     }
 
-    pub fn iri(&self, s: &str) -> Iri {
+    fn iri(&self, s: &str) -> Iri {
         let key = self.0.get_or_intern(s);
         Iri(key)
     }
 
-    pub fn str(&self, i: &Iri) -> &str {
+    fn str(&self, i: &Iri) -> &str {
         self.0.resolve(&i.0)
     }
 
     pub fn used(&self) -> usize {
         self.0.len()
     }
-
-    // TODO do this for the url as well
 }
 
 pub static REUSE_IRI: LazyLock<ReusedIriSet> = LazyLock::new(ReusedIriSet::new);
@@ -37,6 +38,7 @@ pub static REUSE_IRI: LazyLock<ReusedIriSet> = LazyLock::new(ReusedIriSet::new);
 // TODO
 // Iri could maybe be split into absolute(full iri) and relative(simple and abbriviated iri) versions
 
+/// Absolute or relative IRI. Validated on creation. Space optimized with reuse set.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 pub struct Iri(Spur);
 
@@ -59,18 +61,20 @@ impl Iri {
 
     pub fn try_to_full(&self, prefixes: &HashMap<String, RangeBox<String>>) -> Option<Self> {
         if let Some((prefix, simple_iri)) = self.as_str().split_once(':') {
-            prefixes.get(prefix).map(|resolved_prefix| {
+            prefixes.get(prefix).and_then(|resolved_prefix| {
                 [resolved_prefix.value().as_str(), simple_iri]
                     .join("")
-                    .to_iri()
+                    .parse()
+                    .ok()
             })
         } else {
             // Simple IRIs get a free colon prepended
             // ref: https://www.w3.org/TR/owl2-manchester-syntax/#IRIs.2C_Integers.2C_Literals.2C_and_Entities
-            prefixes.get("").map(|resolved_prefix| {
+            prefixes.get("").and_then(|resolved_prefix| {
                 [resolved_prefix.value().as_str(), self.as_str()]
                     .join("")
-                    .to_iri()
+                    .parse()
+                    .ok()
             })
         }
     }
@@ -101,29 +105,45 @@ impl Iri {
     }
 }
 
-pub trait ToIri {
-    fn to_iri(&self) -> Iri;
-}
+impl FromStr for Iri {
+    type Err = IriParseError;
 
-impl ToIri for &str {
-    fn to_iri(&self) -> Iri {
-        REUSE_IRI.iri(self)
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match OxiriRef::parse(s) {
+            Ok(_) => Ok(REUSE_IRI.iri(s)),
+            Err(e) => Err(e),
+        }
     }
 }
 
-impl ToIri for String {
-    fn to_iri(&self) -> Iri {
-        REUSE_IRI.iri(self)
+pub trait ToIriUnchecked {
+    /// This does panic if the IRI is invalid!
+    fn to_iri_unchecked(&self) -> Iri;
+}
+
+impl ToIriUnchecked for &str {
+    fn to_iri_unchecked(&self) -> Iri {
+        self.parse().unwrap()
     }
 }
 
-impl ToIri for RopeSlice<'_> {
-    fn to_iri(&self) -> Iri {
+pub trait TryToIri {
+    fn try_to_iri(&self) -> Result<Iri, IriParseError>;
+}
+
+// impl ToIri for String {
+//     fn to_iri(&self) -> Iri {
+//         REUSE_IRI.iri(self)
+//     }
+// }
+
+impl TryToIri for RopeSlice<'_> {
+    fn try_to_iri(&self) -> Result<Iri, IriParseError> {
         if let Some(str) = self.as_str() {
             // Does not allocate a String
-            REUSE_IRI.iri(str)
+            str.parse()
         } else {
-            REUSE_IRI.iri(&self.to_string())
+            self.to_string().parse()
         }
     }
 }
@@ -168,9 +188,9 @@ mod tests {
 
     #[test]
     fn reused_iri_set_create_iri_should_work() {
-        let _iri = "http://example.com/onto#132".to_iri();
-        let _iri2 = "http://example.com/onto#132".to_iri();
-        let _iri3 = "http://example.com/onto#132".to_iri();
+        let _iri = "http://example.com/onto#132".to_iri_unchecked();
+        let _iri2 = "http://example.com/onto#132".to_iri_unchecked();
+        let _iri3 = "http://example.com/onto#132".to_iri_unchecked();
 
         // This is 4, because the resuse set holds one of the strong reference counts
         assert_eq!(REUSE_IRI.0.len(), 1);

@@ -42,7 +42,7 @@ use tree_sitter_c2rust::Language;
 use workspace::Workspace;
 
 use crate::consts::{LABEL_IRI, STRING_IRI};
-use crate::iri::{Iri, ToIri, REUSE_IRI};
+use crate::iri::{Iri, ToIriUnchecked, REUSE_IRI};
 use crate::sync_backend::SyncBackend;
 use crate::web::HttpClient;
 use crate::workspace::{
@@ -1336,10 +1336,10 @@ fn create_label_code_action(
 
     let text_edits = doc.add_annotation_edits(workspace::Annotation {
         frame_iri: iri_under_cursor.value().full_iri.clone(),
-        iri: LABEL_IRI.to_iri(),
+        iri: LABEL_IRI.to_iri_unchecked(),
         string_value: label.clone(),
         language: None,
-        datatype: STRING_IRI.to_iri(),
+        datatype: STRING_IRI.to_iri_unchecked(),
     });
 
     if text_edits.is_empty() {

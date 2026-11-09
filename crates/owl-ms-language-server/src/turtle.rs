@@ -14,7 +14,7 @@ use tree_sitter_c2rust::{Language, Parser, Query, QueryCursor, StreamingIterator
 use crate::{
     debugging::timeit,
     error::{Error, Result},
-    iri::{Iri, ToIri},
+    iri::{Iri, ToIriUnchecked},
     pos::Position,
     queries::{treesitter_highlight_capture_into_semantic_token_type_index, TTL_ALL_QUERIES},
     range::{Range, RangeBox},

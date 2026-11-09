@@ -3,7 +3,7 @@ use crate::consts::{get_fixed_infos, keyword_hover_info, LABEL_IRI, STRING_IRI};
 use crate::error::{Error, Result, ResultExt, ResultIterator};
 use crate::functional::InternalOfnDocument;
 use crate::iri::Iri;
-use crate::iri::ToIri;
+use crate::iri::ToIriUnchecked;
 use crate::manchester::InternalOmnDocument;
 use crate::pos::Position;
 use crate::queries::OMN_NODE_TYPES;
