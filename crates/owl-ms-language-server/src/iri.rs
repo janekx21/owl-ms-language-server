@@ -3,7 +3,13 @@ use itertools::Itertools;
 use lasso::{Spur, ThreadedRodeo};
 use log::warn;
 use ropey::RopeSlice;
-use sophia::iri::resolve::{IriParseError, OxiriRef};
+use sophia::{
+    api::MownStr,
+    iri::{
+        resolve::{IriParseError, OxiriRef},
+        IriRef,
+    },
+};
 use std::{
     borrow::Borrow, collections::HashMap, fmt::Display, ops::Deref, str::FromStr, sync::LazyLock,
 };
@@ -109,9 +115,21 @@ impl FromStr for Iri {
     type Err = IriParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match OxiriRef::parse(s) {
-            Ok(_) => Ok(REUSE_IRI.iri(s)),
-            Err(e) => Err(e),
+        // Remove empty fragments
+        let s = match s.rsplit_once('#') {
+            Some((iri, "")) => iri,
+            None | Some(_) => s,
+        };
+
+        match s.rsplit_once(':') {
+            // This is an abbriviated IRI. Lets not parse it.
+            Some(_) => Ok(REUSE_IRI.iri(s)),
+
+            // This is a full IRI. Lets parse it.
+            None => match OxiriRef::parse(s) {
+                Ok(_) => Ok(REUSE_IRI.iri(s)),
+                Err(e) => Err(e),
+            },
         }
     }
 }
@@ -148,15 +166,21 @@ impl TryToIri for RopeSlice<'_> {
     }
 }
 
-impl From<String> for Iri {
-    fn from(val: String) -> Self {
-        REUSE_IRI.iri(&val)
+// impl From<String> for Iri {
+//     fn from(val: String) -> Self {
+//         REUSE_IRI.iri(&val)
+//     }
+// }
+
+impl From<Url> for Iri {
+    fn from(val: Url) -> Self {
+        val.as_str().parse().expect("url is valid iri")
     }
 }
 
-impl From<&str> for Iri {
-    fn from(val: &str) -> Self {
-        REUSE_IRI.iri(val)
+impl From<IriRef<MownStr<'_>>> for Iri {
+    fn from(val: IriRef<MownStr<'_>>) -> Self {
+        val.as_str().parse().expect("url is valid iri")
     }
 }
 

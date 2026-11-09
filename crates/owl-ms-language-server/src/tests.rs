@@ -5110,11 +5110,11 @@ async fn backend_did_change_should_update_ontology_id() {
 
     assert_eq!(
         document.ontology_iri(),
-        Some("http://example.com/othername".into())
+        Some("http://example.com/othername".to_iri_unchecked())
     );
     assert_eq!(
         document.version_iri(),
-        Some("http://example.com/ontology/123".into())
+        Some("http://example.com/ontology/123".to_iri_unchecked())
     );
 }
 
@@ -5185,7 +5185,7 @@ async fn backend_did_change_with_syntax_change_should_update_ontology_id() {
 
     assert_eq!(
         document.ontology_iri(),
-        Some("http://example.com/ontology".into())
+        Some("http://example.com/ontology".to_iri_unchecked())
     );
     assert_eq!(document.version_iri(), None);
 }
@@ -5281,11 +5281,11 @@ async fn backend_did_change_with_large_syntax_change_should_update_ontology_id()
 
     assert_eq!(
         document.ontology_iri(),
-        Some("http://example.com/othername".into())
+        Some("http://example.com/othername".to_iri_unchecked())
     );
     assert_eq!(
         document.version_iri(),
-        Some("http://example.com/ontology/321".into())
+        Some("http://example.com/ontology/321".to_iri_unchecked())
     );
 }
 

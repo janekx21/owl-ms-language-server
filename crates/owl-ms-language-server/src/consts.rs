@@ -1,5 +1,6 @@
 use crate::{
     iri::Iri,
+    iri::ToIriUnchecked,
     workspace::{Annotation, FrameInfo, FrameType},
 };
 use indoc::indoc;
@@ -30,12 +31,12 @@ macro_rules! fixed_infos {
             match iri.as_str() {
                 $(
                     $iri => vec![FrameInfo {
-                        iri: $iri.into(),
+                        iri: $iri.to_iri_unchecked(),
                         annotations: vec![
                             $(
                                 Annotation {
-                                    frame_iri: $iri.into(),
-                                    iri: $ann_iri.into(),
+                                    frame_iri: $iri.to_iri_unchecked(),
+                                    iri: $ann_iri.to_iri_unchecked(),
                                     string_value: $string_value.to_string(),
                                     language: Some($language),
                                     datatype: fixed_infos!(@datatype $($datatype)?),
@@ -53,7 +54,7 @@ macro_rules! fixed_infos {
         }
     };
 
-    (@datatype) => { STRING_IRI.into() };
+    (@datatype) => { STRING_IRI.to_iri_unchecked() };
     (@datatype $datatype:expr) => { $datatype };
 }
 

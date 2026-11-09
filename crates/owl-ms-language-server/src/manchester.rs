@@ -4,7 +4,9 @@ use crate::consts::{
 use crate::error::{Error, Result, ResultIterator};
 use crate::iri::{Iri, ToIriUnchecked, TryToIri};
 use crate::pos::Position;
-use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type_index};
+use crate::queries::{
+    self, treesitter_highlight_capture_into_semantic_token_type_index, OMN_NODE_TYPES,
+};
 use crate::range::{Change, RangeBox};
 use crate::workspace::{
     build_iri_locations, capture_by_name, changes_from_lsp, edit_vec_rb, extend_vec_rb,
@@ -26,6 +28,7 @@ use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelI
 use rayon::slice::ParallelSliceMut;
 use ropey::Rope;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::path::Path;
@@ -342,7 +345,7 @@ impl OntologyDocument for InternalOmnDocument {
                 let iri = node_text(&node, self.rope()).try_to_iri()?;
                 Some(RenameInfo::Iri(IriRenameInfo {
                     full_iri: self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri),
-                    new_iri: self.abbreviated_iri_to_full_iri(&new_name.into()),
+                    new_iri: self.abbreviated_iri_to_full_iri(&new_name.parse()?),
                     frame_type,
                     original: new_name.to_string(),
                 }))
@@ -437,9 +440,7 @@ impl OntologyDocument for InternalOmnDocument {
                     return vec![];
                 }
                 if let Some(p) = self.queried_document.prefixes.get(old_prefix) {
-                    let (name_range, _) = self
-                        .parsed_document
-                        .prefix_parts_in_range(*p.range())
+                    let (name_range, _) = prefix_parts_in_range(&self.parsed_document, *p.range())
                         .expect("valid prefix in this range");
 
                     let mut edits = vec![RangeBox::new(format!("{new_prefix}:"), name_range)];
@@ -716,7 +717,7 @@ impl InternalOmnDocument {
         let parsed_document = ParsedDocument::new(tree, rope);
 
         // TODO
-        let queried_document: QueriedDocument = parsed_document.into_queried();
+        let queried_document: QueriedDocument = into_queried(&parsed_document);
 
         let stage2: Stage2Document = queried_document.analyze(&parsed_document, &id);
 
@@ -854,27 +855,16 @@ impl QueriedDocument {
                     Some(iri.value())
                 }
             })
-            .map(super::iri::ToIriUnchecked::to_iri)
+            .filter_map(|i| i.parse::<Iri>().ok())
             // Filter out the current document as a prefix (most likely the empty prefix ":")
             .filter(|iri| iri != own_iri)
-            .map(|iri| {
-                // Sets fragment to always be there but empty
-                iri.rsplit_once('#').map(|(a, _)| a.to_iri()).unwrap_or(iri)
-
-                // if iri.fragment().is_some() {
-                //     let mut url = iri.clone();
-                //     url.set_fragment(Some(""));
-                //     url
-                // } else {
-                //     iri
-                // }
-            })
             .collect_vec();
 
         let referenced_iris = document_references
             .iter()
-            .map(|iri| iri_to_onology_iri(iri.value().clone()))
-            .unique();
+            .filter_map(|iri| iri_to_parent_url_str(iri.value()))
+            .unique()
+            .filter_map(|s| s.parse().ok());
 
         other_iris.extend(referenced_iris);
 
@@ -946,7 +936,7 @@ impl QueriedDocument {
         parsed_document
             .query_range(&OMN_ALL_QUERIES.annotation_query, range)
             .iter()
-            .map(|m| {
+            .filter_map(|m| {
                 let frame_iri_capture =
                     capture_by_name(&OMN_ALL_QUERIES.annotation_query, &m.captures, "frame_iri")
                         .expect("frame capture");
@@ -966,13 +956,16 @@ impl QueriedDocument {
                 let language_capture =
                     capture_by_name(&OMN_ALL_QUERIES.annotation_query, &m.captures, "language");
 
-                let frame_iri = trim_full_iri_rope_slice(frame_iri_capture.node.text).to_iri();
+                let frame_iri = trim_full_iri_rope_slice(frame_iri_capture.node.text)
+                    .try_to_iri()
+                    .ok()?;
                 let frame_iri = self
                     .abbreviated_iri_to_full_iri(&frame_iri)
                     .unwrap_or(frame_iri);
 
-                let annotation_iri =
-                    trim_full_iri_rope_slice(annotation_iri_capture.node.text).to_iri();
+                let annotation_iri = trim_full_iri_rope_slice(annotation_iri_capture.node.text)
+                    .try_to_iri()
+                    .ok()?;
                 let annotation_iri = self
                     .abbreviated_iri_to_full_iri(&annotation_iri)
                     .unwrap_or(annotation_iri);
@@ -984,22 +977,26 @@ impl QueriedDocument {
                     .and_then(|tag| language::Language::try_from(tag).ok());
                 // TODO #180 spawn diagnostics about wrong language
 
-                let datatype = datatype_capture.map_or(STRING_IRI.into(), |c| match c.node.kind {
-                    "keyword_integer" => INTEGER_IRI.into(),
-                    "keyword_decimal" => DECIMAL_IRI.into(),
-                    "keyword_float" => FLOAT_IRI.into(),
-                    "keyword_string" => STRING_IRI.into(),
-                    _ => self
-                        .abbreviated_iri_to_full_iri(&c.node.text.to_iri())
-                        .unwrap_or(c.node.text.to_iri()),
-                });
+                let datatype =
+                    datatype_capture.map_or(Some(STRING_IRI.to_iri_unchecked()), |c| {
+                        match c.node.kind {
+                            "keyword_integer" => Some(INTEGER_IRI.to_iri_unchecked()),
+                            "keyword_decimal" => Some(DECIMAL_IRI.to_iri_unchecked()),
+                            "keyword_float" => Some(FLOAT_IRI.to_iri_unchecked()),
+                            "keyword_string" => Some(STRING_IRI.to_iri_unchecked()),
+                            _ => {
+                                let iri = c.node.text.try_to_iri().ok()?;
+                                Some(self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri))
+                            }
+                        }
+                    })?;
 
                 // The value can decide the type
                 // TODO maybe check with range of annotation property
                 let datatype = match value_capture.node.kind {
-                    "integer_literal" => INTEGER_IRI.into(),
-                    "decimal_literal" => DECIMAL_IRI.into(),
-                    "floating_point_literal" => FLOAT_IRI.into(),
+                    "integer_literal" => INTEGER_IRI.to_iri_unchecked(),
+                    "decimal_literal" => DECIMAL_IRI.to_iri_unchecked(),
+                    "floating_point_literal" => FLOAT_IRI.to_iri_unchecked(),
                     _ => datatype,
                 };
 
@@ -1011,7 +1008,7 @@ impl QueriedDocument {
                     datatype,
                 };
 
-                RangeBox::new(annotation, frame_capture.node.range)
+                Some(RangeBox::new(annotation, frame_capture.node.range))
             })
             .collect_vec()
     }
@@ -1031,7 +1028,7 @@ impl QueriedDocument {
         parsed_document
             .query_range(&OMN_ALL_QUERIES.frame_query, range)
             .iter()
-            .map(|m| match &m.captures[..] {
+            .filter_map(|m| match &m.captures[..] {
                 [frame_iri_capture, frame_capture] => {
                     let frame_iri_parent_kind = frame_iri_capture
                         .node
@@ -1039,18 +1036,20 @@ impl QueriedDocument {
                         .as_ref()
                         .expect("All frame IRIs should have parents");
 
-                    let frame_iri = trim_full_iri_rope_slice(frame_iri_capture.node.text).to_iri();
+                    let frame_iri = trim_full_iri_rope_slice(frame_iri_capture.node.text)
+                        .try_to_iri()
+                        .ok()?;
                     let frame_iri = self
                         .abbreviated_iri_to_full_iri(&frame_iri)
                         .unwrap_or(frame_iri);
 
-                    RangeBox::new(
+                    Some(RangeBox::new(
                         IriDefinition {
                             iri: frame_iri,
                             kind: FrameType::parse(frame_iri_parent_kind),
                         },
                         frame_capture.node.range,
-                    )
+                    ))
                 }
                 _ => unreachable!(),
             })
@@ -1069,12 +1068,14 @@ impl QueriedDocument {
         parsed_document
             .query_range(&OMN_ALL_QUERIES.iri_query_references, range)
             .iter()
-            .map(|m| match &m.captures[..] {
+            .filter_map(|m| match &m.captures[..] {
                 [iri_capture] => {
-                    let iri = trim_full_iri_rope_slice(iri_capture.node.text).to_iri();
+                    let iri = trim_full_iri_rope_slice(iri_capture.node.text)
+                        .try_to_iri()
+                        .ok()?;
                     let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
-                    RangeBox::new(iri, iri_capture.node.range)
+                    Some(RangeBox::new(iri, iri_capture.node.range))
                 }
                 _ => unreachable!(),
             })
@@ -1101,12 +1102,13 @@ impl QueriedDocument {
 
         let (directly_reachable_import_iris, directly_reachable_other_iris) =
             timeit("reachable iris", || {
-                self.reachable_iris(&references, &id.uri.as_str().to_iri()) // TODO!! use id.iri
+                self.reachable_iris(&references, &id.uri.clone().into())
+                // TODO!! use id.iri
             });
 
         let iri_locations = build_iri_locations(&references);
 
-        let mut local_diagnostics = timeit("syntax errors", || parsed_document.syntax_errors());
+        let mut local_diagnostics = timeit("syntax errors", || syntax_errors(parsed_document));
         local_diagnostics.extend(semantic_local_diagnostics(&references, &self.prefixes));
         Stage2Document {
             definitions,
@@ -1141,7 +1143,7 @@ impl QueriedDocument {
         }
 
         if dirty {
-            self.ontology_id = parsed_document.ontology_id();
+            self.ontology_id = ontology_id(parsed_document);
         }
 
         // Edit
@@ -1182,13 +1184,13 @@ impl QueriedDocument {
         // Add
 
         for di in post_change_ranges {
-            let additional_imports = parsed_document.imports_in_range(*di);
+            let additional_imports = imports_in_range(parsed_document, *di);
 
             self.imports.extend(additional_imports);
         }
 
         for di in post_change_ranges {
-            let additional_prefixes = parsed_document.prefixes_in_range(*di);
+            let additional_prefixes = prefixes_in_range(parsed_document, *di);
 
             if !additional_prefixes.is_empty() {
                 dirty_prefix = true;
@@ -1209,9 +1211,9 @@ impl From<ParsedDocument> for QueriedDocument {
     fn from(val: ParsedDocument) -> Self {
         debug!("ParsedDocument -> QueriedDocument");
 
-        let ontology_id = val.ontology_id();
-        let prefixes = val.prefixes();
-        let imports = val.imports();
+        let ontology_id = ontology_id(&val);
+        let prefixes = prefixes(&val);
+        let imports = imports(&val);
 
         QueriedDocument {
             ontology_id,
@@ -1221,20 +1223,23 @@ impl From<ParsedDocument> for QueriedDocument {
     }
 }
 
-impl ParsedDocument {
-    fn into_queried(self: &ParsedDocument) -> QueriedDocument {
-        debug!("ParsedDocument -> QueriedDocument");
+fn into_queried(parsed_document: &ParsedDocument) -> QueriedDocument {
+    debug!("ParsedDocument -> QueriedDocument");
 
-        let ((ontology_id, prefixes), imports) = rayon::join(
-            || rayon::join(|| self.ontology_id(), || self.prefixes()),
-            || self.imports(),
-        );
+    let ((ontology_id, prefixes), imports) = rayon::join(
+        || {
+            rayon::join(
+                || ontology_id(parsed_document),
+                || prefixes(parsed_document),
+            )
+        },
+        || imports(parsed_document),
+    );
 
-        QueriedDocument {
-            ontology_id,
-            prefixes,
-            imports,
-        }
+    QueriedDocument {
+        ontology_id,
+        prefixes,
+        imports,
     }
 }
 
@@ -1617,11 +1622,11 @@ impl Stage2Document {
 
             // TODO split into seperate functions
             let (directly_reachable_import_iris, directly_reachable_other_iris) =
-                queried_document.reachable_iris(&self.references, &id.uri.as_str().to_iri()); // TODO!! use id.iri
+                queried_document.reachable_iris(&self.references, &id.uri.clone().into()); // TODO!! use id.iri
             self.directly_reachable_import_iris = directly_reachable_import_iris;
             self.directly_reachable_other_iris = directly_reachable_other_iris;
 
-            self.local_diagnostics = parsed_document.syntax_errors();
+            self.local_diagnostics = syntax_errors(parsed_document);
 
             self.local_diagnostics.extend(semantic_local_diagnostics(
                 &self.references,
@@ -1696,5 +1701,314 @@ fn try_into_abbriviated(iri: &Iri) -> Option<(&str, &str)> {
         }
     } else {
         None
+    }
+}
+
+/// Returns the ontology IRI if possible and the version IRI if possible.
+pub fn ontology_id(parsed_document: &ParsedDocument) -> Option<RangeBox<OntologyId>> {
+    match &parsed_document.query(&OMN_ALL_QUERIES.ontology)[..] {
+        [] => None,
+        [ontology] => match &ontology.captures[..] {
+            [] => None,
+            // This should be a full IRI so lets trim it
+            [iri_capture] => Some(RangeBox::new(
+                (
+                    trim_full_iri_rope_slice(iri_capture.node.text)
+                        .try_to_iri()
+                        .ok()?,
+                    None,
+                ),
+                iri_capture.node.range,
+            )),
+            [iri_capture, version_iri_capture] => Some(RangeBox::new(
+                (
+                    trim_full_iri_rope_slice(iri_capture.node.text)
+                        .try_to_iri()
+                        .ok()?,
+                    Some(
+                        trim_full_iri_rope_slice(version_iri_capture.node.text)
+                            .try_to_iri()
+                            .ok()?,
+                    ),
+                ),
+                Range::new(
+                    iri_capture.node.range.start,
+                    version_iri_capture.node.range.end,
+                ),
+            )),
+            _ => unreachable!("The query has only one capture"),
+        },
+        _ => unreachable!("the grammar only parses ontology zero or one time"),
+    }
+}
+
+/// Returns the prefixes of a document (without colon `:`) in a prefix name to iri map.
+///
+/// Some prefixes should always be defined
+///
+/// ```owl-ms
+/// Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+/// Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+/// Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+/// Prefix: owl: <http://www.w3.org/2002/07/owl#>
+/// ```
+pub fn prefixes(parsed_document: &ParsedDocument) -> HashMap<String, RangeBox<String>> {
+    parsed_document
+        .query(&OMN_ALL_QUERIES.prefix)
+        .into_iter()
+        .map(|m| match &m.captures[..] {
+            [name_capture, iri_capture] => (
+                name_capture
+                    .node
+                    .text
+                    .to_string()
+                    .trim_end_matches(':')
+                    .to_string(),
+                RangeBox::new(
+                    trim_full_iri_rope_slice(iri_capture.node.text).to_string(),
+                    Range::new(name_capture.node.range.start, iri_capture.node.range.end),
+                ),
+            ),
+            _ => unreachable!(),
+        })
+        // Horned owl has no default here. Let's keep it out for now.
+        // .chain(
+        //     STANDARD_PREFIX_NAMES
+        //         .iter()
+        //         .map(|(a, b)| (a.to_string(), b.to_string())),
+        // )
+        .unique_by(|(k, v)| (k.clone(), v.value().clone()))
+        .collect()
+}
+
+pub fn prefixes_in_range(
+    parsed_document: &ParsedDocument,
+    range: Range,
+) -> HashMap<String, RangeBox<String>> {
+    parsed_document
+        .query_range(&OMN_ALL_QUERIES.prefix, range)
+        .into_iter()
+        .map(|m| match &m.captures[..] {
+            [name_capture, iri_capture] => (
+                name_capture
+                    .node
+                    .text
+                    .to_string()
+                    .trim_end_matches(':')
+                    .to_string(),
+                RangeBox::new(
+                    trim_full_iri_rope_slice(iri_capture.node.text).to_string(),
+                    Range::new(name_capture.node.range.start, iri_capture.node.range.end),
+                ),
+            ),
+            _ => unreachable!(),
+        })
+        .unique_by(|(k, v)| (k.clone(), v.value().clone()))
+        .collect()
+}
+
+pub fn prefix_parts_in_range(
+    parsed_document: &ParsedDocument,
+    range: Range,
+) -> Option<(Range, Range)> {
+    parsed_document
+        .query_range(&OMN_ALL_QUERIES.prefix, range)
+        .into_iter()
+        .map(|m| match &m.captures[..] {
+            [name_capture, iri_capture] => (name_capture.node.range, iri_capture.node.range),
+            _ => unreachable!(),
+        })
+        .next()
+}
+
+pub fn imports(parsed_document: &ParsedDocument) -> Vec<RangeBox<Iri>> {
+    parsed_document
+        .query(&OMN_ALL_QUERIES.import_query)
+        .iter()
+        .filter_map(|m| match &m.captures[..] {
+            [iri_capture] => trim_full_iri_rope_slice(iri_capture.node.text)
+                .try_to_iri()
+                .ok()
+                .map(|iri| RangeBox::new(iri, iri_capture.node.range)),
+            _ => unimplemented!(),
+        })
+        .collect_vec()
+}
+
+pub fn imports_in_range(parsed_document: &ParsedDocument, range: Range) -> Vec<RangeBox<Iri>> {
+    parsed_document
+        .query_range(&OMN_ALL_QUERIES.import_query, range)
+        .iter()
+        .filter_map(|m| match &m.captures[..] {
+            [iri_capture] => trim_full_iri_rope_slice(iri_capture.node.text)
+                .try_to_iri()
+                .ok()
+                .map(|iri| RangeBox::new(iri, iri_capture.node.range)),
+            _ => unimplemented!(),
+        })
+        .collect_vec()
+}
+
+/// Generate the diagnostics for a single node, walking recursively down to every child and every syntax error within
+pub fn syntax_errors(parsed_document: &ParsedDocument) -> Vec<Diagnostic> {
+    let mut cursor = parsed_document.tree().root_node().walk();
+    let mut diagnostics = Vec::<Diagnostic>::new();
+
+    loop {
+        let node = cursor.node();
+
+        if node.is_error() {
+            let leaf = first_leaf(node);
+            let range: Range = cursor.node().range().into();
+
+            let prev_node = node.prev_sibling().unwrap_or(node.parent().unwrap_or(node));
+
+            let mut prev = if let Some(prev_sib) = node.prev_sibling() {
+                let prev_sibs_last_leaf = get_last_leaf(prev_sib);
+                prev_sibs_last_leaf
+            } else {
+                prev_node
+            };
+
+            let mut parent_chain = vec![prev.kind()];
+            while let Some(par) = prev.parent() {
+                parent_chain.push(par.kind());
+                prev = par;
+            }
+
+            let possible_nodes = possible_nodes(node)
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+            debug!("Possible nodes: {possible_nodes:#?}");
+            debug!("Parent chain: {parent_chain:#?}");
+
+            let parent_chain_children = parent_chain
+                .iter()
+                .flat_map(|kind| {
+                    OMN_NODE_TYPES
+                        .get(&(*kind).to_string())
+                        .iter()
+                        .flat_map(|t| {
+                            t.children
+                                .types
+                                .iter()
+                                .map(|c| c.type_.clone())
+                                .collect_vec()
+                        })
+                        .collect_vec()
+                })
+                .collect::<HashSet<_>>();
+
+            let valid_children = parent_chain_children.intersection(&possible_nodes);
+
+            let valid_children: String = valid_children
+                .map(|nt| node_type_to_string(nt))
+                .sorted_unstable()
+                .join(", ");
+
+            let parent = parent_chain
+                .iter()
+                .map(|parent_kind| node_type_to_string(parent_kind))
+                .join(" < ");
+
+            diagnostics.push(Diagnostic {
+                range,
+                kind: DiagnosticKind::SyntaxError {
+                    valid_children,
+                    parent,
+                    msg: leaf
+                        .to_string()
+                        .trim_start_matches('(')
+                        .trim_end_matches(')')
+                        .to_string(),
+                },
+            });
+
+            // move along
+            while !cursor.goto_next_sibling() {
+                // move out
+                if !cursor.goto_parent() {
+                    // this node has no parent, it's the root
+                    return diagnostics;
+                }
+            }
+        } else if node.has_error() {
+            // move in
+            let has_child = cursor.goto_first_child(); // should always work
+
+            if !has_child {
+                while !cursor.goto_next_sibling() {
+                    // move out
+                    if !cursor.goto_parent() {
+                        // this node has no parent, it's the root
+                        return diagnostics;
+                    }
+                }
+            }
+        } else {
+            // move along
+            while !cursor.goto_next_sibling() {
+                // move out
+                if !cursor.goto_parent() {
+                    // this node has no parent, it's the root
+                    return diagnostics;
+                }
+            }
+        }
+    }
+}
+
+fn possible_nodes(node: Node<'_>) -> HashSet<&'static str> {
+    if !node.is_error() {
+        return HashSet::new();
+    }
+
+    let state = first_leaf(node).parse_state();
+
+    let names = LANGUAGE_OMN
+        .lookahead_iterator(state)
+        .map(|mut it| it.iter_names().collect())
+        .unwrap_or_default();
+
+    names
+}
+
+fn first_leaf(node: Node<'_>) -> Node<'_> {
+    let mut current = node;
+    while let Some(child) = current.child(0) {
+        current = child;
+    }
+    current
+}
+
+fn get_last_leaf(node: Node<'_>) -> Node<'_> {
+    debug!("Get last leaf of {node}");
+    if node.child_count() > 0 {
+        if let Some(c) = node.child(node.child_count() - 1) {
+            debug!("Goto child {c} with index {}", node.child_count() - 1);
+            get_last_leaf(c)
+        } else {
+            node
+        }
+    } else {
+        debug!("End on {node}");
+        node
+    }
+}
+
+fn node_type_to_string(node_type: &str) -> String {
+    node_type
+        .trim_start_matches("keyword_")
+        .split_terminator('_')
+        .map(capitalize_string)
+        .join(" ")
+}
+
+fn capitalize_string(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
     }
 }

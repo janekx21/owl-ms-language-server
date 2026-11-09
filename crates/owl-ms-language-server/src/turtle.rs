@@ -14,7 +14,7 @@ use tree_sitter_c2rust::{Language, Parser, Query, QueryCursor, StreamingIterator
 use crate::{
     debugging::timeit,
     error::{Error, Result},
-    iri::{Iri, ToIriUnchecked},
+    iri::{Iri, TryToIri},
     pos::Position,
     queries::{treesitter_highlight_capture_into_semantic_token_type_index, TTL_ALL_QUERIES},
     range::{Range, RangeBox},
@@ -175,19 +175,21 @@ fn gen_definitions(
     parsed_document
         .query(&TTL_ALL_QUERIES.definition)
         .into_iter()
-        .map(|m| {
+        .filter_map(|m| {
             let iri_c = m.captures.first().expect("should be one");
-            let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
+            let iri = trim_full_iri_rope_slice(iri_c.node.text)
+                .try_to_iri()
+                .ok()?;
             let iri = iri.try_to_full(prefixes).unwrap_or(iri);
             debug!("Found ttl {iri}");
-            RangeBox::new(
+            Some(RangeBox::new(
                 IriDefinition {
                     iri,
                     // kind: FrameType::Unknown, // TODO frame type FrameType::parse(iri_c.node.parent_kind.expect("iri should have parent")),
                     kind: FrameType::Unknown,
                 },
                 iri_c.node.range,
-            )
+            ))
         })
         .collect()
 }
@@ -300,10 +302,11 @@ impl OntologyDocument for InternalTtlDocument {
                     .filter_map(|ele| {
                         let iri_c = ele.captures.first().expect("should match once"); // TODO trim and to full iri
 
-                        let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
+                        let iri = trim_full_iri_rope_slice(iri_c.node.text)
+                            .try_to_iri()
+                            .ok()?;
                         let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
 
-                        // TODO node frame type check?
                         if iri == iri_rename_info.full_iri {
                             let value = iri_rename_info
                                 .new_iri
