@@ -1,7 +1,7 @@
 use core::fmt;
 use itertools::Itertools;
 use lasso::{Spur, ThreadedRodeo};
-use log::warn;
+use log::{debug, warn};
 use ropey::RopeSlice;
 use sophia::{
     api::MownStr,
@@ -105,6 +105,7 @@ impl Iri {
 
     /// This normalizes the IRI into a URL
     pub fn to_url(&self) -> Option<Url> {
+        debug!("IRI to URL {}", self.as_str());
         Url::parse(self.as_str())
             .inspect_err(|e| warn!("Url Parse Error: {e}"))
             .ok()
@@ -121,12 +122,13 @@ impl FromStr for Iri {
             None | Some(_) => s,
         };
 
-        match s.rsplit_once(':') {
+        match s.split_once("://") {
             // This is an abbriviated IRI. Lets not parse it.
-            Some(_) => Ok(REUSE_IRI.iri(s)),
+            // TODO!!!! this lets absolute iris trhou
+            None => Ok(REUSE_IRI.iri(s)),
 
             // This is a full IRI. Lets parse it.
-            None => match OxiriRef::parse(s) {
+            Some(_) => match OxiriRef::parse(s) {
                 Ok(_) => Ok(REUSE_IRI.iri(s)),
                 Err(e) => Err(e),
             },

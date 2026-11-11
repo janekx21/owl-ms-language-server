@@ -6563,7 +6563,7 @@ async fn backend_did_open_with_international_import_should_work() {
     let (doc_main, _) = sync.get_internal_document(&url).unwrap();
     assert!(doc_main
         .directly_imports()
-        .contains(&&"http://example.org/ä".to_iri()));
+        .contains(&&"http://example.org/ä".to_iri_unchecked()));
 }
 
 /////////////////////////

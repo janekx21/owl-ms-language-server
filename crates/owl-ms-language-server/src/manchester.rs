@@ -862,7 +862,7 @@ impl QueriedDocument {
 
         let referenced_iris = document_references
             .iter()
-            .filter_map(|iri| iri_to_parent_url_str(iri.value()))
+            .map(|iri| iri_to_onology_iri(iri.value().clone()))
             .unique()
             .filter_map(|s| s.parse().ok());
 

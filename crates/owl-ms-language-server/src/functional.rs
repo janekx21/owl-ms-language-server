@@ -204,10 +204,9 @@ fn gen_imports(parsed_document: &ParsedDocument) -> Vec<Iri> {
     parsed_document
         .query(&OFN_ALL_QUERIES.import)
         .into_iter()
-        .map(|m| {
+        .filter_map(|m| {
             let iri_c = m.captures.iter().exactly_one().expect("should be one");
-            let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
-            iri
+            trim_full_iri_rope_slice(iri_c.node.text).try_to_iri().ok()
         })
         .collect()
 }
@@ -269,8 +268,8 @@ impl OntologyDocument for InternalOfnDocument {
     }
 
     fn local_diagnostics(&self) -> &[Diagnostic] {
-    &[] // TODO
-}
+        &[] // TODO
+    }
 
     fn iri_locations(&self) -> HashMap<&Iri, &Vec<RangeBox<()>>> {
         HashMap::new() // TODO

@@ -30,6 +30,7 @@ use sophia::api::source::TripleSource;
 use sophia::api::term::{BnodeId, LanguageTag, SimpleTerm, Term};
 use sophia::api::MownStr;
 use sophia::inmem::graph::LightGraph;
+use sophia::iri::resolve::{Oxiri, OxiriRef};
 use sophia::iri::IriRef;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -1699,9 +1700,9 @@ impl ExternalDocument {
             .unique()
             .map(std::convert::Into::into)
             // Filter out IRI's that point to this ontology
-            .filter(|url: &Iri| {
+            .filter(|iri: &Iri| {
                 // This should be faster than url.make_relative, because url contains a serialized version
-                !url.to_string()
+                !iri.to_string()
                     .starts_with(uri.to_string().trim_end_matches('#'))
             })
             .filter(|url| !url.to_string().contains(&graph.1))
@@ -1725,16 +1726,42 @@ impl ExternalDocument {
 /// Convert some IRI into a IRI where the ontolgoy of that IRI can be fetched from.
 /// This turns `http://example.com/ontology#Table` -> `http://example.com/ontology`
 /// and `http://example.com/ontology/Table` -> `http://example.com/ontology`.
-pub fn iri_to_onology_iri(mut iri: Iri) -> Iri {
+pub fn iri_to_onology_iri(iri: Iri) -> Iri {
     // TODO check for obo ontology
     // See https://obofoundry.org/principles/fp-003-uris.html
-    if let Some((l, _)) = url.rsplit_once('#') {
-        url = l.to_iri_unchecked(); // Should stay valid
-    } else if let Some((l, _)) = url.rsplit_once('/') {
-        url = l.to_iri_unchecked(); // Should stay valid
-    }
 
-    iri
+    let o = if iri.contains("://") {
+        // absolute IRI
+        // We know that IRI is a valid IRI, lets skip the check
+        let oxiri = OxiriRef::parse_unchecked(iri);
+        if oxiri.fragment().is_some() {
+            format!(
+                "{}://{}{}",
+                oxiri.scheme().unwrap_or_default(),
+                oxiri.authority().unwrap_or_default(),
+                oxiri.path() // No fragment but last path segment
+            )
+            .as_str()
+            .to_iri_unchecked()
+        } else {
+            format!(
+                "{}://{}{}",
+                oxiri.scheme().unwrap_or_default(),
+                oxiri.authority().unwrap_or_default(),
+                oxiri
+                    .path()
+                    .rsplit_once('/')
+                    .map_or(oxiri.path(), |(l, _)| l) // Remove last path segment
+            )
+            .as_str()
+            .to_iri_unchecked()
+        }
+    } else {
+        // What can I do on abbriviated iris? Nothing i guess
+        iri
+    };
+    // debug!("try iri to ontology url {iri} -> {o}");
+    o
 }
 
 #[cached(
