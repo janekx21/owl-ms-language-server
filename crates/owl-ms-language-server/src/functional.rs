@@ -49,7 +49,7 @@ pub struct InternalOfnDocument {
     parsed_document: ParsedDocument,
     prefixes: HashMap<String, RangeBox<String>>,
     definitions: Vec<RangeBox<IriDefinition>>,
-    imports: Vec<Url>,
+    imports: Vec<Iri>,
 }
 
 impl InternalOfnDocument {
@@ -194,14 +194,14 @@ fn gen_definitions(
         .collect()
 }
 
-fn gen_imports(parsed_document: &ParsedDocument) -> Vec<Url> {
+fn gen_imports(parsed_document: &ParsedDocument) -> Vec<Iri> {
     parsed_document
         .query(&OFN_ALL_QUERIES.import)
         .into_iter()
-        .filter_map(|m| {
+        .map(|m| {
             let iri_c = m.captures.iter().exactly_one().expect("should be one");
             let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
-            iri.to_string().parse().ok()
+            iri
         })
         .collect()
 }
@@ -254,11 +254,11 @@ impl OntologyDocument for InternalOfnDocument {
         vec![] // TODO
     }
 
-    fn directly_imports(&self) -> Vec<&Url> {
+    fn directly_imports(&self) -> Vec<&Iri> {
         self.imports.iter().collect()
     }
 
-    fn directly_references_doc(&self) -> Vec<&Url> {
+    fn directly_references_doc(&self) -> Vec<&Iri> {
         self.imports.iter().collect()
     }
 
@@ -341,8 +341,8 @@ impl OntologyDocument for InternalOfnDocument {
     }
 
     fn all_iris_in_range(&self, _range: Range) -> Vec<RangeBox<Iri>> {
-    vec![] // TODO
-}
+        vec![] // TODO
+    }
 
     fn formatted(&self, _options: &FormattingSettings) -> String {
         self.parsed_document.rope().to_string() // TODO
@@ -353,48 +353,48 @@ impl OntologyDocument for InternalOfnDocument {
     }
 
     fn highlights(&self, range: Range) -> Highlights {
-    let query_source = tree_sitter_owl_fn::HIGHLIGHTS_QUERY;
-    let query = Query::new(&LANGUAGE_OFN, query_source).expect("valid query expect");
-    let mut query_cursor = QueryCursor::new();
-    if range != Range::FULL_RANGE {
-        query_cursor.set_point_range(range.into());
+        let query_source = tree_sitter_owl_fn::HIGHLIGHTS_QUERY;
+        let query = Query::new(&LANGUAGE_OFN, query_source).expect("valid query expect");
+        let mut query_cursor = QueryCursor::new();
+        if range != Range::FULL_RANGE {
+            query_cursor.set_point_range(range.into());
+        }
+        let matches = query_cursor.matches(
+            &query,
+            self.parsed_document.tree().root_node(),
+            RopeProvider::new(self.rope()),
+        );
+
+        let nodes = matches
+            .map_deref(|m| m.captures)
+            .flatten()
+            .map(|c| {
+                (
+                    c.node,
+                    treesitter_highlight_capture_into_semantic_token_type_index(
+                        query.capture_names()[c.index as usize],
+                    ),
+                )
+            })
+            .collect_vec();
+
+        nodes
+            .iter()
+            .map(|(node, type_index)| RangeBox::new(*type_index, node.range().into()))
+            .collect()
     }
-    let matches = query_cursor.matches(
-        &query,
-        self.parsed_document.tree().root_node(),
-        RopeProvider::new(self.rope()),
-    );
-
-    let nodes = matches
-        .map_deref(|m| m.captures)
-        .flatten()
-        .map(|c| {
-            (
-                c.node,
-                treesitter_highlight_capture_into_semantic_token_type_index(
-                    query.capture_names()[c.index as usize],
-                ),
-            )
-        })
-        .collect_vec();
-
-    nodes
-        .iter()
-        .map(|(node, type_index)| RangeBox::new(*type_index, node.range().into()))
-        .collect()
-}
 
     fn get_keyword_competions_at(&self, _pos: Position) -> Vec<String> {
         vec![] // TODO
     }
 
     fn get_iri_completions_at(
-    &self,
-    _pos: Position,
-    _workspace: &Workspace,
-) -> Vec<(String, String, String, bool)> {
-    vec![] // TODO
-}
+        &self,
+        _pos: Position,
+        _workspace: &Workspace,
+    ) -> Vec<(String, String, String, bool)> {
+        vec![] // TODO
+    }
 
     fn statistic(&self) -> String {
         "Not implemented".into()
