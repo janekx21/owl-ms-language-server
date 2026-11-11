@@ -1988,7 +1988,7 @@ impl ExternalDocument {
                     .starts_with(uri.to_string().trim_end_matches('#'))
             })
             .filter(|url| !url.to_string().contains(&graph.1))
-            .map(iri_to_onology_url)
+            .map(iri_to_onology_iri)
             .unique();
 
         Box::new(imports.iter().cloned().chain(child_urls).unique())
@@ -2005,24 +2005,21 @@ impl ExternalDocument {
     }
 }
 
-/// Should do the same as [`iri_to_parent_url`] but without parsing the url and therefore without allocation
-pub fn iri_to_parent_url_str(iri: &str) -> Option<&str> {
-    iri.rsplit_once('#')
-        .map(|(l, _)| l)
-        .or_else(|| iri.rsplit_once('/').map(|(l, _)| l))
-}
-
-/// Convert some IRI (here in URL type) into a URL where the IRI can be fetched from
-pub fn iri_to_onology_url(mut url: Iri) -> Iri {
+/// Convert some IRI into a IRI where the ontolgoy of that IRI can be fetched from.
+/// This turns `http://example.com/ontology#Table` -> `http://example.com/ontology`
+/// and `http://example.com/ontology/Table` -> `http://example.com/ontology`.
+pub fn iri_to_onology_iri(mut iri: Iri) -> Iri {
     // TODO check for obo ontology
     // See https://obofoundry.org/principles/fp-003-uris.html
-    if let Some((l, _)) = url.rsplit_once('#') {
-        url = l.to_iri();
-    } else if let Some((l, _)) = url.rsplit_once('/') {
-        url = l.to_iri();
+    // TODO use oxiri not string splits
+
+    if let Some((l, _)) = iri.rsplit_once('#') {
+        iri = l.to_iri();
+    } else if let Some((l, _)) = iri.rsplit_once('/') {
+        iri = l.to_iri();
     }
 
-    url
+    iri
 }
 
 #[cached(

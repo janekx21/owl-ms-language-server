@@ -3,13 +3,7 @@ use itertools::Itertools;
 use lasso::{Spur, ThreadedRodeo};
 use log::warn;
 use ropey::RopeSlice;
-use std::{
-    borrow::Borrow,
-    collections::HashMap,
-    fmt::{Display, Write},
-    ops::Deref,
-    sync::LazyLock,
-};
+use std::{borrow::Borrow, collections::HashMap, fmt::Display, ops::Deref, sync::LazyLock};
 use tower_lsp::lsp_types::Url;
 
 use crate::range::RangeBox;

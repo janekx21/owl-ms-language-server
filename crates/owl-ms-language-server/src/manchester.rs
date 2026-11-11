@@ -8,7 +8,7 @@ use crate::queries::{self, treesitter_highlight_capture_into_semantic_token_type
 use crate::range::{Change, RangeBox};
 use crate::workspace::{
     build_iri_locations, capture_by_name, changes_from_lsp, edit_vec_rb, extend_vec_rb,
-    iri_to_parent_url_str, node_text, post_change_ranges, retain_vec_rb, retain_vec_rb_on_remove,
+    iri_to_onology_iri, node_text, post_change_ranges, retain_vec_rb, retain_vec_rb_on_remove,
     trim_full_iri_rope_slice, trim_string_value, word_before_character, Annotation, Diagnostic,
     DiagnosticKind, DocumentId, FormattingSettings, FrameInfo, FrameType, Highlights, HoverResult,
     IriAtPosition, IriDefinition, IriRenameInfo, KeywordAction, Location, OntologyDocument,
@@ -132,14 +132,14 @@ impl OntologyDocument for InternalOmnDocument {
     }
 
     fn directly_imports(&self) -> Vec<&Iri> {
-        self.stage2.directly_reachable_import_urls.iter().collect()
+        self.stage2.directly_reachable_import_iris.iter().collect()
     }
 
     fn directly_references_doc(&self) -> Vec<&Iri> {
         self.stage2
-            .directly_reachable_import_urls
+            .directly_reachable_import_iris
             .iter()
-            .chain(self.stage2.directly_reachable_other_urls.iter())
+            .chain(self.stage2.directly_reachable_other_iris.iter())
             .collect()
     }
 
@@ -629,8 +629,8 @@ impl OntologyDocument for InternalOmnDocument {
             self.stage2.all_frame_infos.len(),
             self.stage2.local_diagnostics.len(),
             self.stage2.iri_locations.len(),
-            self.stage2.directly_reachable_import_urls.len(),
-            self.stage2.directly_reachable_other_urls.len(),
+            self.stage2.directly_reachable_import_iris.len(),
+            self.stage2.directly_reachable_other_iris.len(),
             self.stage2.all_frame_infos.values().map(|a| a.annotations.len()).sum::<usize>(),
             self.stage2.all_frame_infos.values().map(|a| a.definitions.len()).sum::<usize>(),
         )
@@ -831,7 +831,7 @@ pub struct QueriedDocument {
 
 impl QueriedDocument {
     /// Finds flat references to other document URL's in this document
-    pub fn reachable_urls(
+    pub fn reachable_iris(
         &self,
         document_references: &[RangeBox<Iri>],
         own_iri: &Iri,
@@ -842,8 +842,8 @@ impl QueriedDocument {
             .map(|rb| rb.value().clone())
             .collect_vec();
 
-        // Other urls include prefixes
-        let mut other_urls = self
+        // Other iris include prefixes
+        let mut other_iris = self
             .prefixes
             .iter()
             // Filter out the empty prefix ":"
@@ -860,32 +860,17 @@ impl QueriedDocument {
             .map(|iri| {
                 // Sets fragment to always be there but empty
                 iri.rsplit_once('#').map(|(a, _)| a.to_iri()).unwrap_or(iri)
-
-                // if iri.fragment().is_some() {
-                //     let mut url = iri.clone();
-                //     url.set_fragment(Some(""));
-                //     url
-                // } else {
-                //     iri
-                // }
             })
             .collect_vec();
 
-        let referenced_urls = document_references
+        let referenced_iris = document_references
             .iter()
-            .filter_map(|iri| iri_to_parent_url_str(iri.value()))
-            .unique()
-            .map(|s| s.to_iri());
+            .map(|iri| iri_to_onology_iri(iri.value().clone()))
+            .unique();
 
-        // debug!(
-        //     "Extending {} with {}",
-        //     own_uri,
-        //     referenced_urls.iter().join(", ")
-        // );
+        other_iris.extend(referenced_iris);
 
-        other_urls.extend(referenced_urls);
-
-        (imports, other_urls)
+        (imports, other_iris)
     }
 
     pub fn abbreviated_iri_to_full_iri(&self, abbreviated_iri: &Iri) -> Option<Iri> {
@@ -1106,9 +1091,9 @@ impl QueriedDocument {
             QueriedDocument::document_all_frame_infos(&definitions, &annotations, &id.path)
         });
 
-        let (directly_reachable_import_urls, directly_reachable_other_urls) =
-            timeit("reachable urls", || {
-                self.reachable_urls(&references, &id.uri.as_str().to_iri()) // TODO!! use id.iri
+        let (directly_reachable_import_iris, directly_reachable_other_iris) =
+            timeit("reachable iris", || {
+                self.reachable_iris(&references, &id.uri.as_str().to_iri()) // TODO!! use id.iri
             });
 
         let iri_locations = build_iri_locations(&references);
@@ -1121,8 +1106,8 @@ impl QueriedDocument {
             annotations,
             all_frame_infos,
             local_diagnostics,
-            directly_reachable_import_urls,
-            directly_reachable_other_urls,
+            directly_reachable_import_iris,
+            directly_reachable_other_iris,
             iri_locations,
         }
     }
@@ -1509,10 +1494,10 @@ pub struct Stage2Document {
 
     all_frame_infos: HashMap<Iri, FrameInfo>,
     local_diagnostics: Vec<Diagnostic>,
-    /// These include only URL's from the imports
-    directly_reachable_import_urls: Vec<Iri>,
-    /// These include all other URL's that can be found in this document
-    directly_reachable_other_urls: Vec<Iri>,
+    /// These include only IRI's from the imports
+    directly_reachable_import_iris: Vec<Iri>,
+    /// These include all other IRI's that can be found in this document
+    directly_reachable_other_iris: Vec<Iri>,
     iri_locations: HashMap<Iri, Vec<RangeBox<()>>>,
 }
 
@@ -1623,10 +1608,10 @@ impl Stage2Document {
             self.all_frame_infos = all_frame_infos;
 
             // TODO split into seperate functions
-            let (directly_reachable_import_urls, directly_reachable_other_urls) =
-                queried_document.reachable_urls(&self.references, &id.uri.as_str().to_iri()); // TODO!! use id.iri
-            self.directly_reachable_import_urls = directly_reachable_import_urls;
-            self.directly_reachable_other_urls = directly_reachable_other_urls;
+            let (directly_reachable_import_iris, directly_reachable_other_iris) =
+                queried_document.reachable_iris(&self.references, &id.uri.as_str().to_iri()); // TODO!! use id.iri
+            self.directly_reachable_import_iris = directly_reachable_import_iris;
+            self.directly_reachable_other_iris = directly_reachable_other_iris;
 
             self.local_diagnostics = parsed_document.syntax_errors();
 
