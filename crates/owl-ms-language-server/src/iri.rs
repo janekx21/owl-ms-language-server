@@ -142,8 +142,13 @@ pub trait ToIriUnchecked {
 }
 
 impl ToIriUnchecked for &str {
+    #[cfg(test)]
     fn to_iri_unchecked(&self) -> Iri {
-        self.parse().unwrap()
+        self.parse().expect("unchecked iri should still be valid")
+    }
+    #[cfg(not(test))]
+    fn to_iri_unchecked(&self) -> Iri {
+        REUSE_IRI.iri(self)
     }
 }
 

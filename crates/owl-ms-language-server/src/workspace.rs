@@ -30,7 +30,7 @@ use sophia::api::source::TripleSource;
 use sophia::api::term::{BnodeId, LanguageTag, SimpleTerm, Term};
 use sophia::api::MownStr;
 use sophia::inmem::graph::LightGraph;
-use sophia::iri::resolve::{Oxiri, OxiriRef};
+use sophia::iri::resolve::OxiriRef;
 use sophia::iri::IriRef;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -1410,7 +1410,9 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
             Component::OntologyID(horned_owl::model::OntologyID {
                 iri: Some(id),
                 viri: _,
-            }) => Some(SimpleTerm::Iri(IriRef::new(MownStr::from_ref(id)).unwrap())),
+            }) => Some(SimpleTerm::Iri(
+                IriRef::new(MownStr::from_ref(id)).expect("valid iri"),
+            )),
             _ => None,
         });
 
@@ -1418,9 +1420,12 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
             match &ac.component {
                 AnnotationAssertion(aa) => match &aa.subject {
                     AnnotationSubject::IRI(iri) => {
-                        let subject = SimpleTerm::Iri(IriRef::new(MownStr::from_ref(iri)).unwrap());
-                        let predicate =
-                            SimpleTerm::Iri(IriRef::new(MownStr::from_ref(&aa.ann.ap)).unwrap());
+                        let subject = SimpleTerm::Iri(
+                            IriRef::new(MownStr::from_ref(iri)).expect("valid iri"),
+                        );
+                        let predicate = SimpleTerm::Iri(
+                            IriRef::new(MownStr::from_ref(&aa.ann.ap)).expect("valid iri"),
+                        );
                         let object = match &aa.ann.av {
                             AnnotationValue::Literal(literal) => match literal {
                                 Literal::Simple { literal } => SimpleTerm::LiteralDatatype(
@@ -1429,22 +1434,25 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
                                 ),
                                 Literal::Language { literal, lang } => SimpleTerm::LiteralLanguage(
                                     literal.clone().into(),
-                                    LanguageTag::new(lang.clone().into()).unwrap(),
+                                    LanguageTag::new(lang.clone().into())
+                                        .expect("valid language tag"),
                                 ),
                                 Literal::Datatype {
                                     literal,
                                     datatype_iri,
                                 } => SimpleTerm::LiteralDatatype(
                                     literal.clone().into(),
-                                    IriRef::new(MownStr::from_ref(datatype_iri)).unwrap(),
+                                    IriRef::new(MownStr::from_ref(datatype_iri))
+                                        .expect("valid iri"),
                                 ),
                             },
-                            AnnotationValue::IRI(iri) => {
-                                SimpleTerm::Iri(IriRef::new(MownStr::from_ref(iri)).unwrap())
-                            }
+                            AnnotationValue::IRI(iri) => SimpleTerm::Iri(
+                                IriRef::new(MownStr::from_ref(iri)).expect("valid iri"),
+                            ),
                             AnnotationValue::AnonymousIndividual(anonymous_individual) => {
                                 SimpleTerm::BlankNode(
-                                    BnodeId::new(MownStr::from_ref(anonymous_individual)).unwrap(),
+                                    BnodeId::new(MownStr::from_ref(anonymous_individual))
+                                        .expect("valid blanc node id"),
                                 )
                             }
                         };
@@ -1559,7 +1567,7 @@ impl ExternalDocument {
             .map(|g| {
                 // Find Match for: x <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2002/07/owl#Ontology>.
                 let owl = Namespace::new_unchecked("http://www.w3.org/2002/07/owl#");
-                let owl_ontology = owl.get("Ontology").unwrap();
+                let owl_ontology = owl.get("Ontology").expect("valid iri");
                 let ontology_id = &g
                     .triples_matching(Any, [sophia::api::ns::rdf::type_], [owl_ontology])
                     .flatten()
@@ -1652,14 +1660,10 @@ impl ExternalDocument {
 
         result.insert(self.uri.clone());
 
-        // TODO shitty child urls :<
         let docs = urls.iter().filter_map(|iri| {
-            workspace.document_by_url(&iri.to_url().unwrap())
+            iri.to_url().and_then(|u| workspace.document_by_url(&u))
+
             // TODO maybe reactivate but for now lets not log here
-            // .ok_or(Error::DocumentNotLoaded(url.clone()))
-            // Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
-            // .inspect_log()
-            // .ok()
         });
 
         for doc in docs {
