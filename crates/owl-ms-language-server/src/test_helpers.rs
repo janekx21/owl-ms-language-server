@@ -230,7 +230,7 @@ impl HttpClient for StaticClient {
         info!("Resolving {url} in static client");
         self.data.get(url).cloned().ok_or(crate::web::Error::Web(
             url.to_string(),
-            "Static client did not define that URL and date",
+            "Static client did not define that URL and data",
         ))
     }
 }

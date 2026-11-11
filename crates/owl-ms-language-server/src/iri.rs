@@ -1,8 +1,15 @@
+use core::fmt;
 use itertools::Itertools;
 use lasso::{Spur, ThreadedRodeo};
 use log::warn;
 use ropey::RopeSlice;
-use std::{borrow::Borrow, collections::HashMap, fmt::Display, ops::Deref, sync::LazyLock};
+use std::{
+    borrow::Borrow,
+    collections::HashMap,
+    fmt::{Display, Write},
+    ops::Deref,
+    sync::LazyLock,
+};
 use tower_lsp::lsp_types::Url;
 
 use crate::range::RangeBox;
@@ -36,12 +43,18 @@ pub static REUSE_IRI: LazyLock<ReusedIriSet> = LazyLock::new(ReusedIriSet::new);
 // TODO
 // Iri could maybe be split into absolute(full iri) and relative(simple and abbriviated iri) versions
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 pub struct Iri(Spur);
 
 impl Display for Iri {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+impl fmt::Debug for Iri {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Iri({self})")
     }
 }
 

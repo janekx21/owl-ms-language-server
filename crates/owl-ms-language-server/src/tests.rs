@@ -6467,6 +6467,105 @@ async fn backend_command_helper(old_ontology: &str, new_ontology: &str, command:
     assert_eq!(doc_content, new_ontology);
 }
 
+#[test(tokio::test)]
+async fn backend_did_open_with_international_import_should_work() {
+    setup();
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![
+            WorkspaceMember::CatalogFile(
+                Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap()).with_uri(
+                    Url::parse("http://example.org/ä").unwrap().as_ref(),
+                    "other.omn",
+                ),
+            ),
+            WorkspaceMember::OmnFile {
+                name: "other.omn".into(),
+                content: indoc! {r#"
+                    Prefix: : <http://example.org/ontology#>
+                    Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                    Ontology: <http://example.org/ontology>
+                        Class: ClassInOther
+                            Annotations:
+                                rdfs:label "Class in Other"
+                        AnnotationProperty: rdfs:label
+                    
+                "#}
+                .into(),
+            },
+        ]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test wosrkpace".into(),
+        }),
+        vec![],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    // Act
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "manchester".to_string(),
+                version: 0,
+                text: indoc! {r#"
+                    Prefix: : <http://example.org/ontology#>
+                    Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                    Ontology: <http://example.org/ontology>
+                        Import: <http://example.org/ä>
+                        Class: ClassInMain
+                            Annotations:
+                                rdfs:label "Class in Main"
+                            SubClassOf: ClassInOther
+                        AnnotationProperty: rdfs:label
+                "#}
+                .to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+    let hover_result = service
+        .inner()
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url.clone() },
+                position: lsp_types::Position::new(7, 25), // ClassInOther
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await
+        .unwrap();
+
+    assert_empty_diagnostics(&service).await;
+
+    let hover_result = hover_result.unwrap();
+
+    let contents = match hover_result.contents {
+        HoverContents::Scalar(MarkedString::String(str)) => str,
+        _ => panic!("Did not think of that"),
+    };
+    // info!("{:#?}", service.inner().workspaces.read());
+    info!("contents={contents}");
+    assert!(!contents.contains("**ClassInOther**"));
+    assert!(contents.contains("Class in Other"));
+
+    let sync = service.inner().read_sync().await;
+    let (doc_main, _) = sync.get_internal_document(&url).unwrap();
+    assert!(doc_main
+        .directly_imports()
+        .contains(&&"http://example.org/ä".to_iri()));
+}
+
 /////////////////////////
 // Fuzz / property-based tests
 /////////////////////////
