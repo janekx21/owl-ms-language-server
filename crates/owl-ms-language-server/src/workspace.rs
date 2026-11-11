@@ -99,12 +99,13 @@ pub struct Workspace {
 }
 
 /// This enum is a proxy for dispatching [`OntologyDocument`] methods
+#[allow(clippy::large_enum_variant)] // Size differs by 2x but that is ok
 #[enum_dispatch(OntologyDocument)]
 #[derive(Debug, PartialEq, Eq)]
 pub enum InternalDocument {
-    InternalOmn(InternalOmnDocument),
-    InternalOfn(InternalOfnDocument),
-    InternalTtl(InternalTtlDocument),
+    Omn(InternalOmnDocument),
+    Ofn(InternalOfnDocument),
+    Ttl(InternalTtlDocument),
 }
 
 /// The read/write internal document trait.
@@ -133,12 +134,14 @@ pub trait OntologyDocument {
     fn version_iri(&self) -> Option<Iri>;
     fn definitions(&self) -> Vec<&RangeBox<IriDefinition>>;
     fn references(&self) -> Vec<&RangeBox<Iri>>;
+
     /// OWL ontolgies that are imported by this ontology.
     /// There are also indirect imports, but they need to be resolved in the workspace,
     /// because a single document has no context of the workspace.
-    fn directly_imports(&self) -> Vec<&Url>;
+    fn directly_imports(&self) -> Vec<&Iri>;
+
     /// This includes prefixes, references and imports
-    fn directly_references_doc(&self) -> Vec<&Url>;
+    fn directly_references_doc(&self) -> Vec<&Iri>;
 
     /// Errors/Diagnostics that are created by this document alone. This
     /// includes e.g. syntax errors.
@@ -151,6 +154,7 @@ pub trait OntologyDocument {
     /// Taking a (relative) abbreviated or simple IRI and resolving the (absolute) full IRI.
     /// The reverse of [`full_iri_to_abbreviated_iri`].
     fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<Iri>;
+
     /// Taking a (absolute) full IRI and by prefixing it making it shorter into a (relative)
     /// abbriviated or simple IRI.
     /// The reverse of [`abbreviated_iri_to_full_iri`].
@@ -303,15 +307,9 @@ pub enum Lang {
 impl InternalDocument {
     pub fn new(url: Url, version: i32, text: String, lang: &Lang) -> InternalDocument {
         match lang {
-            Lang::Omn => {
-                InternalDocument::InternalOmn(InternalOmnDocument::new(url, version, text))
-            }
-            Lang::Ofn => {
-                InternalDocument::InternalOfn(InternalOfnDocument::new(url, version, text))
-            }
-            Lang::Ttl => {
-                InternalDocument::InternalTtl(InternalTtlDocument::new(url, version, text))
-            }
+            Lang::Omn => InternalDocument::Omn(InternalOmnDocument::new(url, version, text)),
+            Lang::Ofn => InternalDocument::Ofn(InternalOfnDocument::new(url, version, text)),
+            Lang::Ttl => InternalDocument::Ttl(InternalTtlDocument::new(url, version, text)),
         }
     }
 
@@ -321,15 +319,15 @@ impl InternalDocument {
         encoding: &PositionEncodingKind,
     ) -> Result<InternalDocument> {
         match self {
-            InternalDocument::InternalOmn(doc) => doc
-                .edit_inner(params, encoding)
-                .map(InternalDocument::InternalOmn),
-            InternalDocument::InternalOfn(doc) => doc
-                .edit_inner(params, encoding)
-                .map(InternalDocument::InternalOfn),
-            InternalDocument::InternalTtl(doc) => doc
-                .edit_inner(params, encoding)
-                .map(InternalDocument::InternalTtl),
+            InternalDocument::Omn(doc) => {
+                doc.edit_inner(params, encoding).map(InternalDocument::Omn)
+            }
+            InternalDocument::Ofn(doc) => {
+                doc.edit_inner(params, encoding).map(InternalDocument::Ofn)
+            }
+            InternalDocument::Ttl(doc) => {
+                doc.edit_inner(params, encoding).map(InternalDocument::Ttl)
+            }
         }
     }
 }
@@ -800,7 +798,7 @@ fn read_cached_doc(workspace: &Workspace, url: &Url) -> Result<Option<Document>>
     let mut cache_valid = true;
     if let Ok(file) = fs::File::open(web_cache.join(&file_name)) {
         let modified_time = file.metadata()?.modified()?;
-        if modified_time + Duration::from_secs(60 * 60 * 24 * 30) < SystemTime::now() {
+        if modified_time + Duration::from_hours(720) < SystemTime::now() {
             // invalidate cache
             warn!("Cached document is stale (older then 30 days) {url}");
             cache_valid = false;
@@ -1004,7 +1002,6 @@ pub async fn publish_lsp_diagnostics(
         .filter_and_log()
         .collect_vec();
 
-    // TODO create diagnostics for files that depend on this file
     debug!(
         "Publish diagnostics for {} {:#?}",
         doc.path().display(),
@@ -1030,7 +1027,7 @@ pub fn inlay_hint(
     range: Range,
     encoding: &PositionEncodingKind,
     workspace: &Workspace,
-    prefered_language: Vec<Language>,
+    prefered_language: &[Language],
 ) -> Vec<InlayHint> {
     let reachable_docs = reachable_docs_recursive(doc, workspace, true);
     debug!("Reachable docs for {} are {reachable_docs:#?}", doc.uri());
@@ -1042,7 +1039,7 @@ pub fn inlay_hint(
 
             let label = Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs)
                 .ok_or(Error::FrameInfoNotFound(iri.to_string()))?
-                .label_with_lang(workspace, &prefered_language)
+                .label_with_lang(workspace, prefered_language)
                 .unwrap_or_default();
 
             trace!("Found {label} for {iri}");
@@ -1104,12 +1101,9 @@ fn reachable_docs_recursive_helper(
     let docs = urls
         .iter()
         .inspect(|u| trace!("{u}"))
-        .filter_map(|url| {
-            workspace.document_by_url(url)
-            // TODO maybe reactivate but for now lets not log here
-            // .ok_or(Error::DocumentNotLoaded(url.clone())) //                    Workspace::resolve_url_to_document(&doc.try_get_workspace()?, &url)
-            // .inspect_log()
-            // .ok()
+        .filter_map(|iri| {
+            let url = iri.to_url()?;
+            workspace.document_by_url(&url)
         })
         .collect_vec();
 
@@ -1672,8 +1666,8 @@ pub struct ExternalDocument {
     pub uri: Url,
     pub text: String,
     pub graph: InfoGraph,
-    reachable_urls: Vec<Url>,
-    imports: Vec<Url>,
+    reachable_urls: Vec<Iri>,
+    imports: Vec<Iri>,
     definitions: HashSet<Iri>,
 }
 
@@ -1788,7 +1782,7 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
         let graph_name = ontology_iri
             .as_ref()
             .and_then(|s| s.iri().clone())
-            .map_or("???".into(), |i| i.to_string()); //TODO what default graph name?
+            .map_or("???".into(), |i| i.to_string()); // TODO what default graph name?
 
         Self(graph, graph_name)
     }
@@ -1853,7 +1847,7 @@ impl ExternalDocument {
                     .flatten()
                     .next()
                     .and_then(|[s, _, _]| s.iri())
-                    .map_or("???".into(), |i| i.to_string()); //TODO default case
+                    .map_or("???".into(), |i| i.to_string()); // TODO default case
 
                 InfoGraph(g, ontology_id.clone())
             })
@@ -1872,7 +1866,7 @@ impl ExternalDocument {
         Ok(graph)
     }
 
-    fn gen_imports(graph: &InfoGraph) -> Box<dyn Iterator<Item = Url> + '_> {
+    fn gen_imports(graph: &InfoGraph) -> Box<dyn Iterator<Item = Iri> + '_> {
         let graph = &graph.0;
 
         // `graph.triples_matching` will exceed the stack size (Stack Overflow) on large graphs
@@ -1884,13 +1878,13 @@ impl ExternalDocument {
                     .is_some_and(|iri| iri.as_str() == "http://www.w3.org/2002/07/owl#imports")
             })
             .filter_map(|[_, _, o]| o.iri())
-            .flat_map(|iri| Url::parse(&iri))
+            .map(|iri| iri.as_str().to_iri())
             .unique();
 
         Box::new(iris)
     }
 
-    pub fn imports(&self) -> &Vec<Url> {
+    pub fn imports(&self) -> &Vec<Iri> {
         &self.imports
     }
 
@@ -1941,8 +1935,8 @@ impl ExternalDocument {
         result.insert(self.uri.clone());
 
         // TODO shitty child urls :<
-        let docs = urls.iter().filter_map(|url| {
-            workspace.document_by_url(url)
+        let docs = urls.iter().filter_map(|iri| {
+            workspace.document_by_url(&iri.to_url().unwrap())
             // TODO maybe reactivate but for now lets not log here
             // .ok_or(Error::DocumentNotLoaded(url.clone()))
             // Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
@@ -1977,8 +1971,8 @@ impl ExternalDocument {
     fn gen_reachable_urls<'a>(
         uri: &'a Url,
         graph: &'a InfoGraph,
-        imports: &'a [Url],
-    ) -> Box<dyn Iterator<Item = Url> + 'a> {
+        imports: &'a [Iri],
+    ) -> Box<dyn Iterator<Item = Iri> + 'a> {
         // TODO this is not that stable yet
         let child_urls = graph
             .0
@@ -1986,7 +1980,7 @@ impl ExternalDocument {
             .filter_map(std::result::Result::ok)
             .filter_map(|term| term.iri())
             .unique()
-            .filter_map(|iri| Url::parse(&iri).ok())
+            .map(|iri| iri.as_str().to_iri())
             // Filter out IRI's that point to this ontology
             .filter(|url| {
                 // This should be faster than url.make_relative, because url contains a serialized version
@@ -1994,13 +1988,13 @@ impl ExternalDocument {
                     .starts_with(uri.to_string().trim_end_matches('#'))
             })
             .filter(|url| !url.to_string().contains(&graph.1))
-            .map(iri_to_onology_url)
+            .map(iri_to_onology_iri)
             .unique();
 
         Box::new(imports.iter().cloned().chain(child_urls).unique())
     }
 
-    pub fn reachable_urls(&self) -> &Vec<Url> {
+    pub fn reachable_urls(&self) -> &Vec<Iri> {
         &self.reachable_urls
     }
 
@@ -2011,24 +2005,21 @@ impl ExternalDocument {
     }
 }
 
-/// Should do the same as [`iri_to_parent_url`] but without parsing the url and therefore without allocation
-pub fn iri_to_parent_url_str(iri: &str) -> Option<&str> {
-    iri.rsplit_once('#')
-        .map(|(l, _)| l)
-        .or_else(|| iri.rsplit_once('/').map(|(l, _)| l))
-}
+/// Convert some IRI into a IRI where the ontolgoy of that IRI can be fetched from.
+/// This turns `http://example.com/ontology#Table` -> `http://example.com/ontology`
+/// and `http://example.com/ontology/Table` -> `http://example.com/ontology`.
+pub fn iri_to_onology_iri(mut iri: Iri) -> Iri {
+    // TODO check for obo ontology
+    // See https://obofoundry.org/principles/fp-003-uris.html
+    // TODO use oxiri not string splits
 
-/// Convert some IRI (here in URL type) into a URL where the IRI can be fetched from
-pub fn iri_to_onology_url(mut url: Url) -> Url {
-    if url.fragment().is_some() {
-        url.set_fragment(Some(""));
-    } else if let Ok(mut seg) = url.path_segments_mut() {
-        // TODO check for obo ontology
-        // See https://obofoundry.org/principles/fp-003-uris.html
-
-        seg.pop();
+    if let Some((l, _)) = iri.rsplit_once('#') {
+        iri = l.to_iri();
+    } else if let Some((l, _)) = iri.rsplit_once('/') {
+        iri = l.to_iri();
     }
-    url
+
+    iri
 }
 
 #[cached(
@@ -2181,13 +2172,13 @@ impl FrameInfo {
     ///
     /// TODO this can be replaced with [`label_with_lang`]
     pub fn label(&self, workspace: &Workspace) -> Option<String> {
-        self.annotation_display(&LABEL_IRI.into(), workspace, &vec![])
+        self.annotation_display(&LABEL_IRI.into(), workspace, &[])
     }
 
     pub fn label_with_lang(
         &self,
         workspace: &Workspace,
-        prefered_language: &Vec<Language>,
+        prefered_language: &[Language],
     ) -> Option<String> {
         self.annotation_display(&LABEL_IRI.into(), workspace, prefered_language)
     }
@@ -2211,7 +2202,7 @@ impl FrameInfo {
         &self,
         iri: &Iri,
         workspace: &Workspace,
-        prefered_language: &Vec<Language>,
+        prefered_language: &[Language],
     ) -> Option<String> {
         let annotations = self
             .annotations
@@ -2239,10 +2230,10 @@ impl FrameInfo {
                 if let Some(language) = &annotation.language {
                     // english is implied
                     if language == &Language::En {
-                        annotation.string_value.to_string()
+                        annotation.string_value.clone()
                     } else {
                         // TODO the "...@ Language" suffix could be removed when just one lang matches
-                        format!("{} @ {}", &annotation.string_value, &language.name())
+                        format!("{} @ {}", annotation.string_value, language.name())
                     }
                 } else if annotation.datatype != STRING_IRI.into() && iri != &LABEL_IRI.into()
                 // Endless recursion if label is a valid iri
@@ -2293,7 +2284,7 @@ impl FrameInfo {
                     .unwrap_or(annotation.iri.to_string());
                 // TODO #28 use values directly
                 let mut annotation_display = self
-                    .annotation_display(&annotation.iri, workspace, &vec![])
+                    .annotation_display(&annotation.iri, workspace, &[])
                     .unwrap_or(annotation.iri.to_string());
 
                 // If this is a multiline string then give it some space to work with
@@ -2462,7 +2453,7 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
     let import_iris: Vec<&str> = doc
         .directly_imports()
         .into_iter()
-        .map(Url::as_str)
+        .map(super::iri::Iri::as_str)
         .collect();
 
     let ontology_iri = doc.ontology_iri();
@@ -3019,8 +3010,8 @@ mod tests {
         let urls = external_doc.imports();
 
         // Assert
-        assert!(urls.contains(&Url::parse("http://www.example.com/other-property").unwrap()));
-        assert!(urls.contains(&tmp_url.url()));
+        assert!(urls.contains(&"http://www.example.com/other-property".to_iri()));
+        assert!(urls.contains(&tmp_url.url().as_str().to_iri()));
     }
 
     #[test]

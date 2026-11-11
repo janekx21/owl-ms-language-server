@@ -174,7 +174,7 @@ pub async fn arrange_backend_with_client(
             ("http://www.w3.org/2000/01/rdf-schema#", "dummy"),
         ]
         .into_iter()
-        .chain(data.into_iter())
+        .chain(data)
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect(),
     });
@@ -230,7 +230,7 @@ impl HttpClient for StaticClient {
         info!("Resolving {url} in static client");
         self.data.get(url).cloned().ok_or(crate::web::Error::Web(
             url.to_string(),
-            "Static client did not define that URL and date",
+            "Static client did not define that URL and data",
         ))
     }
 }

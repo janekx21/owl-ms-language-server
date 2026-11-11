@@ -16,7 +16,6 @@ clap = { version = "4.5", features = ["derive"] }
 horned-owl = "1"
 itertools = "0.14"
 log = "0.4"
-oxiri = "0.2"
 quick-xml = { version = "0.37", features = ["serialize"] }
 ropey = "1.6"
 serde = { version = "1.0", features = ["derive", "serde_derive"] }
@@ -43,6 +42,7 @@ enum_dispatch = "0.3.13"
 rayon-join = "1.12.0"
 lasso = { version = "0.7.3", features = ["multi-threaded"] }
 stringcase = "1.0.0"
+# TODO do I need this? iri-string = "0"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

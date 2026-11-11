@@ -49,7 +49,7 @@ pub struct InternalOfnDocument {
     parsed_document: ParsedDocument,
     prefixes: HashMap<String, RangeBox<String>>,
     definitions: Vec<RangeBox<IriDefinition>>,
-    imports: Vec<Url>,
+    imports: Vec<Iri>,
 }
 
 impl InternalOfnDocument {
@@ -194,14 +194,14 @@ fn gen_definitions(
         .collect()
 }
 
-fn gen_imports(parsed_document: &ParsedDocument) -> Vec<Url> {
+fn gen_imports(parsed_document: &ParsedDocument) -> Vec<Iri> {
     parsed_document
         .query(&OFN_ALL_QUERIES.import)
         .into_iter()
-        .filter_map(|m| {
+        .map(|m| {
             let iri_c = m.captures.iter().exactly_one().expect("should be one");
             let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
-            iri.to_string().parse().ok()
+            iri
         })
         .collect()
 }
@@ -234,7 +234,7 @@ impl OntologyDocument for InternalOfnDocument {
         vec![] // TODO
     }
 
-    fn find_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
+    fn find_frame_info(&self, _iri: &Iri) -> Option<FrameInfo> {
         None // TODO
     }
 
@@ -254,11 +254,11 @@ impl OntologyDocument for InternalOfnDocument {
         vec![] // TODO
     }
 
-    fn directly_imports(&self) -> Vec<&Url> {
+    fn directly_imports(&self) -> Vec<&Iri> {
         self.imports.iter().collect()
     }
 
-    fn directly_references_doc(&self) -> Vec<&Url> {
+    fn directly_references_doc(&self) -> Vec<&Iri> {
         self.imports.iter().collect()
     }
 
@@ -292,15 +292,15 @@ impl OntologyDocument for InternalOfnDocument {
         self.parsed_document.tree().root_node().range().into()
     }
 
-    fn iri_at(&self, pos: Position) -> Option<RangeBox<IriAtPosition>> {
+    fn iri_at(&self, _pos: Position) -> Option<RangeBox<IriAtPosition>> {
         None // TODO
     }
 
-    fn rename_range(&self, pos: Position) -> Option<Range> {
+    fn rename_range(&self, _pos: Position) -> Option<Range> {
         None // TODO
     }
 
-    fn rename_info_at(&self, pos: Position, new_name: &str) -> Result<Option<RenameInfo>> {
+    fn rename_info_at(&self, _pos: Position, _new_name: &str) -> Result<Option<RenameInfo>> {
         Ok(None) // TODO
     }
 
@@ -311,7 +311,7 @@ impl OntologyDocument for InternalOfnDocument {
                     .query(&OFN_ALL_QUERIES.iri_query_all)
                     .into_iter()
                     .filter_map(|ele| {
-                        let iri_c = ele.captures.iter().next().expect("should match once"); // TODO trim and to full iri
+                        let iri_c = ele.captures.first().expect("should match once"); // TODO trim and to full iri
 
                         let iri = trim_full_iri_rope_slice(iri_c.node.text).to_iri();
                         let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
@@ -336,19 +336,19 @@ impl OntologyDocument for InternalOfnDocument {
         }
     }
 
-    fn keyword_actions_at(&self, pos: Position) -> Vec<KeywordAction> {
+    fn keyword_actions_at(&self, _pos: Position) -> Vec<KeywordAction> {
         vec![] // TODO
     }
 
-    fn all_iris_in_range(&self, range: Range) -> Vec<RangeBox<Iri>> {
+    fn all_iris_in_range(&self, _range: Range) -> Vec<RangeBox<Iri>> {
         vec![] // TODO
     }
 
-    fn formatted(&self, options: &FormattingSettings) -> String {
+    fn formatted(&self, _options: &FormattingSettings) -> String {
         self.parsed_document.rope().to_string() // TODO
     }
 
-    fn hover(&self, pos: Position) -> Option<HoverResult> {
+    fn hover(&self, _pos: Position) -> Option<HoverResult> {
         None // TODO
     }
 
@@ -384,14 +384,14 @@ impl OntologyDocument for InternalOfnDocument {
             .collect()
     }
 
-    fn get_keyword_competions_at(&self, pos: Position) -> Vec<String> {
+    fn get_keyword_competions_at(&self, _pos: Position) -> Vec<String> {
         vec![] // TODO
     }
 
     fn get_iri_completions_at(
         &self,
-        pos: Position,
-        workspace: &Workspace,
+        _pos: Position,
+        _workspace: &Workspace,
     ) -> Vec<(String, String, String, bool)> {
         vec![] // TODO
     }
@@ -400,7 +400,7 @@ impl OntologyDocument for InternalOfnDocument {
         "Not implemented".into()
     }
 
-    fn add_annotation_edits(&self, annotation: Annotation) -> Vec<RangeBox<String>> {
+    fn add_annotation_edits(&self, _annotation: Annotation) -> Vec<RangeBox<String>> {
         vec![]
     }
 }

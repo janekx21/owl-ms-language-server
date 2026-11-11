@@ -363,7 +363,7 @@ async fn backend_did_open_ofn_should_create_document() {
         .unwrap_or_else(|_| panic!("Should be exactly one"));
 
     let _ofn = match doc {
-        InternalDocument::InternalOfn(internal_fn_document) => internal_fn_document,
+        InternalDocument::Ofn(internal_fn_document) => internal_fn_document,
         _ => panic!("Should be ofn"),
     };
     // TODO ofn do stuff
@@ -410,7 +410,7 @@ async fn backend_did_open_ttl_should_create_document() {
         .unwrap_or_else(|_| panic!("Should be exactly one"));
 
     let _doc = match doc {
-        InternalDocument::InternalTtl(doc) => doc,
+        InternalDocument::Ttl(doc) => doc,
         _ => panic!("Should be ttl"),
     };
     // TODO ofn do stuff
@@ -649,7 +649,7 @@ async fn backend_hover_on_class_should_show_class_info() {
     // Arrange
     let service = arrange_backend(
         None,
-        vec![("http://www.w3.org/2000/01/rdf-schema#", "dummy")],
+        vec![("http://www.w3.org/2000/01/rdf-schema", "dummy")],
     )
     .await;
 
@@ -725,7 +725,7 @@ async fn backend_hover_on_class_should_show_datatype_label() {
     // Arrange
     let service = arrange_backend(
         None,
-        vec![("http://www.w3.org/2000/01/rdf-schema#", "dummy")],
+        vec![("http://www.w3.org/2000/01/rdf-schema", "dummy")],
     )
     .await;
 
@@ -856,7 +856,7 @@ async fn arrange_multi_file_ontology() -> (LspService<Backend>, TempDir) {
             name: "test wosrkpace".into(),
         }),
         vec![
-            ("http://www.w3.org/2000/01/rdf-schema#", ""), //dummy
+            ("http://www.w3.org/2000/01/rdf-schema", ""), //dummy
         ],
     )
     .await;
@@ -1031,7 +1031,7 @@ async fn backend_hover_on_external_simple_iri_should_show_external_info() {
                 </Ontology>
             "##,
             ),
-            ("http://www.w3.org/2000/01/rdf-schema#", "dummy"),
+            ("http://www.w3.org/2000/01/rdf-schema", "dummy"),
         ],
     )
     .await;
@@ -1146,7 +1146,7 @@ async fn backend_hover_on_external_full_iri_should_show_external_info() {
                 </Ontology>
             "##,
             ),
-            ("http://www.w3.org/2000/01/rdf-schema#", "dummy"),
+            ("http://www.w3.org/2000/01/rdf-schema", "dummy"),
         ],
     )
     .await;
@@ -1255,10 +1255,10 @@ async fn backend_hover_on_external_rdf_document_at_simple_iri_should_show_extern
                 </rdf:RDF>
             "##,
             ),
-            ("http://foo.org/ontology#", "dummy"),
-            ("http://www.w3.org/1999/02/22-rdf-syntax-ns#", "dummy"),
-            ("http://www.w3.org/2002/07/owl#", "dummy"),
-            ("http://www.w3.org/2000/01/rdf-schema#", "dummy"),
+            ("http://foo.org/ontology", "dummy"),
+            ("http://www.w3.org/1999/02/22-rdf-syntax-ns", "dummy"),
+            ("http://www.w3.org/2002/07/owl", "dummy"),
+            ("http://www.w3.org/2000/01/rdf-schema", "dummy"),
         ],
     )
     .await;
@@ -1528,7 +1528,7 @@ async fn backend_inlay_hint_on_external_simple_iri_should_show_iri() {
                 </Ontology>
             "##,
             ),
-            ("http://www.w3.org/2000/01/rdf-schema#", ""), // dummy
+            ("http://www.w3.org/2000/01/rdf-schema", ""), // dummy
         ],
     )
     .await;
@@ -2159,7 +2159,7 @@ async fn backend_did_open_should_load_external_rdf_via_http() {
         }),
         vec![
             (
-                "http://www.w3.org/2000/01/rdf-schema#",
+                "http://www.w3.org/2000/01/rdf-schema",
                 r##"<?xml version="1.0"?>
                     <rdf:RDF xmlns="http://www.example.com/iri#"
                          xml:base="http://www.example.com/iri"
@@ -2249,7 +2249,7 @@ async fn backend_hover_should_use_external_rdf_info() {
         }),
         vec![
             (
-                "http://www.w3.org/2000/01/rdf-schema#",
+                "http://www.w3.org/2000/01/rdf-schema",
                 r##"
                 <rdf:RDF
                     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
@@ -2280,8 +2280,8 @@ async fn backend_hover_should_use_external_rdf_info() {
             ),
             ("http://purl.org/dc/elements/1.1/", "dummy"),
             ("http://purl.org/dc/elements/1.1", "dummy"),
-            ("http://www.w3.org/1999/02/22-rdf-syntax-ns#", "dummy"),
-            ("http://www.w3.org/2002/07/owl#", "dummy"),
+            ("http://www.w3.org/1999/02/22-rdf-syntax-ns", "dummy"),
+            ("http://www.w3.org/2002/07/owl", "dummy"),
         ],
     )
     .await;
@@ -3273,7 +3273,7 @@ async fn backend_rename_helper(
     new_name: &str,
 ) {
     // Arrange
-    let service = arrange_backend(None, vec![("https://example.com/ontology#", "dummy")]).await;
+    let service = arrange_backend(None, vec![("https://example.com/ontology", "dummy")]).await;
 
     let dir = TempDir::new("owl-ms-test").unwrap();
     let url = Url::from_file_path(dir.path().join("foo.omn")).unwrap();
@@ -3420,7 +3420,7 @@ async fn backend_rename_should_work_for_functinal() {
             name: "test workspace".into(),
         }),
         vec![
-            ("http://www.w3.org/2000/01/rdf-schema#", ""), //dummy
+            ("http://www.w3.org/2000/01/rdf-schema", ""), //dummy
         ],
     )
     .await;
@@ -3590,7 +3590,7 @@ async fn backend_rename_should_work_for_ttl() {
             name: "test workspace".into(),
         }),
         vec![
-            ("http://www.w3.org/2000/01/rdf-schema#", ""), //dummy
+            ("http://www.w3.org/2000/01/rdf-schema", ""), //dummy
         ],
     )
     .await;
@@ -3688,7 +3688,7 @@ async fn backend_did_open_should_load_external_documents_recursivly() {
         None,
         vec![
             (
-                "http://a/depth-1#",
+                "http://a/depth-1",
                 indoc! {r#"
                     <?xml version="1.0"?>
                     <Ontology xmlns="http://www.w3.org/2002/07/owl#"
@@ -3720,7 +3720,7 @@ async fn backend_did_open_should_load_external_documents_recursivly() {
                 "#},
             ),
             (
-                "http://a/depth-2#",
+                "http://a/depth-2",
                 indoc! {r#"
                     <?xml version="1.0"?>
                     <Ontology xmlns="http://www.w3.org/2002/07/owl#"
@@ -6367,7 +6367,7 @@ async fn backend_command_helper(old_ontology: &str, new_ontology: &str, command:
     // Arrange
     let (service, cs) = arrange_backend_with_client(
         None,
-        vec![("https://example.com/ontology#", "dummy")],
+        vec![("https://example.com/ontology", "dummy")],
         Value::Null,
     )
     .await;
@@ -6465,6 +6465,105 @@ async fn backend_command_helper(old_ontology: &str, new_ontology: &str, command:
     let doc_content = doc.rope().to_string();
 
     assert_eq!(doc_content, new_ontology);
+}
+
+#[test(tokio::test)]
+async fn backend_did_open_with_international_import_should_work() {
+    setup();
+    // Arrange
+    let tmp_dir = arrange_workspace_folders(|dir| {
+        vec![
+            WorkspaceMember::CatalogFile(
+                Catalog::new(dir.join("catalog-v001.xml").to_str().unwrap()).with_uri(
+                    Url::parse("http://example.org/ä").unwrap().as_ref(),
+                    "other.omn",
+                ),
+            ),
+            WorkspaceMember::OmnFile {
+                name: "other.omn".into(),
+                content: indoc! {r#"
+                    Prefix: : <http://example.org/ontology#>
+                    Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                    Ontology: <http://example.org/ontology>
+                        Class: ClassInOther
+                            Annotations:
+                                rdfs:label "Class in Other"
+                        AnnotationProperty: rdfs:label
+                    
+                "#}
+                .into(),
+            },
+        ]
+    });
+
+    let service = arrange_backend(
+        Some(WorkspaceFolder {
+            uri: Url::from_directory_path(tmp_dir.path()).unwrap(),
+            name: "test wosrkpace".into(),
+        }),
+        vec![],
+    )
+    .await;
+
+    let url = Url::from_file_path(tmp_dir.path().join("main.omn")).unwrap();
+
+    // Act
+    service
+        .inner()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: url.clone(),
+                language_id: "manchester".to_string(),
+                version: 0,
+                text: indoc! {r#"
+                    Prefix: : <http://example.org/ontology#>
+                    Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                    Ontology: <http://example.org/ontology>
+                        Import: <http://example.org/ä>
+                        Class: ClassInMain
+                            Annotations:
+                                rdfs:label "Class in Main"
+                            SubClassOf: ClassInOther
+                        AnnotationProperty: rdfs:label
+                "#}
+                .to_string(),
+            },
+        })
+        .await;
+
+    // Assert
+    let hover_result = service
+        .inner()
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: url.clone() },
+                position: lsp_types::Position::new(7, 25), // ClassInOther
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        })
+        .await
+        .unwrap();
+
+    assert_empty_diagnostics(&service).await;
+
+    let hover_result = hover_result.unwrap();
+
+    let contents = match hover_result.contents {
+        HoverContents::Scalar(MarkedString::String(str)) => str,
+        _ => panic!("Did not think of that"),
+    };
+    // info!("{:#?}", service.inner().workspaces.read());
+    info!("contents={contents}");
+    assert!(!contents.contains("**ClassInOther**"));
+    assert!(contents.contains("Class in Other"));
+
+    let sync = service.inner().read_sync().await;
+    let (doc_main, _) = sync.get_internal_document(&url).unwrap();
+    assert!(doc_main
+        .directly_imports()
+        .contains(&&"http://example.org/ä".to_iri()));
 }
 
 /////////////////////////

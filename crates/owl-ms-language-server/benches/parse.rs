@@ -60,7 +60,7 @@ fn ontology_size_bench(c: &mut Criterion) {
 
                     let mut parser = Parser::new();
                     parser.set_language(&LANGUAGE_OMN).unwrap();
-                    (source_code.to_string(), parser)
+                    (source_code.clone(), parser)
                 },
                 |(source, parser)| parse_helper(source, parser),
                 criterion::BatchSize::SmallInput,

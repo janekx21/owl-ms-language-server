@@ -104,8 +104,9 @@ impl Backend {
 
                 // Create diagnostics for files that depend on this file
                 for other_internal_doc in workspace.internal_documents() {
-                    let depends_on_me = other_internal_doc.directly_imports().iter().any(|u| {
-                        workspace.document_by_url(u) == Some(DocumentReference::Internal(document))
+                    let depends_on_me = other_internal_doc.directly_imports().iter().any(|iri| {
+                        workspace.document_by_url(&iri.to_url().unwrap())
+                            == Some(DocumentReference::Internal(document))
                     });
 
                     if depends_on_me {
@@ -126,9 +127,9 @@ impl Backend {
         let mini_backend = self.clone();
         let path = path.to_owned();
         tokio::spawn(async move {
-            let mut todo: LinkedList<(Url, u32)> = { build_todo_list(&mini_backend, &path).await };
+            let mut todo: LinkedList<(_, u32)> = { build_todo_list(&mini_backend, &path).await };
 
-            let mut done = HashSet::<Url>::new();
+            let mut done = HashSet::<_>::new();
 
             debug!(
                 "Loading dependencies of {} len = {}",
@@ -136,14 +137,14 @@ impl Backend {
                 todo.len()
             );
 
-            while let Some((url, depth)) = todo.pop_front() {
-                debug!("Indexing {url} ...");
-                if done.contains(&url) {
-                    debug!("URL {url} was indexed. Skip");
+            while let Some((iri, depth)) = todo.pop_front() {
+                debug!("Indexing {iri} ...");
+                if done.contains(&iri) {
+                    debug!("URL {iri} was indexed. Skip");
                     continue;
                 }
                 if depth > 2 {
-                    debug!("Depth {depth} exceeded 2 for {url}. Skip");
+                    debug!("Depth {depth} exceeded 2 for {iri}. Skip");
                     continue;
                 }
 
@@ -157,22 +158,24 @@ impl Backend {
                         .expect("Workspace for document should exist");
 
                     // TODO well the Error is not Send. That's why we convert to Option
-                    Workspace::resolve_url_to_document(
-                        workspace,
-                        &url,
-                        mini_backend.http_client.clone(),
-                    )
-                    .await
-                    .inspect_log()
-                    .ok()
+                    if let Some(url) = iri.to_url() {
+                        Workspace::resolve_url_to_document(
+                            workspace,
+                            &url,
+                            mini_backend.http_client.clone(),
+                        )
+                        .await
+                    } else {
+                        Ok(None)
+                    }
                 };
 
-                let resolved_doc = if let Some(resolved_doc) = resolved_doc_or_err {
-                    resolved_doc
-                } else {
-                    // This is the error case
-                    warn!("Resolving {url} did not work");
-                    None
+                let resolved_doc = match resolved_doc_or_err {
+                    Ok(resolved_doc) => resolved_doc,
+                    Err(e) => {
+                        warn!("Resolving {iri} did not work: {e}");
+                        None
+                    }
                 };
 
                 if let Some(doc) = resolved_doc {
@@ -217,7 +220,7 @@ impl Backend {
                 // Refresh the inline hints, because we got new information now
                 refresh_inlay_hints(&mini_backend).await;
 
-                done.insert(url);
+                done.insert(iri);
             }
 
             // Every dependency is loaded
@@ -231,7 +234,7 @@ impl Backend {
         let mut all_handles = Vec::<JoinHandle<()>>::new();
         for workspace in sync.workspaces_mut() {
             let handles = std::mem::take(&mut workspace.index_handles);
-            all_handles.extend(handles.into_iter());
+            all_handles.extend(handles);
         }
         drop(sync);
         for handle in all_handles {
@@ -368,7 +371,7 @@ async fn refresh_inlay_hints(mini_backend: &Backend) {
 async fn build_todo_list(
     mini_backend: &Backend,
     path: &std::path::PathBuf,
-) -> LinkedList<(Url, u32)> {
+) -> LinkedList<(Iri, u32)> {
     let sync = mini_backend.sync.read().await;
     let workspace = sync
         .get_workspace(&Url::from_file_path(path).expect("File path should be convertable to URL"))
@@ -450,7 +453,7 @@ impl LanguageServer for Backend {
         async {
             let file_url = params.text_document.uri;
             let language_id = params.text_document.language_id;
-            info!("Did open {file_url} {language_id} ...",);
+            info!("Did open {file_url} {language_id} ...");
 
             let lang = match &language_id[..] {
                 "manchester" => Some(Lang::Omn),
@@ -663,14 +666,14 @@ impl LanguageServer for Backend {
             .preferred_languages
             .iter()
             .filter_map(|lang_str| language::Language::try_from(lang_str.as_str()).ok())
-            .collect();
+            .collect_vec();
 
         let hints = document_inlay_hint(
             document,
             range,
             self.encoding(),
             workspace,
-            preferred_languages,
+            &preferred_languages,
         );
 
         Ok(Some(hints))
@@ -754,8 +757,8 @@ impl LanguageServer for Backend {
         let mut actions = vec![];
 
         actions.extend(missin_iri_actions(pos, doc, ws, self.encoding())?);
-        actions.extend(create_prefix_from_iri(pos, doc, ws, self.encoding())?);
-        actions.extend(create_label_code_action(pos, doc, ws, self.encoding())?);
+        actions.extend(create_prefix_from_iri(pos, doc, self.encoding())?);
+        actions.extend(create_label_code_action(pos, doc, self.encoding())?);
         actions.extend(keyword_actions(pos, doc, self.encoding())?);
 
         Ok(Some(actions))
@@ -1134,8 +1137,8 @@ impl LanguageServer for Backend {
                         ws.internal_documents().map(|ele| {
                             let edits = ele
                                 .prefixes()
-                                .iter()
-                                .flat_map(|(p, _)| {
+                                .keys()
+                                .flat_map(|p| {
                                     // Rename each prefix to itself
                                     ele.rename_edits(&workspace::RenameInfo::Prefix(
                                         p.into(),
@@ -1247,7 +1250,6 @@ fn missin_iri_actions(
 fn create_prefix_from_iri(
     pos: Position,
     doc: &InternalDocument,
-    ws: &Workspace,
     encoding: &PositionEncodingKind,
 ) -> Result<Vec<CodeActionOrCommand>> {
     let Some(iri_under_cursor) = doc.iri_at(pos) else {
@@ -1317,7 +1319,6 @@ fn split_iri(iri: &Iri) -> Result<(&str, &str, char)> {
 fn create_label_code_action(
     pos: Position,
     doc: &InternalDocument,
-    ws: &Workspace,
     encoding: &PositionEncodingKind,
 ) -> Result<Vec<CodeActionOrCommand>> {
     let Some(iri_under_cursor) = doc.iri_at(pos) else {
@@ -1364,7 +1365,7 @@ fn create_label_code_action(
         .collect_vec();
 
     let code_action = CodeActionOrCommand::CodeAction(CodeAction {
-        title: format!("Create label \"{label}\" for {kind} `{shorter_iri_under_cursor}`",),
+        title: format!("Create label \"{label}\" for {kind} `{shorter_iri_under_cursor}`"),
         edit: Some(WorkspaceEdit {
             changes: Some(HashMap::from([(doc.uri().clone(), text_edits)])),
             ..Default::default()

@@ -17,11 +17,7 @@ struct StaticClient {
 
 impl HttpClient for StaticClient {
     fn get(&self, url: &str) -> owl_ms_language_server::web::Result<String> {
-        Ok(self
-            .data
-            .get(url)
-            .unwrap_or(&"dummy".to_string())
-            .to_string())
+        Ok(self.data.get(url).unwrap_or(&"dummy".to_string()).clone())
     }
 }
 
@@ -62,7 +58,7 @@ const RNG_SEED: u64 = 42;
 
 /// Returns appropriate sample size for a given ontology size.
 /// Larger ontologies need fewer samples because setup (including indexing) takes longer.
-fn sample_size_for(ontology_size: usize) -> usize {
+fn _sample_size_for(ontology_size: usize) -> usize {
     match ontology_size {
         0..=500 => 100,
         501..=2000 => 50,
