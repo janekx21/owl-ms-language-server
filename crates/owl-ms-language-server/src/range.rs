@@ -272,6 +272,7 @@ fn post_end_of_change(change: &Change) -> Position {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct LineRange {
     pub start: u32,
     pub end: u32,

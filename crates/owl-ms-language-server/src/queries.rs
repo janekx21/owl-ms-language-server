@@ -60,6 +60,8 @@ pub struct OmnAllQueries {
     pub frame_query: Query,
     pub prefix: Query,
     pub ontology: Query,
+    pub highlights: Query,
+    pub folds: Query,
 }
 
 // All queries are in one struct for easy testing. Invalid ones are detected by unit tests.
@@ -134,6 +136,9 @@ pub static OMN_ALL_QUERIES: LazyLock<OmnAllQueries> = LazyLock::new(|| OmnAllQue
         ",
     )
     .expect("valid query"),
+    highlights: Query::new(&LANGUAGE_OMN, tree_sitter_owl_ms::HIGHLIGHTS_QUERY)
+        .expect("valid query"),
+    folds: Query::new(&LANGUAGE_OMN, tree_sitter_owl_ms::FOLDS_QUERY).expect("valid query"),
 });
 
 pub struct OfnAllQueries {

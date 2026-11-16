@@ -504,14 +504,13 @@ impl OntologyDocument for InternalOmnDocument {
     }
 
     fn highlights(&self, range: Range) -> Highlights {
-        let query_source = tree_sitter_owl_ms::HIGHLIGHTS_QUERY;
-        let query = Query::new(&LANGUAGE_OMN, query_source).expect("valid query expect");
+        let query = &OMN_ALL_QUERIES.highlights;
         let mut query_cursor = QueryCursor::new();
         if range != Range::FULL_RANGE {
             query_cursor.set_point_range(range.into());
         }
         let matches = query_cursor.matches(
-            &query,
+            query,
             self.tree().root_node(),
             RopeProvider::new(self.rope()),
         );
@@ -677,7 +676,7 @@ impl OntologyDocument for InternalOmnDocument {
     }
 
     fn folding_range(&self) -> Vec<LineRange> {
-        vec![LineRange::new(1, 5)]
+        self.queried_document.folds.clone()
     }
 }
 
@@ -832,6 +831,7 @@ pub struct QueriedDocument {
     pub ontology_id: Option<RangeBox<OntologyId>>,
     pub prefixes: HashMap<String, RangeBox<String>>,
     pub imports: Vec<RangeBox<Iri>>,
+    pub folds: Vec<LineRange>,
 }
 
 impl QueriedDocument {
@@ -1213,37 +1213,25 @@ impl QueriedDocument {
 
 impl From<ParsedDocument> for QueriedDocument {
     fn from(val: ParsedDocument) -> Self {
-        debug!("ParsedDocument -> QueriedDocument");
-
-        let ontology_id = ontology_id(&val);
-        let prefixes = prefixes(&val);
-        let imports = imports(&val);
-
-        QueriedDocument {
-            ontology_id,
-            prefixes,
-            imports,
-        }
+        into_queried(&val)
     }
 }
 
 fn into_queried(parsed_document: &ParsedDocument) -> QueriedDocument {
     debug!("ParsedDocument -> QueriedDocument");
 
-    let ((ontology_id, prefixes), imports) = rayon::join(
-        || {
-            rayon::join(
-                || ontology_id(parsed_document),
-                || prefixes(parsed_document),
-            )
-        },
+    let (ontology_id, (prefixes, (imports, folds))) = rayon_join::join!(
+        || ontology_id(parsed_document),
+        || prefixes(parsed_document),
         || imports(parsed_document),
+        || folds(parsed_document)
     );
 
     QueriedDocument {
         ontology_id,
         prefixes,
         imports,
+        folds,
     }
 }
 
@@ -1834,6 +1822,20 @@ pub fn imports(parsed_document: &ParsedDocument) -> Vec<RangeBox<Iri>> {
                 .try_to_iri()
                 .ok()
                 .map(|iri| RangeBox::new(iri, iri_capture.node.range)),
+            _ => unimplemented!(),
+        })
+        .collect_vec()
+}
+
+pub fn folds(parsed_document: &ParsedDocument) -> Vec<LineRange> {
+    parsed_document
+        .query(&OMN_ALL_QUERIES.folds)
+        .iter()
+        .map(|m| match &m.captures[..] {
+            [fold_capture] => LineRange::new(
+                fold_capture.node.range.start.line(),
+                fold_capture.node.range.end.line(),
+            ),
             _ => unimplemented!(),
         })
         .collect_vec()

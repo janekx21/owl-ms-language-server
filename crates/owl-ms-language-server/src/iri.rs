@@ -11,8 +11,7 @@ use sophia::{
     },
 };
 use std::{
-    borrow::Borrow, collections::HashMap, fmt::Display, mem, ops::Deref, str::FromStr,
-    sync::LazyLock,
+    borrow::Borrow, collections::HashMap, fmt::Display, ops::Deref, str::FromStr, sync::LazyLock,
 };
 use tower_lsp::lsp_types::Url;
 
