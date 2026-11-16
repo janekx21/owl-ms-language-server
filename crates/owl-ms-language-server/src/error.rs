@@ -1,4 +1,5 @@
 use log::error;
+use sophia::iri::resolve::IriParseError;
 use std::{borrow::Cow, io, path::PathBuf};
 use thiserror::Error;
 use tower_lsp::lsp_types::Url;
@@ -51,6 +52,8 @@ pub enum Error {
     Sophia(String), // I could not crate a streaming error type, because one of the generics is not importable, because of a foreign crate
     #[error("Web Error: {0}")]
     Web(#[from] crate::web::Error),
+    #[error("Iri Parse Error: {0}")]
+    IriParseError(#[from] IriParseError),
 }
 
 // This Error type should be send I think

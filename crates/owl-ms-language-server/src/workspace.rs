@@ -1,19 +1,14 @@
 use crate::catalog::CatalogUri;
-use crate::consts::{get_fixed_infos, keyword_hover_info, LABEL_IRI, STRING_IRI};
+use crate::consts::{get_fixed_infos, LABEL_IRI, STRING_IRI};
 use crate::error::{Error, Result, ResultExt, ResultIterator};
 use crate::functional::InternalOfnDocument;
-use crate::iri::Iri;
-use crate::iri::ToIri;
+use crate::iri::{Iri, ToIriUnchecked};
 use crate::manchester::InternalOmnDocument;
 use crate::pos::Position;
-use crate::queries::OMN_NODE_TYPES;
 use crate::range::{Change, RangeBox};
 use crate::turtle::InternalTtlDocument;
 use crate::web::{url_to_filename, HttpClient};
-use crate::{
-    catalog::Catalog, debugging::timeit, queries::OMN_ALL_QUERIES, range::Range,
-    rope_provider::RopeProvider, LANGUAGE_OMN,
-};
+use crate::{catalog::Catalog, debugging::timeit, range::Range, rope_provider::RopeProvider};
 use cached::{cached, Cached};
 use enum_dispatch::enum_dispatch;
 use horned_owl::model::Component::{self, AnnotationAssertion};
@@ -35,7 +30,7 @@ use sophia::api::source::TripleSource;
 use sophia::api::term::{BnodeId, LanguageTag, SimpleTerm, Term};
 use sophia::api::MownStr;
 use sophia::inmem::graph::LightGraph;
-use sophia::iri::resolve::Oxiri;
+use sophia::iri::resolve::OxiriRef;
 use sophia::iri::IriRef;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -99,6 +94,8 @@ pub struct Workspace {
 }
 
 /// This enum is a proxy for dispatching [`OntologyDocument`] methods
+/// Internal omn ontologies are ontology files on disk.
+/// Text -> Parsed -> Queried -> Analyzed -> [`InternalDocument`]
 #[allow(clippy::large_enum_variant)] // Size differs by 2x but that is ok
 #[enum_dispatch(OntologyDocument)]
 #[derive(Debug, PartialEq, Eq)]
@@ -551,36 +548,36 @@ impl Workspace {
             .tree_reduce(FrameInfo::merge)
     }
 
-    pub fn node_info(&self, node: &Node, doc: &InternalDocument) -> String {
-        match node.kind() {
-            "class_frame" | "annotation_property_frame" | "class_iri" => {
-                // Goto first named child and repeat
-                if let Some(iri_node) = &node.named_child(0) {
-                    self.node_info(iri_node, doc)
-                } else {
-                    "Class Frame\nNo iri was found".to_string()
-                }
-            }
-            "full_iri" => {
-                let iri = trim_full_iri_rope_slice(node_text(node, doc.rope()));
+    // pub fn node_info(&self, node: &Node, doc: &InternalDocument) -> String {
+    //     match node.kind() {
+    //         "class_frame" | "annotation_property_frame" | "class_iri" => {
+    //             // Goto first named child and repeat
+    //             if let Some(iri_node) = &node.named_child(0) {
+    //                 self.node_info(iri_node, doc)
+    //             } else {
+    //                 "Class Frame\nNo iri was found".to_string()
+    //             }
+    //         }
+    //         "full_iri" => {
+    //             let iri = trim_full_iri_rope_slice(node_text(node, doc.rope()));
 
-                self.get_frame_info(&iri.to_iri())
-                    .map(|fi| fi.info_display(self))
-                    .unwrap_or(iri.to_string())
-            }
-            "simple_iri" | "abbreviated_iri" => {
-                let iri = node_text(node, doc.rope()).to_string();
-                let iri = doc
-                    .abbreviated_iri_to_full_iri(&iri.to_iri())
-                    .unwrap_or(iri.into());
-                debug!("Getting node info for {iri} at doc {}", doc.uri());
-                self.get_frame_info(&iri)
-                    .map(|fi| fi.info_display(self))
-                    .unwrap_or(iri.to_string())
-            }
-            kind => keyword_hover_info(kind),
-        }
-    }
+    //             self.get_frame_info(&iri.to_iri())
+    //                 .map(|fi| fi.info_display(self))
+    //                 .unwrap_or(iri.to_string())
+    //         }
+    //         "simple_iri" | "abbreviated_iri" => {
+    //             let iri = node_text(node, doc.rope()).to_string();
+    //             let iri = doc
+    //                 .abbreviated_iri_to_full_iri(&iri.to_iri())
+    //                 .unwrap_or(iri.into());
+    //             debug!("Getting node info for {iri} at doc {}", doc.uri());
+    //             self.get_frame_info(&iri)
+    //                 .map(|fi| fi.info_display(self))
+    //                 .unwrap_or(iri.to_string())
+    //         }
+    //         kind => keyword_hover_info(kind),
+    //     }
+    // }
 
     pub fn find_catalog_uri(&self, url: &Url) -> Option<(&Catalog, &CatalogUri)> {
         let url_string = url.to_string();
@@ -858,9 +855,6 @@ pub enum Document {
     Internal(InternalDocument),
     External(ExternalDocument),
 }
-
-/// Internal omn ontologies are OMN files on disk.
-/// Text -> Parsed -> Queried -> Analyzed -> ``InternalDocument``
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct DocumentId {
@@ -1209,154 +1203,6 @@ impl ParsedDocument {
         };
         Ok((parsed_document, old_tree))
     }
-
-    /// Generate the diagnostics for a single node, walking recursively down to every child and every syntax error within
-    pub fn syntax_errors(self: &ParsedDocument) -> Vec<Diagnostic> {
-        let mut cursor = self.tree.root_node().walk();
-        let mut diagnostics = Vec::<Diagnostic>::new();
-
-        loop {
-            let node = cursor.node();
-
-            if node.is_error() {
-                let leaf = first_leaf(node);
-                let range: Range = cursor.node().range().into();
-
-                let prev_node = node.prev_sibling().unwrap_or(node.parent().unwrap_or(node));
-
-                let mut prev = if let Some(prev_sib) = node.prev_sibling() {
-                    let prev_sibs_last_leaf = get_last_leaf(prev_sib);
-                    prev_sibs_last_leaf
-                } else {
-                    prev_node
-                };
-
-                let mut parent_chain = vec![prev.kind()];
-                while let Some(par) = prev.parent() {
-                    parent_chain.push(par.kind());
-                    prev = par;
-                }
-
-                let possible_nodes = possible_nodes(node)
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect();
-                debug!("Possible nodes: {possible_nodes:#?}");
-                debug!("Parent chain: {parent_chain:#?}");
-
-                let parent_chain_children = parent_chain
-                    .iter()
-                    .flat_map(|kind| {
-                        OMN_NODE_TYPES
-                            .get(&(*kind).to_string())
-                            .iter()
-                            .flat_map(|t| {
-                                t.children
-                                    .types
-                                    .iter()
-                                    .map(|c| c.type_.clone())
-                                    .collect_vec()
-                            })
-                            .collect_vec()
-                    })
-                    .collect::<HashSet<_>>();
-
-                let valid_children = parent_chain_children.intersection(&possible_nodes);
-
-                let valid_children: String = valid_children
-                    .map(|nt| node_type_to_string(nt))
-                    .sorted_unstable()
-                    .join(", ");
-
-                let parent = parent_chain
-                    .iter()
-                    .map(|parent_kind| node_type_to_string(parent_kind))
-                    .join(" < ");
-
-                diagnostics.push(Diagnostic {
-                    range,
-                    kind: DiagnosticKind::SyntaxError {
-                        valid_children,
-                        parent,
-                        msg: leaf
-                            .to_string()
-                            .trim_start_matches('(')
-                            .trim_end_matches(')')
-                            .to_string(),
-                    },
-                });
-
-                // move along
-                while !cursor.goto_next_sibling() {
-                    // move out
-                    if !cursor.goto_parent() {
-                        // this node has no parent, it's the root
-                        return diagnostics;
-                    }
-                }
-            } else if node.has_error() {
-                // move in
-                let has_child = cursor.goto_first_child(); // should always work
-
-                if !has_child {
-                    while !cursor.goto_next_sibling() {
-                        // move out
-                        if !cursor.goto_parent() {
-                            // this node has no parent, it's the root
-                            return diagnostics;
-                        }
-                    }
-                }
-            } else {
-                // move along
-                while !cursor.goto_next_sibling() {
-                    // move out
-                    if !cursor.goto_parent() {
-                        // this node has no parent, it's the root
-                        return diagnostics;
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn first_leaf(node: Node<'_>) -> Node<'_> {
-    let mut current = node;
-    while let Some(child) = current.child(0) {
-        current = child;
-    }
-    current
-}
-
-fn possible_nodes(node: Node<'_>) -> HashSet<&'static str> {
-    if !node.is_error() {
-        return HashSet::new();
-    }
-
-    let state = first_leaf(node).parse_state();
-
-    let names = LANGUAGE_OMN
-        .lookahead_iterator(state)
-        .map(|mut it| it.iter_names().collect())
-        .unwrap_or_default();
-
-    names
-}
-
-fn get_last_leaf(node: Node<'_>) -> Node<'_> {
-    debug!("Get last leaf of {node}");
-    if node.child_count() > 0 {
-        if let Some(c) = node.child(node.child_count() - 1) {
-            debug!("Goto child {c} with index {}", node.child_count() - 1);
-            get_last_leaf(c)
-        } else {
-            node
-        }
-    } else {
-        debug!("End on {node}");
-        node
-    }
 }
 
 // for debugging
@@ -1449,134 +1295,6 @@ impl ParsedDocument {
 
     pub fn query_range(&'_ self, query: &Query, range: Range) -> Vec<UnwrappedQueryMatch<'_>> {
         query_helper(self, query, Some(range))
-    }
-
-    /// Returns the ontology IRI if possible and the version IRI if possible.
-    pub fn ontology_id(&self) -> Option<RangeBox<OntologyId>> {
-        match &self.query(&OMN_ALL_QUERIES.ontology)[..] {
-            [] => None,
-            [ontology] => match &ontology.captures[..] {
-                [] => None,
-                // This should be a full IRI so lets trim it
-                [iri_capture] => Some(RangeBox::new(
-                    (
-                        trim_full_iri_rope_slice(iri_capture.node.text).to_iri(),
-                        None,
-                    ),
-                    iri_capture.node.range,
-                )),
-                [iri_capture, version_iri_capture] => Some(RangeBox::new(
-                    (
-                        trim_full_iri_rope_slice(iri_capture.node.text).to_iri(),
-                        Some(trim_full_iri_rope_slice(version_iri_capture.node.text).to_iri()),
-                    ),
-                    Range::new(
-                        iri_capture.node.range.start,
-                        version_iri_capture.node.range.end,
-                    ),
-                )),
-                _ => unreachable!("The query has only one capture"),
-            },
-            _ => unreachable!("the grammar only parses ontology zero or one time"),
-        }
-    }
-
-    /// Returns the prefixes of a document (without colon `:`) in a prefix name to iri map.
-    ///
-    /// Some prefixes should always be defined
-    ///
-    /// ```owl-ms
-    /// Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-    /// Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-    /// Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
-    /// Prefix: owl: <http://www.w3.org/2002/07/owl#>
-    /// ```
-    pub fn prefixes(&self) -> HashMap<String, RangeBox<String>> {
-        self.query(&OMN_ALL_QUERIES.prefix)
-            .into_iter()
-            .map(|m| match &m.captures[..] {
-                [name_capture, iri_capture] => (
-                    name_capture
-                        .node
-                        .text
-                        .to_string()
-                        .trim_end_matches(':')
-                        .to_string(),
-                    RangeBox::new(
-                        trim_full_iri_rope_slice(iri_capture.node.text).to_string(),
-                        Range::new(name_capture.node.range.start, iri_capture.node.range.end),
-                    ),
-                ),
-                _ => unreachable!(),
-            })
-            // Horned owl has no default here. Let's keep it out for now.
-            // .chain(
-            //     STANDARD_PREFIX_NAMES
-            //         .iter()
-            //         .map(|(a, b)| (a.to_string(), b.to_string())),
-            // )
-            .unique_by(|(k, v)| (k.clone(), v.value().clone()))
-            .collect()
-    }
-
-    pub fn prefixes_in_range(&self, range: Range) -> HashMap<String, RangeBox<String>> {
-        self.query_range(&OMN_ALL_QUERIES.prefix, range)
-            .into_iter()
-            .map(|m| match &m.captures[..] {
-                [name_capture, iri_capture] => (
-                    name_capture
-                        .node
-                        .text
-                        .to_string()
-                        .trim_end_matches(':')
-                        .to_string(),
-                    RangeBox::new(
-                        trim_full_iri_rope_slice(iri_capture.node.text).to_string(),
-                        Range::new(name_capture.node.range.start, iri_capture.node.range.end),
-                    ),
-                ),
-                _ => unreachable!(),
-            })
-            .unique_by(|(k, v)| (k.clone(), v.value().clone()))
-            .collect()
-    }
-
-    pub fn prefix_parts_in_range(&self, range: Range) -> Option<(Range, Range)> {
-        self.query_range(&OMN_ALL_QUERIES.prefix, range)
-            .into_iter()
-            .map(|m| match &m.captures[..] {
-                [name_capture, iri_capture] => (name_capture.node.range, iri_capture.node.range),
-                _ => unreachable!(),
-            })
-            .next()
-    }
-
-    pub fn imports(&self) -> Vec<RangeBox<Iri>> {
-        self.query(&OMN_ALL_QUERIES.import_query)
-            .iter()
-            .filter_map(|m| match &m.captures[..] {
-                [iri_capture] => {
-                    Oxiri::parse(trim_full_iri_rope_slice(iri_capture.node.text).to_string())
-                        .ok()
-                        .map(|iri_| RangeBox::new(iri_.as_str().to_iri(), iri_capture.node.range))
-                }
-                _ => unimplemented!(),
-            })
-            .collect_vec()
-    }
-
-    pub fn imports_in_range(&self, range: Range) -> Vec<RangeBox<Iri>> {
-        self.query_range(&OMN_ALL_QUERIES.import_query, range)
-            .iter()
-            .filter_map(|m| match &m.captures[..] {
-                [iri_capture] => {
-                    Oxiri::parse(trim_full_iri_rope_slice(iri_capture.node.text).to_string())
-                        .ok()
-                        .map(|iri_| RangeBox::new(iri_.as_str().to_iri(), iri_capture.node.range))
-                }
-                _ => unimplemented!(),
-            })
-            .collect_vec()
     }
 }
 
@@ -1692,7 +1410,9 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
             Component::OntologyID(horned_owl::model::OntologyID {
                 iri: Some(id),
                 viri: _,
-            }) => Some(SimpleTerm::Iri(IriRef::new(MownStr::from_ref(id)).unwrap())),
+            }) => Some(SimpleTerm::Iri(
+                IriRef::new(MownStr::from_ref(id)).expect("valid iri"),
+            )),
             _ => None,
         });
 
@@ -1700,9 +1420,12 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
             match &ac.component {
                 AnnotationAssertion(aa) => match &aa.subject {
                     AnnotationSubject::IRI(iri) => {
-                        let subject = SimpleTerm::Iri(IriRef::new(MownStr::from_ref(iri)).unwrap());
-                        let predicate =
-                            SimpleTerm::Iri(IriRef::new(MownStr::from_ref(&aa.ann.ap)).unwrap());
+                        let subject = SimpleTerm::Iri(
+                            IriRef::new(MownStr::from_ref(iri)).expect("valid iri"),
+                        );
+                        let predicate = SimpleTerm::Iri(
+                            IriRef::new(MownStr::from_ref(&aa.ann.ap)).expect("valid iri"),
+                        );
                         let object = match &aa.ann.av {
                             AnnotationValue::Literal(literal) => match literal {
                                 Literal::Simple { literal } => SimpleTerm::LiteralDatatype(
@@ -1711,22 +1434,25 @@ impl From<SetOntology<ArcStr>> for InfoGraph {
                                 ),
                                 Literal::Language { literal, lang } => SimpleTerm::LiteralLanguage(
                                     literal.clone().into(),
-                                    LanguageTag::new(lang.clone().into()).unwrap(),
+                                    LanguageTag::new(lang.clone().into())
+                                        .expect("valid language tag"),
                                 ),
                                 Literal::Datatype {
                                     literal,
                                     datatype_iri,
                                 } => SimpleTerm::LiteralDatatype(
                                     literal.clone().into(),
-                                    IriRef::new(MownStr::from_ref(datatype_iri)).unwrap(),
+                                    IriRef::new(MownStr::from_ref(datatype_iri))
+                                        .expect("valid iri"),
                                 ),
                             },
-                            AnnotationValue::IRI(iri) => {
-                                SimpleTerm::Iri(IriRef::new(MownStr::from_ref(iri)).unwrap())
-                            }
+                            AnnotationValue::IRI(iri) => SimpleTerm::Iri(
+                                IriRef::new(MownStr::from_ref(iri)).expect("valid iri"),
+                            ),
                             AnnotationValue::AnonymousIndividual(anonymous_individual) => {
                                 SimpleTerm::BlankNode(
-                                    BnodeId::new(MownStr::from_ref(anonymous_individual)).unwrap(),
+                                    BnodeId::new(MownStr::from_ref(anonymous_individual))
+                                        .expect("valid blanc node id"),
                                 )
                             }
                         };
@@ -1841,7 +1567,7 @@ impl ExternalDocument {
             .map(|g| {
                 // Find Match for: x <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2002/07/owl#Ontology>.
                 let owl = Namespace::new_unchecked("http://www.w3.org/2002/07/owl#");
-                let owl_ontology = owl.get("Ontology").unwrap();
+                let owl_ontology = owl.get("Ontology").expect("valid iri");
                 let ontology_id = &g
                     .triples_matching(Any, [sophia::api::ns::rdf::type_], [owl_ontology])
                     .flatten()
@@ -1878,7 +1604,7 @@ impl ExternalDocument {
                     .is_some_and(|iri| iri.as_str() == "http://www.w3.org/2002/07/owl#imports")
             })
             .filter_map(|[_, _, o]| o.iri())
-            .map(|iri| iri.as_str().to_iri())
+            .map(std::convert::Into::into)
             .unique();
 
         Box::new(iris)
@@ -1904,7 +1630,7 @@ impl ExternalDocument {
                     debug!("{s:?} {iri:?} {o:?}");
                     if let Some(subject_iri) = s.iri() {
                         if iri.as_str() == IRI_RDF_TYPE {
-                            hash_set.insert(subject_iri.as_str().to_iri());
+                            hash_set.insert(subject_iri.into());
                         }
                     }
                 })
@@ -1934,14 +1660,10 @@ impl ExternalDocument {
 
         result.insert(self.uri.clone());
 
-        // TODO shitty child urls :<
         let docs = urls.iter().filter_map(|iri| {
-            workspace.document_by_url(&iri.to_url().unwrap())
+            iri.to_url().and_then(|u| workspace.document_by_url(&u))
+
             // TODO maybe reactivate but for now lets not log here
-            // .ok_or(Error::DocumentNotLoaded(url.clone()))
-            // Workspace::resolve_url_to_document(&self.try_get_workspace()?, &url)
-            // .inspect_log()
-            // .ok()
         });
 
         for doc in docs {
@@ -1980,11 +1702,11 @@ impl ExternalDocument {
             .filter_map(std::result::Result::ok)
             .filter_map(|term| term.iri())
             .unique()
-            .map(|iri| iri.as_str().to_iri())
+            .map(std::convert::Into::into)
             // Filter out IRI's that point to this ontology
-            .filter(|url| {
+            .filter(|iri: &Iri| {
                 // This should be faster than url.make_relative, because url contains a serialized version
-                !url.to_string()
+                !iri.to_string()
                     .starts_with(uri.to_string().trim_end_matches('#'))
             })
             .filter(|url| !url.to_string().contains(&graph.1))
@@ -2008,18 +1730,42 @@ impl ExternalDocument {
 /// Convert some IRI into a IRI where the ontolgoy of that IRI can be fetched from.
 /// This turns `http://example.com/ontology#Table` -> `http://example.com/ontology`
 /// and `http://example.com/ontology/Table` -> `http://example.com/ontology`.
-pub fn iri_to_onology_iri(mut iri: Iri) -> Iri {
+pub fn iri_to_onology_iri(iri: Iri) -> Iri {
     // TODO check for obo ontology
     // See https://obofoundry.org/principles/fp-003-uris.html
-    // TODO use oxiri not string splits
 
-    if let Some((l, _)) = iri.rsplit_once('#') {
-        iri = l.to_iri();
-    } else if let Some((l, _)) = iri.rsplit_once('/') {
-        iri = l.to_iri();
-    }
-
-    iri
+    let o = if iri.contains("://") {
+        // absolute IRI
+        // We know that IRI is a valid IRI, lets skip the check
+        let oxiri = OxiriRef::parse_unchecked(iri);
+        if oxiri.fragment().is_some() {
+            format!(
+                "{}://{}{}",
+                oxiri.scheme().unwrap_or_default(),
+                oxiri.authority().unwrap_or_default(),
+                oxiri.path() // No fragment but last path segment
+            )
+            .as_str()
+            .to_iri_unchecked()
+        } else {
+            format!(
+                "{}://{}{}",
+                oxiri.scheme().unwrap_or_default(),
+                oxiri.authority().unwrap_or_default(),
+                oxiri
+                    .path()
+                    .rsplit_once('/')
+                    .map_or(oxiri.path(), |(l, _)| l) // Remove last path segment
+            )
+            .as_str()
+            .to_iri_unchecked()
+        }
+    } else {
+        // What can I do on abbriviated iris? Nothing i guess
+        iri
+    };
+    // debug!("try iri to ontology url {iri} -> {o}");
+    o
 }
 
 #[cached(
@@ -2046,23 +1792,23 @@ fn get_frame_info_helper_ex(doc: &ExternalDocument, iri: &Iri) -> Option<FrameIn
             Any,
         )
         .flatten()
-        .map(|[s, p, o]| {
+        .filter_map(|[s, p, o]| {
             let ann = simple_term_to_annotation(o);
-            FrameInfo {
+            Some(FrameInfo {
                 iri: iri.clone(),
                 annotations: vec![Annotation {
-                    frame_iri: simple_term_literal(s).into(),
-                    iri: simple_term_literal(p).into(),
+                    frame_iri: simple_term_literal(s).parse().ok()?, // Blank nodes are not supportd
+                    iri: simple_term_literal(p).parse().ok()?,
                     string_value: ann.0,
                     language: ann.2,
-                    datatype: ann.1.into(),
+                    datatype: ann.1.parse().ok()?,
                 }],
                 frame_type: FrameType::Unknown,
                 definitions: vec![Location {
                     uri: doc.uri.clone(),
                     range: Range::ZERO,
                 }],
-            }
+            })
         })
         .tree_reduce(FrameInfo::merge)
 }
@@ -2172,7 +1918,7 @@ impl FrameInfo {
     ///
     /// TODO this can be replaced with [`label_with_lang`]
     pub fn label(&self, workspace: &Workspace) -> Option<String> {
-        self.annotation_display(&LABEL_IRI.into(), workspace, &[])
+        self.annotation_display(&LABEL_IRI.to_iri_unchecked(), workspace, &[])
     }
 
     pub fn label_with_lang(
@@ -2180,7 +1926,7 @@ impl FrameInfo {
         workspace: &Workspace,
         prefered_language: &[Language],
     ) -> Option<String> {
-        self.annotation_display(&LABEL_IRI.into(), workspace, prefered_language)
+        self.annotation_display(&LABEL_IRI.to_iri_unchecked(), workspace, prefered_language)
     }
 
     ///
@@ -2235,7 +1981,8 @@ impl FrameInfo {
                         // TODO the "...@ Language" suffix could be removed when just one lang matches
                         format!("{} @ {}", annotation.string_value, language.name())
                     }
-                } else if annotation.datatype != STRING_IRI.into() && iri != &LABEL_IRI.into()
+                } else if annotation.datatype != STRING_IRI.to_iri_unchecked()
+                    && iri != &LABEL_IRI.to_iri_unchecked()
                 // Endless recursion if label is a valid iri
                 {
                     let datatype_label = workspace
@@ -2310,7 +2057,7 @@ impl FrameInfo {
         }
         for annotation in &self.annotations {
             if annotation.string_value.contains(query) {
-                if annotation.iri == LABEL_IRI.into() {
+                if annotation.iri == LABEL_IRI.to_iri_unchecked() {
                     sum += 1000;
 
                     if let Some((l, r)) = annotation.string_value.split_once(query) {
@@ -2343,7 +2090,7 @@ impl FrameInfo {
 
     pub fn is_deprecated(&self) -> bool {
         self.annotations.iter().any(|annotation| {
-            annotation.iri == "http://www.w3.org/2002/07/owl#deprecated".into()
+            annotation.iri == "http://www.w3.org/2002/07/owl#deprecated".to_iri_unchecked()
                 && (annotation.string_value == "true" || annotation.string_value == "1")
         })
     }
@@ -2504,22 +2251,6 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
     );
 
     diagnostics
-}
-
-fn node_type_to_string(node_type: &str) -> String {
-    node_type
-        .trim_start_matches("keyword_")
-        .split_terminator('_')
-        .map(capitalize_string)
-        .join(" ")
-}
-
-fn capitalize_string(s: &str) -> String {
-    let mut c = s.chars();
-    match c.next() {
-        None => String::new(),
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-    }
 }
 
 /// taken from <https://www.w3.org/TR/owl2-syntax/#Entity_Declarations_and_Typing>
@@ -2831,18 +2562,18 @@ mod tests {
             .into(),
         );
 
-        let full_iri = doc.abbreviated_iri_to_full_iri(&"owl:Nothing".into());
-        let full_iri_2 = doc.abbreviated_iri_to_full_iri(&"ja:Janek".into());
+        let full_iri = doc.abbreviated_iri_to_full_iri(&"owl:Nothing".to_iri_unchecked());
+        let full_iri_2 = doc.abbreviated_iri_to_full_iri(&"ja:Janek".to_iri_unchecked());
 
         assert_eq!(
             full_iri,
-            Some("http://www.w3.org/2002/07/owl#Nothing".into())
+            Some("http://www.w3.org/2002/07/owl#Nothing".to_iri_unchecked())
         );
         assert_eq!(
             full_iri_2,
             Some(
                 "http://www.semanticweb.org/janek/ontologies/2025/5/untitled-ontology-3/Janek"
-                    .into()
+                    .to_iri_unchecked()
             )
         );
     }
@@ -2859,16 +2590,16 @@ mod tests {
             .into(),
         );
 
-        let full_iri = doc.abbreviated_iri_to_full_iri(&":Nothing".into());
-        let full_iri_2 = doc.abbreviated_iri_to_full_iri(&"Nothing".into());
+        let full_iri = doc.abbreviated_iri_to_full_iri(&":Nothing".to_iri_unchecked());
+        let full_iri_2 = doc.abbreviated_iri_to_full_iri(&"Nothing".to_iri_unchecked());
 
         assert_eq!(
             full_iri,
-            Some("http://www.w3.org/2002/07/owl#Nothing".into())
+            Some("http://www.w3.org/2002/07/owl#Nothing".to_iri_unchecked())
         );
         assert_eq!(
             full_iri_2,
-            Some("http://www.w3.org/2002/07/owl#Nothing".into())
+            Some("http://www.w3.org/2002/07/owl#Nothing".to_iri_unchecked())
         );
     }
 
@@ -2939,13 +2670,13 @@ mod tests {
         );
 
         // Act
-        let info = doc.find_frame_info(&"A".into());
+        let info = doc.find_frame_info(&"A".to_iri_unchecked());
 
         // Assert
         info!("{doc:#?}");
         let info = info.unwrap();
 
-        assert_eq!(info.iri, "A".into());
+        assert_eq!(info.iri, "A".to_iri_unchecked());
         assert_eq!(
             info.definitions,
             vec![Location {
@@ -3010,8 +2741,8 @@ mod tests {
         let urls = external_doc.imports();
 
         // Assert
-        assert!(urls.contains(&"http://www.example.com/other-property".to_iri()));
-        assert!(urls.contains(&tmp_url.url().as_str().to_iri()));
+        assert!(urls.contains(&"http://www.example.com/other-property".to_iri_unchecked()));
+        assert!(urls.contains(&tmp_url.url().as_str().to_iri_unchecked()));
     }
 
     #[test]
@@ -3032,8 +2763,8 @@ mod tests {
             .into(),
         );
 
-        let abbr_iri =
-            doc.full_iri_to_abbreviated_iri(&"http://www.w3.org/2002/07/owl#Thing".into());
+        let abbr_iri = doc
+            .full_iri_to_abbreviated_iri(&"http://www.w3.org/2002/07/owl#Thing".to_iri_unchecked());
 
         assert_eq!(abbr_iri, Some("owl:Thing".to_string()));
     }
@@ -3050,8 +2781,8 @@ mod tests {
             .into(),
         );
 
-        let abbr_iri =
-            doc.full_iri_to_abbreviated_iri(&"http://www.w3.org/2002/07/owl#Thing".into());
+        let abbr_iri = doc
+            .full_iri_to_abbreviated_iri(&"http://www.w3.org/2002/07/owl#Thing".to_iri_unchecked());
 
         assert_eq!(abbr_iri, Some("Thing".to_string()));
     }
