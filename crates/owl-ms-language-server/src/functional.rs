@@ -17,7 +17,7 @@ use crate::{
     iri::{Iri, TryToIri},
     pos::Position,
     queries::{treesitter_highlight_capture_into_semantic_token_type_index, OFN_ALL_QUERIES},
-    range::{Range, RangeBox},
+    range::{LineRange, Range, RangeBox},
     rope_provider::RopeProvider,
     workspace::{
         changes_from_lsp, trim_full_iri_rope_slice, Annotation, Diagnostic, DocumentId,
@@ -408,6 +408,10 @@ impl OntologyDocument for InternalOfnDocument {
     }
 
     fn add_annotation_edits(&self, _annotation: Annotation) -> Vec<RangeBox<String>> {
+        vec![]
+    }
+
+    fn folding_range(&self) -> Vec<LineRange> {
         vec![]
     }
 }

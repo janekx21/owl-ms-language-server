@@ -5,10 +5,10 @@ use crate::functional::InternalOfnDocument;
 use crate::iri::{Iri, ToIriUnchecked};
 use crate::manchester::InternalOmnDocument;
 use crate::pos::Position;
-use crate::range::{Change, RangeBox};
+use crate::range::{Change, LineRange, Range, RangeBox};
 use crate::turtle::InternalTtlDocument;
 use crate::web::{url_to_filename, HttpClient};
-use crate::{catalog::Catalog, debugging::timeit, range::Range, rope_provider::RopeProvider};
+use crate::{catalog::Catalog, debugging::timeit, rope_provider::RopeProvider};
 use cached::{cached, Cached};
 use enum_dispatch::enum_dispatch;
 use horned_owl::model::Component::{self, AnnotationAssertion};
@@ -252,6 +252,8 @@ pub trait OntologyDocument {
     }
 
     fn statistic(&self) -> String;
+
+    fn folding_range(&self) -> Vec<LineRange>;
 }
 
 pub(crate) enum HoverResult {

@@ -272,6 +272,25 @@ fn post_end_of_change(change: &Change) -> Position {
     }
 }
 
+pub struct LineRange {
+    pub start: u32,
+    pub end: u32,
+}
+
+impl LineRange {
+    pub fn new(start: u32, end: u32) -> Self {
+        LineRange { start, end }
+    }
+}
+
+impl From<std::ops::Range<u32>> for LineRange {
+    fn from(value: std::ops::Range<u32>) -> Self {
+        LineRange::new(value.start, value.end)
+    }
+}
+
+// pub type LineRange = std::ops::Range<u32>;
+
 #[cfg(test)]
 mod tests {
     use super::*;

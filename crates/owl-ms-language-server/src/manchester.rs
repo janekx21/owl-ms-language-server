@@ -7,7 +7,7 @@ use crate::pos::Position;
 use crate::queries::{
     self, treesitter_highlight_capture_into_semantic_token_type_index, OMN_NODE_TYPES,
 };
-use crate::range::{Change, RangeBox};
+use crate::range::{Change, LineRange, RangeBox};
 use crate::workspace::{
     build_iri_locations, capture_by_name, changes_from_lsp, edit_vec_rb, extend_vec_rb,
     iri_to_onology_iri, node_text, post_change_ranges, retain_vec_rb, retain_vec_rb_on_remove,
@@ -674,6 +674,10 @@ impl OntologyDocument for InternalOmnDocument {
             format!("\n    Annotations: {annotation_iri} \"{label}\""),
             Range::new(l.range.end, l.range.end),
         )]
+    }
+
+    fn folding_range(&self) -> Vec<LineRange> {
+        vec![LineRange::new(1, 5)]
     }
 }
 
