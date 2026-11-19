@@ -1894,7 +1894,7 @@ pub struct FrameInfo {
 }
 
 impl FrameInfo {
-    fn merge(a: FrameInfo, b: FrameInfo) -> FrameInfo {
+    pub fn merge(a: FrameInfo, b: FrameInfo) -> FrameInfo {
         let mut c = a;
         c.extend(b);
         c

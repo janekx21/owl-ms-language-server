@@ -54,6 +54,7 @@ pub struct InternalOfnDocument {
     parsed_document: ParsedDocument,
     prefixes: HashMap<String, RangeBox<String>>,
     definitions: Vec<RangeBox<IriDefinition>>,
+    references: Vec<RangeBox<Iri>>,
     imports: Vec<Iri>,
     syntax_errors: Vec<Diagnostic>,
 }
@@ -84,12 +85,14 @@ impl InternalOfnDocument {
         let definitions = gen_definitions(&parsed_document, &prefixes);
         let imports = gen_imports(&parsed_document);
         let syntax_errors = gen_syntax_errors(&parsed_document);
+        let references = gen_references(&parsed_document, &prefixes);
 
         Self {
             id,
             parsed_document,
             prefixes,
             definitions,
+            references,
             imports,
             syntax_errors,
         }
@@ -125,6 +128,7 @@ impl InternalOfnDocument {
             definitions: _, // regenreated for now
             imports: _,
             syntax_errors: _,
+            references: _,
         } = self;
 
         let changes = changes_from_lsp(params, encoding, parsed_document.rope());
@@ -148,18 +152,40 @@ impl InternalOfnDocument {
         let definitions = gen_definitions(&parsed_document, &prefixes);
         let imports = gen_imports(&parsed_document);
         let syntax_errors = gen_syntax_errors(&parsed_document);
+        let references = gen_references(&parsed_document, &prefixes);
 
         let doc = Self {
             id,
             parsed_document,
             prefixes,
             definitions,
+            references,
             imports,
             syntax_errors,
         };
 
         Ok(doc)
     }
+}
+
+fn gen_references(
+    parsed_document: &ParsedDocument,
+    prefixes: &HashMap<String, RangeBox<String>>,
+) -> Vec<RangeBox<Iri>> {
+    parsed_document
+        .query(&OFN_ALL_QUERIES.iri_query_all)
+        .into_iter()
+        .filter_map(|m| {
+            let iri_c = m.captures.first().expect("should be one");
+            trim_full_iri_rope_slice(iri_c.node.text)
+                .try_to_iri()
+                .ok()
+                .map(|iri| {
+                    let iri = iri.try_to_full(prefixes).unwrap_or(iri);
+                    RangeBox::new(iri, iri_c.node.range)
+                })
+        })
+        .collect()
 }
 
 fn gen_prefixes(parsed_document: &ParsedDocument) -> HashMap<String, RangeBox<String>> {
@@ -361,11 +387,36 @@ impl OntologyDocument for InternalOfnDocument {
     }
 
     fn frame_infos(&self) -> Vec<&FrameInfo> {
-        vec![] // TODO
+        // self.definitions
+        //     .iter()
+        //     .map(|d| FrameInfo {
+        //         iri: d.value().iri.clone(),
+        //         annotations: vec![],
+        //         frame_type: d.value().kind,
+        //         definitions: vec![crate::workspace::Location {
+        //             uri: self.uri().clone(),
+        //             range: *d.range(),
+        //         }],
+        //     })
+        //     // .tree_reduce(FrameInfo::merge)
+        //     .collect()
+        vec![]
     }
 
-    fn find_frame_info(&self, _iri: &Iri) -> Option<FrameInfo> {
-        None // TODO
+    fn find_frame_info(&self, iri: &Iri) -> Option<FrameInfo> {
+        self.definitions
+            .iter()
+            .filter(|d| &d.value().iri == iri)
+            .map(|d| FrameInfo {
+                iri: d.value().iri.clone(),
+                annotations: vec![],
+                frame_type: d.value().kind,
+                definitions: vec![crate::workspace::Location {
+                    uri: self.uri().clone(),
+                    range: *d.range(),
+                }],
+            })
+            .tree_reduce(FrameInfo::merge)
     }
 
     fn ontology_iri(&self) -> Option<Iri> {
@@ -381,7 +432,7 @@ impl OntologyDocument for InternalOfnDocument {
     }
 
     fn references(&self) -> Vec<&RangeBox<Iri>> {
-        vec![] // TODO
+        self.references.iter().collect()
     }
 
     fn directly_imports(&self) -> Vec<&Iri> {
@@ -422,8 +473,25 @@ impl OntologyDocument for InternalOfnDocument {
         self.parsed_document.tree().root_node().range().into()
     }
 
-    fn iri_at(&self, _pos: Position) -> Option<RangeBox<IriAtPosition>> {
-        None // TODO
+    fn iri_at(&self, pos: Position) -> Option<RangeBox<IriAtPosition>> {
+        self.references
+            .iter()
+            .find(|r| r.range().contains(pos))
+            .map(|i| {
+                RangeBox::new(
+                    IriAtPosition {
+                        full_iri: i.value().clone(),
+                        is_import: false,   // TODO!
+                        is_ontology: false, // TODO!
+                        frame_type: self
+                            .definitions
+                            .iter()
+                            .find(|d| &d.value().iri == i.value())
+                            .map(|d| d.value().kind),
+                    },
+                    *i.range(),
+                )
+            })
     }
 
     fn rename_range(&self, _pos: Position) -> Option<Range> {
@@ -436,34 +504,23 @@ impl OntologyDocument for InternalOfnDocument {
 
     fn rename_edits(&self, rename_info: &RenameInfo) -> Vec<RangeBox<String>> {
         match rename_info {
-            RenameInfo::Iri(iri_rename_info) => {
-                self.parsed_document
-                    .query(&OFN_ALL_QUERIES.iri_query_all)
-                    .into_iter()
-                    .filter_map(|ele| {
-                        let iri_c = ele.captures.first().expect("should match once"); // TODO trim and to full iri
+            RenameInfo::Iri(iri_rename_info) => self
+                .references
+                .iter()
+                .filter_map(|iri_box| {
+                    if iri_box.value() == &iri_rename_info.full_iri {
+                        let value = iri_rename_info
+                            .new_iri
+                            .as_ref()
+                            .and_then(|i| self.full_iri_to_abbreviated_iri(i))
+                            .unwrap_or(iri_rename_info.original.clone());
 
-                        let iri = trim_full_iri_rope_slice(iri_c.node.text)
-                            .try_to_iri()
-                            .ok()?;
-                        let iri = self.abbreviated_iri_to_full_iri(&iri).unwrap_or(iri);
-
-                        // iri.node.range
-
-                        if iri == iri_rename_info.full_iri {
-                            let value = iri_rename_info
-                                .new_iri
-                                .as_ref()
-                                .and_then(|i| self.full_iri_to_abbreviated_iri(i))
-                                .unwrap_or(iri_rename_info.original.clone());
-
-                            Some(RangeBox::new(value, iri_c.node.range))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            }
+                        Some(RangeBox::new(value, *iri_box.range()))
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
             RenameInfo::Prefix(_, _) => vec![], // TODO
         }
     }

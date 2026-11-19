@@ -708,7 +708,7 @@ impl LanguageServer for Backend {
             } = iri_at.value();
             debug!("Try goto definition of {iri}");
 
-            if *is_import {
+            if is_import.to_owned() {
                 let url = Url::parse(iri.as_str()).map_err(|_| Error::InvalidUrl(url.clone()))?;
                 // This does not work for external documents from prefixes
 
