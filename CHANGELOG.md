@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.4.0...v1.5.0) (2026-11-19)
+
+
+### Features
+
+* [#229](https://github.com/janekx21/owl-ms-language-server/issues/229) add rename for ttl files omn -&gt; ttl ([#233](https://github.com/janekx21/owl-ms-language-server/issues/233)) ([ffc79bc](https://github.com/janekx21/owl-ms-language-server/commit/ffc79bc90c3be697dc5dab2a7a406e8dfd077eb9))
+* [#230](https://github.com/janekx21/owl-ms-language-server/issues/230) handle deep imports (parent [#207](https://github.com/janekx21/owl-ms-language-server/issues/207)) ([#238](https://github.com/janekx21/owl-ms-language-server/issues/238)) ([5206c84](https://github.com/janekx21/owl-ms-language-server/commit/5206c8461618c076a3cc21b30fc86c2002cc634d))
+* [#236](https://github.com/janekx21/owl-ms-language-server/issues/236) replace import url with iri ([#241](https://github.com/janekx21/owl-ms-language-server/issues/241)) ([73ccb87](https://github.com/janekx21/owl-ms-language-server/commit/73ccb8716f0ba958679324d2b27be3fe0967216e))
+* [#240](https://github.com/janekx21/owl-ms-language-server/issues/240) validate iri on creation ([#242](https://github.com/janekx21/owl-ms-language-server/issues/242)) ([d0b9d07](https://github.com/janekx21/owl-ms-language-server/commit/d0b9d0718f3dc9bdb8a80a7f42440a0368d635f9))
+* [#58](https://github.com/janekx21/owl-ms-language-server/issues/58) folding ranges ([#244](https://github.com/janekx21/owl-ms-language-server/issues/244)) ([399ebf9](https://github.com/janekx21/owl-ms-language-server/commit/399ebf90a0956a0e01f2f660224f0bc566438b7b))
+
 ## [1.4.0](https://github.com/janekx21/owl-ms-language-server/compare/v1.3.0...v1.4.0) (2026-10-21)
 
 
