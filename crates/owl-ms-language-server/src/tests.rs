@@ -6566,6 +6566,128 @@ async fn backend_did_open_with_international_import_should_work() {
         .contains(&&"http://example.org/ä".to_iri_unchecked()));
 }
 
+#[test(tokio::test)]
+async fn backend_folding_range_should_create_document() {
+    setup();
+    // Arrange
+    let (_tmp, service, url) = arrange_single_file_backend(indoc! { r#"
+        Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        Prefix: : <http://small/ontology#>
+
+        Ontology: <http://small/ontology>
+
+        AnnotationProperty: rdfs:label
+
+
+        Datatype: bool
+            Annotations: rdfs:label "Wahrheitswert"@de
+
+        Class: ClassA
+
+        Class: ClassB
+            SubClassOf: ClassA
+
+        AnnotationProperty: AnnotationPropertyC
+
+        DataProperty: DataPropertyD
+
+        ObjectProperty: ObjectPropertyE
+
+        Individual: IndividualF
+
+
+        DisjointClasses: ClassA,ClassA
+
+        DisjointProperties: AnnotationPropertyC, AnnotationPropertyC
+
+        DifferentIndividuals: IndividualF,IndividualF
+        "# })
+    .await;
+
+    // Act
+    let result = service
+        .inner()
+        .folding_range(FoldingRangeParams {
+            text_document: TextDocumentIdentifier { uri: url.clone() },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+        })
+        .await;
+
+    // Assert
+    assert_empty_diagnostics(&service).await;
+    let folding_ranges = result.unwrap().unwrap();
+    assert_eq!(
+        folding_ranges,
+        vec![
+            FoldingRange {
+                start_line: 3,
+                end_line: 29,
+                ..FoldingRange::default()
+            },
+            FoldingRange {
+                start_line: 5,
+                end_line: 5,
+                ..FoldingRange::default()
+            },
+            FoldingRange {
+                start_line: 8,
+                end_line: 9,
+                ..FoldingRange::default()
+            },
+            FoldingRange {
+                start_line: 11,
+                end_line: 11,
+                ..FoldingRange::default()
+            },
+            FoldingRange {
+                start_line: 13,
+                end_line: 14,
+                ..FoldingRange::default()
+            },
+            FoldingRange {
+                start_line: 16,
+                end_line: 16,
+                ..FoldingRange::default()
+            },
+            FoldingRange {
+                start_line: 18,
+                end_line: 18,
+                ..FoldingRange::default()
+            },
+            FoldingRange {
+                start_line: 20,
+                end_line: 20,
+                ..FoldingRange::default()
+            },
+            FoldingRange {
+                start_line: 22,
+                end_line: 22,
+                ..FoldingRange::default()
+            },
+            FoldingRange {
+                start_line: 25,
+                end_line: 25,
+                ..FoldingRange::default()
+            },
+            FoldingRange {
+                start_line: 27,
+                end_line: 27,
+                ..FoldingRange::default()
+            },
+            FoldingRange {
+                start_line: 29,
+                end_line: 29,
+                ..FoldingRange::default()
+            },
+        ]
+    );
+}
+
 /////////////////////////
 // Fuzz / property-based tests
 /////////////////////////
