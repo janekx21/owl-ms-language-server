@@ -5,7 +5,8 @@ use crate::error::{Error, Result, ResultIterator};
 use crate::iri::{Iri, ToIriUnchecked, TryToIri};
 use crate::pos::Position;
 use crate::queries::{
-    self, treesitter_highlight_capture_into_semantic_token_type_index, OMN_NODE_TYPES,
+    self, first_leaf, get_last_leaf, possible_nodes,
+    treesitter_highlight_capture_into_semantic_token_type_index, OMN_NODE_TYPES,
 };
 use crate::range::{Change, LineRange, RangeBox};
 use crate::workspace::{
@@ -1962,44 +1963,6 @@ pub fn syntax_errors(parsed_document: &ParsedDocument) -> Vec<Diagnostic> {
                 }
             }
         }
-    }
-}
-
-fn possible_nodes(node: Node<'_>) -> HashSet<&'static str> {
-    if !node.is_error() {
-        return HashSet::new();
-    }
-
-    let state = first_leaf(node).parse_state();
-
-    let names = LANGUAGE_OMN
-        .lookahead_iterator(state)
-        .map(|mut it| it.iter_names().collect())
-        .unwrap_or_default();
-
-    names
-}
-
-fn first_leaf(node: Node<'_>) -> Node<'_> {
-    let mut current = node;
-    while let Some(child) = current.child(0) {
-        current = child;
-    }
-    current
-}
-
-fn get_last_leaf(node: Node<'_>) -> Node<'_> {
-    debug!("Get last leaf of {node}");
-    if node.child_count() > 0 {
-        if let Some(c) = node.child(node.child_count() - 1) {
-            debug!("Goto child {c} with index {}", node.child_count() - 1);
-            get_last_leaf(c)
-        } else {
-            node
-        }
-    } else {
-        debug!("End on {node}");
-        node
     }
 }
 

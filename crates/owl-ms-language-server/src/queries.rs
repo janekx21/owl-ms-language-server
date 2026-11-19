@@ -1,13 +1,27 @@
-use std::{collections::HashMap, sync::LazyLock};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::LazyLock,
+};
 
+use log::debug;
 use serde::{Deserialize, Serialize};
-use tree_sitter_c2rust::Query;
+use tree_sitter_c2rust::{Node, Query};
 
 use crate::{functional::LANGUAGE_OFN, turtle::LANGUAGE_TTL, LANGUAGE_OMN};
 
 pub static OMN_NODE_TYPES: LazyLock<HashMap<String, StaticNode>> = LazyLock::new(|| {
     let node_types: Vec<StaticNode> =
         serde_json::from_str(tree_sitter_owl_ms::NODE_TYPES).expect("valid node types");
+
+    node_types
+        .iter()
+        .map(|node| (node.type_.clone(), (*node).clone()))
+        .collect::<HashMap<String, StaticNode>>()
+});
+
+pub static OFN_NODE_TYPES: LazyLock<HashMap<String, StaticNode>> = LazyLock::new(|| {
+    let node_types: Vec<StaticNode> =
+        serde_json::from_str(tree_sitter_owl_fn::NODE_TYPES).expect("valid node types");
 
     node_types
         .iter()
@@ -493,6 +507,46 @@ pub fn treesitter_highlight_capture_into_semantic_token_type_index(str: &str) ->
         // language tags (@en, @fr-CA)
         "attribute" => 22, // SemanticTokenType::DECORATOR,
         _ => todo!("highlight capture {} not implemented", str),
+    }
+}
+
+// Language indepentend tree functions
+
+pub fn possible_nodes(node: Node<'_>) -> HashSet<&'static str> {
+    if !node.is_error() {
+        return HashSet::new();
+    }
+
+    let state = first_leaf(node).parse_state();
+
+    let names = LANGUAGE_OMN
+        .lookahead_iterator(state)
+        .map(|mut it| it.iter_names().collect())
+        .unwrap_or_default();
+
+    names
+}
+
+pub fn first_leaf(node: Node<'_>) -> Node<'_> {
+    let mut current = node;
+    while let Some(child) = current.child(0) {
+        current = child;
+    }
+    current
+}
+
+pub fn get_last_leaf(node: Node<'_>) -> Node<'_> {
+    debug!("Get last leaf of {node}");
+    if node.child_count() > 0 {
+        if let Some(c) = node.child(node.child_count() - 1) {
+            debug!("Goto child {c} with index {}", node.child_count() - 1);
+            get_last_leaf(c)
+        } else {
+            node
+        }
+    } else {
+        debug!("End on {node}");
+        node
     }
 }
 

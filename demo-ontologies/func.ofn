@@ -4,4 +4,11 @@ Prefix(:=<http://example/onto#>)
 Ontology(<http://example/onto>
 <http://example/onto>
 
-Declaration(Class(:class-in-func-2)))
+Declaration(Class(:class-in-func-2))
+
+Declaration(Class(:class-in-func-4))
+
+Declaration(Datatype(:datatype-1))
+
+)
+

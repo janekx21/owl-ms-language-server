@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::LazyLock,
 };
@@ -16,13 +16,18 @@ use crate::{
     error::{Error, Result},
     iri::{Iri, TryToIri},
     pos::Position,
-    queries::{treesitter_highlight_capture_into_semantic_token_type_index, OFN_ALL_QUERIES},
+    queries::{
+        first_leaf, get_last_leaf, possible_nodes,
+        treesitter_highlight_capture_into_semantic_token_type_index, OFN_ALL_QUERIES,
+        OFN_NODE_TYPES,
+    },
     range::{LineRange, Range, RangeBox},
     rope_provider::RopeProvider,
     workspace::{
-        changes_from_lsp, trim_full_iri_rope_slice, Annotation, Diagnostic, DocumentId,
-        FormattingSettings, FrameInfo, FrameType, Highlights, HoverResult, IriAtPosition,
-        IriDefinition, KeywordAction, OntologyDocument, ParsedDocument, RenameInfo, Workspace,
+        changes_from_lsp, trim_full_iri_rope_slice, Annotation, Diagnostic, DiagnosticKind,
+        DocumentId, FormattingSettings, FrameInfo, FrameType, Highlights, HoverResult,
+        IriAtPosition, IriDefinition, KeywordAction, OntologyDocument, ParsedDocument, RenameInfo,
+        Workspace,
     },
 };
 
@@ -50,6 +55,7 @@ pub struct InternalOfnDocument {
     prefixes: HashMap<String, RangeBox<String>>,
     definitions: Vec<RangeBox<IriDefinition>>,
     imports: Vec<Iri>,
+    syntax_errors: Vec<Diagnostic>,
 }
 
 impl InternalOfnDocument {
@@ -77,6 +83,7 @@ impl InternalOfnDocument {
         let prefixes = gen_prefixes(&parsed_document);
         let definitions = gen_definitions(&parsed_document, &prefixes);
         let imports = gen_imports(&parsed_document);
+        let syntax_errors = gen_syntax_errors(&parsed_document);
 
         Self {
             id,
@@ -84,6 +91,7 @@ impl InternalOfnDocument {
             prefixes,
             definitions,
             imports,
+            syntax_errors,
         }
     }
 
@@ -116,6 +124,7 @@ impl InternalOfnDocument {
             prefixes: _,    // regenreated for now
             definitions: _, // regenreated for now
             imports: _,
+            syntax_errors: _,
         } = self;
 
         let changes = changes_from_lsp(params, encoding, parsed_document.rope());
@@ -138,6 +147,7 @@ impl InternalOfnDocument {
         let prefixes = gen_prefixes(&parsed_document);
         let definitions = gen_definitions(&parsed_document, &prefixes);
         let imports = gen_imports(&parsed_document);
+        let syntax_errors = gen_syntax_errors(&parsed_document);
 
         let doc = Self {
             id,
@@ -145,6 +155,7 @@ impl InternalOfnDocument {
             prefixes,
             definitions,
             imports,
+            syntax_errors,
         };
 
         Ok(doc)
@@ -211,6 +222,120 @@ fn gen_imports(parsed_document: &ParsedDocument) -> Vec<Iri> {
         .collect()
 }
 
+fn gen_syntax_errors(parsed_document: &ParsedDocument) -> Vec<Diagnostic> {
+    syntax_errors(parsed_document)
+}
+
+/// Generate the diagnostics for a single node, walking recursively down to every child and every syntax error within
+pub fn syntax_errors(parsed_document: &ParsedDocument) -> Vec<Diagnostic> {
+    let mut cursor = parsed_document.tree().root_node().walk();
+    let mut diagnostics = Vec::<Diagnostic>::new();
+
+    loop {
+        let node = cursor.node();
+
+        if node.is_error() {
+            let leaf = first_leaf(node);
+            let range: Range = cursor.node().range().into();
+
+            let prev_node = node.prev_sibling().unwrap_or(node.parent().unwrap_or(node));
+
+            let mut prev = if let Some(prev_sib) = node.prev_sibling() {
+                let prev_sibs_last_leaf = get_last_leaf(prev_sib);
+                prev_sibs_last_leaf
+            } else {
+                prev_node
+            };
+
+            let mut parent_chain = vec![prev.kind()];
+            while let Some(par) = prev.parent() {
+                parent_chain.push(par.kind());
+                prev = par;
+            }
+
+            let possible_nodes = possible_nodes(node)
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+            debug!("Possible nodes: {possible_nodes:#?}");
+            debug!("Parent chain: {parent_chain:#?}");
+
+            let parent_chain_children = parent_chain
+                .iter()
+                .flat_map(|kind| {
+                    OFN_NODE_TYPES
+                        .get(&(*kind).to_string())
+                        .iter()
+                        .flat_map(|t| {
+                            t.children
+                                .types
+                                .iter()
+                                .map(|c| c.type_.clone())
+                                .collect_vec()
+                        })
+                        .collect_vec()
+                })
+                .collect::<HashSet<_>>();
+
+            let valid_children = parent_chain_children.intersection(&possible_nodes);
+
+            let valid_children: String = valid_children
+                // .map(|nt| node_type_to_string(nt)) // TODO!
+                .sorted_unstable()
+                .join(", ");
+
+            let parent = parent_chain
+                .iter()
+                // .map(|parent_kind| node_type_to_string(parent_kind)) // TODO!
+                .join(" < ");
+
+            diagnostics.push(Diagnostic {
+                range,
+                kind: DiagnosticKind::SyntaxError {
+                    valid_children,
+                    parent,
+                    msg: leaf
+                        .to_string()
+                        .trim_start_matches('(')
+                        .trim_end_matches(')')
+                        .to_string(),
+                },
+            });
+
+            // move along
+            while !cursor.goto_next_sibling() {
+                // move out
+                if !cursor.goto_parent() {
+                    // this node has no parent, it's the root
+                    return diagnostics;
+                }
+            }
+        } else if node.has_error() {
+            // move in
+            let has_child = cursor.goto_first_child(); // should always work
+
+            if !has_child {
+                while !cursor.goto_next_sibling() {
+                    // move out
+                    if !cursor.goto_parent() {
+                        // this node has no parent, it's the root
+                        return diagnostics;
+                    }
+                }
+            }
+        } else {
+            // move along
+            while !cursor.goto_next_sibling() {
+                // move out
+                if !cursor.goto_parent() {
+                    // this node has no parent, it's the root
+                    return diagnostics;
+                }
+            }
+        }
+    }
+}
+
 impl PartialEq for InternalOfnDocument {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -268,7 +393,7 @@ impl OntologyDocument for InternalOfnDocument {
     }
 
     fn local_diagnostics(&self) -> &[Diagnostic] {
-        &[] // TODO
+        &self.syntax_errors
     }
 
     fn iri_locations(&self) -> HashMap<&Iri, &Vec<RangeBox<()>>> {
@@ -355,8 +480,16 @@ impl OntologyDocument for InternalOfnDocument {
         self.parsed_document.rope().to_string() // TODO
     }
 
-    fn hover(&self, _pos: Position) -> Option<HoverResult> {
-        None // TODO
+    fn hover(&self, pos: Position) -> Option<HoverResult> {
+        // TODO optimize
+        // TODO include ontology iri
+        self.definitions
+            .iter()
+            .find(|d| d.range().contains(pos))
+            .map(|d| HoverResult::Iri {
+                iri: d.value().iri.clone(),
+                range: *d.range(),
+            })
     }
 
     fn highlights(&self, range: Range) -> Highlights {
