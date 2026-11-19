@@ -17,7 +17,7 @@ use crate::{
     iri::{Iri, TryToIri},
     pos::Position,
     queries::{treesitter_highlight_capture_into_semantic_token_type_index, TTL_ALL_QUERIES},
-    range::{Range, RangeBox},
+    range::{LineRange, Range, RangeBox},
     rope_provider::RopeProvider,
     workspace::{
         changes_from_lsp, trim_full_iri_rope_slice, Annotation, Diagnostic, DocumentId,
@@ -252,8 +252,8 @@ impl OntologyDocument for InternalTtlDocument {
     }
 
     fn local_diagnostics(&self) -> &[Diagnostic] {
-    &[] // TODO
-}
+        &[] // TODO
+    }
 
     fn iri_locations(&self) -> HashMap<&Iri, &Vec<RangeBox<()>>> {
         HashMap::new() // TODO
@@ -378,18 +378,22 @@ impl OntologyDocument for InternalTtlDocument {
     }
 
     fn get_iri_completions_at(
-    &self,
-    _pos: Position,
-    _workspace: &Workspace,
-) -> Vec<(String, String, String, bool)> {
-    vec![] // TODO
-}
+        &self,
+        _pos: Position,
+        _workspace: &Workspace,
+    ) -> Vec<(String, String, String, bool)> {
+        vec![] // TODO
+    }
 
     fn statistic(&self) -> String {
         "Not implemented".into()
     }
 
     fn add_annotation_edits(&self, _annotation: Annotation) -> Vec<RangeBox<String>> {
+        vec![]
+    }
+
+    fn folding_range(&self) -> Vec<LineRange> {
         vec![]
     }
 }

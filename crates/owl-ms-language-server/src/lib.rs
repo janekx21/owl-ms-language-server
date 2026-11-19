@@ -318,6 +318,7 @@ impl Backend {
                     work_done_progress: Some(false),
                 },
             }),
+            folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
             ..Default::default()
         }
     }
@@ -1172,6 +1173,24 @@ impl LanguageServer for Backend {
             _ => {}
         }
         Ok(None)
+    }
+
+    async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        let url = params.text_document.uri;
+        info!("Request: folding range of {url}");
+        let sync = self.read_sync().await;
+        let (doc, _) = sync.get_internal_document(&url)?;
+        let folding_range = doc.folding_range();
+        Ok(Some(
+            folding_range
+                .iter()
+                .map(|lr| FoldingRange {
+                    start_line: lr.start,
+                    end_line: lr.end,
+                    ..Default::default()
+                })
+                .collect(),
+        ))
     }
 
     async fn shutdown(&self) -> Result<()> {
