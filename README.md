@@ -14,6 +14,34 @@ An incremental analysis assistant for writing ontologies with the [OWL 2 Web Ont
 
 The language server is stable and production ready.
 
+## Features
+
+| Feature                      | OWL Manchester Syntax (omn) | OWL Functional Syntax (ofn) | Turtle Syntax (ttl) | OWL XML (owx) | OWL RDF (rdf) |
+|------------------------------|-----------------------------|-----------------------------|---------------------|---------------|---------------|
+| Can be imported              | ✅                          | ✅                          | ✅                  | ✅            | ✅            |
+| Syntax/Semantic Highlighting | ✅                          | ✅                          | ✅                  | ❌            | ❌            |
+| Hover IRIs                   | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Hover Keywords               | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Formatting                   | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Inlay hints                  | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Goto Definition              | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Code Action: Missing IRI     | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Code Action: Create Prefix   | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Code Action: Create Label    | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Code Action: Keyword         | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Keyword Completions          | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| IRI Completions              | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Deprication Support          | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Document Symbols             | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Workspace Symbols            | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| References                   | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Start Rename                 | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Receive Rename               | ✅                          | ✅                          | ✅                  | ❌            | ❌            |
+| Command: Shorten IRIs        | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+| Tree-Sitter Support          | ✅                          | ✅                          | ✅                  | ❌            | ❌            |
+| TextMate Grammar             | ✅                          | ❌                          | ❌                  | ❌            | ❌            |
+
+
 ## Structure of this repository
 
 - [crates/owl-ms-language-server/](crates/owl-ms-language-server/) The Language Server
