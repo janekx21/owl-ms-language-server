@@ -255,8 +255,8 @@ impl OntologyDocument for InternalTtlDocument {
         &[] // TODO
     }
 
-    fn iri_locations(&self) -> HashMap<&Iri, &Vec<RangeBox<()>>> {
-        HashMap::new() // TODO
+    fn iri_location(&self, _iri: &Iri) -> Vec<Range> {
+        vec![]
     }
 
     fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<Iri> {

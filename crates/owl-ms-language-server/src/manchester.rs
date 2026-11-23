@@ -151,8 +151,13 @@ impl OntologyDocument for InternalOmnDocument {
         &self.stage2.local_diagnostics
     }
 
-    fn iri_locations(&self) -> HashMap<&Iri, &Vec<RangeBox<()>>> {
-        self.stage2.iri_locations.iter().collect()
+    fn iri_location(&self, iri: &Iri) -> Vec<Range> {
+        self.stage2
+            .iri_locations
+            .get(iri)
+            .into_iter()
+            .flat_map(|vec| vec.iter().map(|rb| *rb.range()))
+            .collect()
     }
 
     fn abbreviated_iri_to_full_iri(&self, iri: &Iri) -> Option<Iri> {

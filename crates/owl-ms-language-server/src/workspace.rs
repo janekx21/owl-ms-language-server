@@ -145,7 +145,7 @@ pub trait OntologyDocument {
     fn local_diagnostics(&self) -> &[Diagnostic];
 
     /// Map of IRIs and where to find them
-    fn iri_locations(&self) -> HashMap<&Iri, &Vec<RangeBox<()>>>;
+    fn iri_location(&self, iri: &Iri) -> Vec<Range>;
 
     // IRI conversions
     /// Taking a (relative) abbreviated or simple IRI and resolving the (absolute) full IRI.
@@ -2225,28 +2225,23 @@ fn semantic_errors(doc: &InternalDocument, workspace: &Workspace) -> Vec<Diagnos
             }
         }
 
-        if let Some(vec) = doc.iri_locations().get(diff) {
-            for ele in *vec {
-                diagnostics.push(Diagnostic {
-                    range: *ele.range(),
-                    kind: DiagnosticKind::MissingIri(diff.clone()),
-                });
-            }
+        for range in doc.iri_location(diff) {
+            diagnostics.push(Diagnostic {
+                range,
+                kind: DiagnosticKind::MissingIri(diff.clone()),
+            });
         }
     }
 
-    let iri_locations = &doc.iri_locations();
     diagnostics.extend(
         workspace
             .all_frame_infos()
             .filter(|fi| fi.is_deprecated())
             .flat_map(|fi| {
-                iri_locations
-                    .get(&fi.iri)
+                doc.iri_location(&fi.iri)
                     .into_iter()
-                    .flat_map(|x| x.iter())
-                    .map(|d| Diagnostic {
-                        range: *d.range(),
+                    .map(|range| Diagnostic {
+                        range,
                         kind: DiagnosticKind::Deprecated(fi.iri.clone()),
                     })
             }),
