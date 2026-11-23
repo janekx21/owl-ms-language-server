@@ -1167,7 +1167,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
         // ------------------------------------------------------------------
         // Ontology document
         // ------------------------------------------------------------------
-        "Prefix" => indoc! {r#"
+        "Prefix" => indoc! {r"
             `Prefix( name=<iri> )`
 
             *Top-level keyword*
@@ -1187,7 +1187,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#IRIs)
-        "#}.to_string(),
+        "}.to_string(),
         "Ontology" => indoc! {r#"
             `Ontology( [ ontologyIRI [ versionIRI ] ] imports annotations axioms )`
 
@@ -1209,7 +1209,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Ontologies)
         "#}.to_string(),
-        "Import" => indoc! {r#"
+        "Import" => indoc! {r"
             `Import( ontologyIRI )`
 
             *Ontology element*
@@ -1226,12 +1226,12 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Imports)
-        "#}.to_string(),
+        "}.to_string(),
 
         // ------------------------------------------------------------------
         // Declarations
         // ------------------------------------------------------------------
-        "Declaration" => indoc! {r#"
+        "Declaration" => indoc! {r"
             `Declaration( entity )`
 
             *Axiom*
@@ -1248,8 +1248,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Axioms)
-        "#}.to_string(),
-        "Class" => indoc! {r#"
+        "}.to_string(),
+        "Class" => indoc! {r"
             `Class( iri )`
 
             *Entity*
@@ -1266,7 +1266,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Classes)
-        "#}.to_string(),
+        "}.to_string(),
         "Datatype" => indoc! {r#"
             `Datatype( iri )`
 
@@ -1286,7 +1286,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Datatypes)
         "#}.to_string(),
-        "ObjectProperty" => indoc! {r#"
+        "ObjectProperty" => indoc! {r"
             `ObjectProperty( iri )`
 
             *Entity*
@@ -1303,8 +1303,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Object_Properties)
-        "#}.to_string(),
-        "DataProperty" => indoc! {r#"
+        "}.to_string(),
+        "DataProperty" => indoc! {r"
             `DataProperty( iri )`
 
             *Entity*
@@ -1321,8 +1321,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Data_Properties)
-        "#}.to_string(),
-        "AnnotationProperty" => indoc! {r#"
+        "}.to_string(),
+        "AnnotationProperty" => indoc! {r"
             `AnnotationProperty( iri )`
 
             *Entity*
@@ -1338,8 +1338,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Annotation_Properties)
-        "#}.to_string(),
-        "NamedIndividual" => indoc! {r#"
+        "}.to_string(),
+        "NamedIndividual" => indoc! {r"
             `NamedIndividual( iri )`
 
             *Entity*
@@ -1356,7 +1356,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Individuals)
-        "#}.to_string(),
+        "}.to_string(),
 
         // ------------------------------------------------------------------
         // Annotations
@@ -1407,7 +1407,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Annotation_Assertion)
         "#}.to_string(),
-        "SubAnnotationPropertyOf" => indoc! {r#"
+        "SubAnnotationPropertyOf" => indoc! {r"
             `SubAnnotationPropertyOf( sub super )`
 
             *Annotation axiom*
@@ -1422,8 +1422,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Annotation_Subproperties)
-        "#}.to_string(),
-        "AnnotationPropertyDomain" => indoc! {r#"
+        "}.to_string(),
+        "AnnotationPropertyDomain" => indoc! {r"
             `AnnotationPropertyDomain( property iri )`
 
             *Annotation axiom*
@@ -1438,8 +1438,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Annotation_Property_Domain)
-        "#}.to_string(),
-        "AnnotationPropertyRange" => indoc! {r#"
+        "}.to_string(),
+        "AnnotationPropertyRange" => indoc! {r"
             `AnnotationPropertyRange( property iri )`
 
             *Annotation axiom*
@@ -1454,12 +1454,12 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Annotation_Property_Range)
-        "#}.to_string(),
+        "}.to_string(),
 
         // ------------------------------------------------------------------
         // Property expressions
         // ------------------------------------------------------------------
-        "ObjectInverseOf" => indoc! {r#"
+        "ObjectInverseOf" => indoc! {r"
             `ObjectInverseOf( op )`
 
             *Object property expression*
@@ -1474,12 +1474,12 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Inverse_Object_Properties)
-        "#}.to_string(),
+        "}.to_string(),
 
         // ------------------------------------------------------------------
         // Data ranges
         // ------------------------------------------------------------------
-        "DataIntersectionOf" => indoc! {r#"
+        "DataIntersectionOf" => indoc! {r"
             `DataIntersectionOf( dr1 dr2 ... drn )`
 
             *Data range*
@@ -1494,8 +1494,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Intersection_of_Data_Ranges)
-        "#}.to_string(),
-        "DataUnionOf" => indoc! {r#"
+        "}.to_string(),
+        "DataUnionOf" => indoc! {r"
             `DataUnionOf( dr1 dr2 ... drn )`
 
             *Data range*
@@ -1510,8 +1510,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Union_of_Data_Ranges)
-        "#}.to_string(),
-        "DataComplementOf" => indoc! {r#"
+        "}.to_string(),
+        "DataComplementOf" => indoc! {r"
             `DataComplementOf( dr )`
 
             *Data range*
@@ -1526,7 +1526,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Complement_of_Data_Ranges)
-        "#}.to_string(),
+        "}.to_string(),
         "DataOneOf" => indoc! {r#"
             `DataOneOf( lt1 ... ltn )`
 
@@ -1566,7 +1566,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
         // ------------------------------------------------------------------
         // Class expressions
         // ------------------------------------------------------------------
-        "ObjectIntersectionOf" => indoc! {r#"
+        "ObjectIntersectionOf" => indoc! {r"
             `ObjectIntersectionOf( ce1 ce2 ... cen )`
 
             *Class expression*
@@ -1581,8 +1581,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Intersection_of_Class_Expressions)
-        "#}.to_string(),
-        "ObjectUnionOf" => indoc! {r#"
+        "}.to_string(),
+        "ObjectUnionOf" => indoc! {r"
             `ObjectUnionOf( ce1 ce2 ... cen )`
 
             *Class expression*
@@ -1597,8 +1597,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Union_of_Class_Expressions)
-        "#}.to_string(),
-        "ObjectComplementOf" => indoc! {r#"
+        "}.to_string(),
+        "ObjectComplementOf" => indoc! {r"
             `ObjectComplementOf( ce )`
 
             *Class expression*
@@ -1613,8 +1613,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Complement_of_Class_Expressions)
-        "#}.to_string(),
-        "ObjectOneOf" => indoc! {r#"
+        "}.to_string(),
+        "ObjectOneOf" => indoc! {r"
             `ObjectOneOf( a1 ... an )`
 
             *Class expression*
@@ -1629,8 +1629,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Enumeration_of_Individuals)
-        "#}.to_string(),
-        "ObjectSomeValuesFrom" => indoc! {r#"
+        "}.to_string(),
+        "ObjectSomeValuesFrom" => indoc! {r"
             `ObjectSomeValuesFrom( ope ce )`
 
             *Class expression*
@@ -1645,8 +1645,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Existential_Quantification)
-        "#}.to_string(),
-        "ObjectAllValuesFrom" => indoc! {r#"
+        "}.to_string(),
+        "ObjectAllValuesFrom" => indoc! {r"
             `ObjectAllValuesFrom( ope ce )`
 
             *Class expression*
@@ -1663,8 +1663,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Universal_Quantification)
-        "#}.to_string(),
-        "ObjectHasValue" => indoc! {r#"
+        "}.to_string(),
+        "ObjectHasValue" => indoc! {r"
             `ObjectHasValue( ope a )`
 
             *Class expression*
@@ -1679,8 +1679,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Individual_Value_Restriction)
-        "#}.to_string(),
-        "ObjectHasSelf" => indoc! {r#"
+        "}.to_string(),
+        "ObjectHasSelf" => indoc! {r"
             `ObjectHasSelf( ope )`
 
             *Class expression*
@@ -1695,8 +1695,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Self-Restriction)
-        "#}.to_string(),
-        "ObjectMinCardinality" => indoc! {r#"
+        "}.to_string(),
+        "ObjectMinCardinality" => indoc! {r"
             `ObjectMinCardinality( n ope [ ce ] )`
 
             *Class expression*
@@ -1711,8 +1711,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Minimum_Cardinality)
-        "#}.to_string(),
-        "ObjectMaxCardinality" => indoc! {r#"
+        "}.to_string(),
+        "ObjectMaxCardinality" => indoc! {r"
             `ObjectMaxCardinality( n ope [ ce ] )`
 
             *Class expression*
@@ -1727,8 +1727,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Maximum_Cardinality)
-        "#}.to_string(),
-        "ObjectExactCardinality" => indoc! {r#"
+        "}.to_string(),
+        "ObjectExactCardinality" => indoc! {r"
             `ObjectExactCardinality( n ope [ ce ] )`
 
             *Class expression*
@@ -1743,7 +1743,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Exact_Cardinality)
-        "#}.to_string(),
+        "}.to_string(),
         "DataSomeValuesFrom" => indoc! {r#"
             `DataSomeValuesFrom( dpe1 ... dpen dr )`
 
@@ -1762,7 +1762,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Existential_Quantification_2)
         "#}.to_string(),
-        "DataAllValuesFrom" => indoc! {r#"
+        "DataAllValuesFrom" => indoc! {r"
             `DataAllValuesFrom( dpe1 ... dpen dr )`
 
             *Class expression*
@@ -1777,7 +1777,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Universal_Quantification_2)
-        "#}.to_string(),
+        "}.to_string(),
         "DataHasValue" => indoc! {r#"
             `DataHasValue( dpe lt )`
 
@@ -1795,7 +1795,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Literal_Value_Restriction)
         "#}.to_string(),
-        "DataMinCardinality" => indoc! {r#"
+        "DataMinCardinality" => indoc! {r"
             `DataMinCardinality( n dpe [ dr ] )`
 
             *Class expression*
@@ -1810,8 +1810,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Minimum_Cardinality_2)
-        "#}.to_string(),
-        "DataMaxCardinality" => indoc! {r#"
+        "}.to_string(),
+        "DataMaxCardinality" => indoc! {r"
             `DataMaxCardinality( n dpe [ dr ] )`
 
             *Class expression*
@@ -1826,8 +1826,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Maximum_Cardinality_2)
-        "#}.to_string(),
-        "DataExactCardinality" => indoc! {r#"
+        "}.to_string(),
+        "DataExactCardinality" => indoc! {r"
             `DataExactCardinality( n dpe [ dr ] )`
 
             *Class expression*
@@ -1842,12 +1842,12 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Exact_Cardinality_2)
-        "#}.to_string(),
+        "}.to_string(),
 
         // ------------------------------------------------------------------
         // Class axioms
         // ------------------------------------------------------------------
-        "SubClassOf" => indoc! {r#"
+        "SubClassOf" => indoc! {r"
             `SubClassOf( [ annotations ] sub super )`
 
             *Axiom*
@@ -1862,7 +1862,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Subclass_Axioms)
-        "#}.to_string(),
+        "}.to_string(),
         "EquivalentClasses" => indoc! {r#"
             `EquivalentClasses( [ annotations ] ce1 ce2 ... cen )`
 
@@ -1883,7 +1883,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Equivalent_Classes)
         "#}.to_string(),
-        "DisjointClasses" => indoc! {r#"
+        "DisjointClasses" => indoc! {r"
             `DisjointClasses( [ annotations ] ce1 ce2 ... cen )`
 
             *Axiom*
@@ -1899,8 +1899,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Classes)
-        "#}.to_string(),
-        "DisjointUnion" => indoc! {r#"
+        "}.to_string(),
+        "DisjointUnion" => indoc! {r"
             `DisjointUnion( [ annotations ] C ce1 ce2 ... cen )`
 
             *Axiom*
@@ -1915,12 +1915,12 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Union_of_Class_Expressions)
-        "#}.to_string(),
+        "}.to_string(),
 
         // ------------------------------------------------------------------
         // Object property axioms
         // ------------------------------------------------------------------
-        "SubObjectPropertyOf" => indoc! {r#"
+        "SubObjectPropertyOf" => indoc! {r"
             `SubObjectPropertyOf( [ annotations ] sub super )`
 
             *Axiom*
@@ -1936,8 +1936,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Object_Subproperties)
-        "#}.to_string(),
-        "ObjectPropertyChain" => indoc! {r#"
+        "}.to_string(),
+        "ObjectPropertyChain" => indoc! {r"
             `ObjectPropertyChain( ope1 ope2 ... open )`
 
             *Property expression chain*
@@ -1952,8 +1952,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Object_Subproperties)
-        "#}.to_string(),
-        "EquivalentObjectProperties" => indoc! {r#"
+        "}.to_string(),
+        "EquivalentObjectProperties" => indoc! {r"
             `EquivalentObjectProperties( [ annotations ] ope1 ope2 ... open )`
 
             *Axiom*
@@ -1968,8 +1968,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Equivalent_Object_Properties)
-        "#}.to_string(),
-        "DisjointObjectProperties" => indoc! {r#"
+        "}.to_string(),
+        "DisjointObjectProperties" => indoc! {r"
             `DisjointObjectProperties( [ annotations ] ope1 ope2 ... open )`
 
             *Axiom*
@@ -1984,8 +1984,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Object_Properties)
-        "#}.to_string(),
-        "InverseObjectProperties" => indoc! {r#"
+        "}.to_string(),
+        "InverseObjectProperties" => indoc! {r"
             `InverseObjectProperties( [ annotations ] ope1 ope2 )`
 
             *Axiom*
@@ -2000,8 +2000,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Inverse_Object_Properties_2)
-        "#}.to_string(),
-        "ObjectPropertyDomain" => indoc! {r#"
+        "}.to_string(),
+        "ObjectPropertyDomain" => indoc! {r"
             `ObjectPropertyDomain( [ annotations ] ope ce )`
 
             *Axiom*
@@ -2016,8 +2016,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Object_Property_Domain)
-        "#}.to_string(),
-        "ObjectPropertyRange" => indoc! {r#"
+        "}.to_string(),
+        "ObjectPropertyRange" => indoc! {r"
             `ObjectPropertyRange( [ annotations ] ope ce )`
 
             *Axiom*
@@ -2032,8 +2032,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Object_Property_Range)
-        "#}.to_string(),
-        "FunctionalObjectProperty" => indoc! {r#"
+        "}.to_string(),
+        "FunctionalObjectProperty" => indoc! {r"
             `FunctionalObjectProperty( [ annotations ] ope )`
 
             *Axiom*
@@ -2048,8 +2048,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Functional_Object_Properties)
-        "#}.to_string(),
-        "InverseFunctionalObjectProperty" => indoc! {r#"
+        "}.to_string(),
+        "InverseFunctionalObjectProperty" => indoc! {r"
             `InverseFunctionalObjectProperty( [ annotations ] ope )`
 
             *Axiom*
@@ -2064,8 +2064,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Inverse-Functional_Object_Properties)
-        "#}.to_string(),
-        "ReflexiveObjectProperty" => indoc! {r#"
+        "}.to_string(),
+        "ReflexiveObjectProperty" => indoc! {r"
             `ReflexiveObjectProperty( [ annotations ] ope )`
 
             *Axiom*
@@ -2080,8 +2080,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Reflexive_Object_Properties)
-        "#}.to_string(),
-        "IrreflexiveObjectProperty" => indoc! {r#"
+        "}.to_string(),
+        "IrreflexiveObjectProperty" => indoc! {r"
             `IrreflexiveObjectProperty( [ annotations ] ope )`
 
             *Axiom*
@@ -2096,8 +2096,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Irreflexive_Object_Properties)
-        "#}.to_string(),
-        "SymmetricObjectProperty" => indoc! {r#"
+        "}.to_string(),
+        "SymmetricObjectProperty" => indoc! {r"
             `SymmetricObjectProperty( [ annotations ] ope )`
 
             *Axiom*
@@ -2112,8 +2112,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Symmetric_Object_Properties)
-        "#}.to_string(),
-        "AsymmetricObjectProperty" => indoc! {r#"
+        "}.to_string(),
+        "AsymmetricObjectProperty" => indoc! {r"
             `AsymmetricObjectProperty( [ annotations ] ope )`
 
             *Axiom*
@@ -2128,8 +2128,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Asymmetric_Object_Properties)
-        "#}.to_string(),
-        "TransitiveObjectProperty" => indoc! {r#"
+        "}.to_string(),
+        "TransitiveObjectProperty" => indoc! {r"
             `TransitiveObjectProperty( [ annotations ] ope )`
 
             *Axiom*
@@ -2144,12 +2144,12 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Transitive_Object_Properties)
-        "#}.to_string(),
+        "}.to_string(),
 
         // ------------------------------------------------------------------
         // Data property axioms
         // ------------------------------------------------------------------
-        "SubDataPropertyOf" => indoc! {r#"
+        "SubDataPropertyOf" => indoc! {r"
             `SubDataPropertyOf( [ annotations ] sub super )`
 
             *Axiom*
@@ -2164,8 +2164,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Data_Subproperties)
-        "#}.to_string(),
-        "EquivalentDataProperties" => indoc! {r#"
+        "}.to_string(),
+        "EquivalentDataProperties" => indoc! {r"
             `EquivalentDataProperties( [ annotations ] dpe1 dpe2 ... dpen )`
 
             *Axiom*
@@ -2180,8 +2180,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Equivalent_Data_Properties)
-        "#}.to_string(),
-        "DisjointDataProperties" => indoc! {r#"
+        "}.to_string(),
+        "DisjointDataProperties" => indoc! {r"
             `DisjointDataProperties( [ annotations ] dpe1 dpe2 ... dpen )`
 
             *Axiom*
@@ -2196,8 +2196,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Data_Properties)
-        "#}.to_string(),
-        "DataPropertyDomain" => indoc! {r#"
+        "}.to_string(),
+        "DataPropertyDomain" => indoc! {r"
             `DataPropertyDomain( [ annotations ] dpe ce )`
 
             *Axiom*
@@ -2212,7 +2212,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Data_Property_Domain)
-        "#}.to_string(),
+        "}.to_string(),
         "DataPropertyRange" => indoc! {r#"
             `DataPropertyRange( [ annotations ] dpe dr )`
 
@@ -2230,7 +2230,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Data_Property_Range)
         "#}.to_string(),
-        "FunctionalDataProperty" => indoc! {r#"
+        "FunctionalDataProperty" => indoc! {r"
             `FunctionalDataProperty( [ annotations ] dpe )`
 
             *Axiom*
@@ -2245,7 +2245,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Functional_Data_Properties)
-        "#}.to_string(),
+        "}.to_string(),
 
         // ------------------------------------------------------------------
         // Datatype definitions, keys
@@ -2267,7 +2267,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Datatype_Definitions)
         "#}.to_string(),
-        "HasKey" => indoc! {r#"
+        "HasKey" => indoc! {r"
             `HasKey( [ annotations ] ce ( ope1 ... open ) ( dpe1 ... dpen ) )`
 
             *Axiom*
@@ -2283,12 +2283,12 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Keys)
-        "#}.to_string(),
+        "}.to_string(),
 
         // ------------------------------------------------------------------
         // Assertions
         // ------------------------------------------------------------------
-        "SameIndividual" => indoc! {r#"
+        "SameIndividual" => indoc! {r"
             `SameIndividual( [ annotations ] a1 a2 ... an )`
 
             *Axiom*
@@ -2303,8 +2303,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Individual_Equality)
-        "#}.to_string(),
-        "DifferentIndividuals" => indoc! {r#"
+        "}.to_string(),
+        "DifferentIndividuals" => indoc! {r"
             `DifferentIndividuals( [ annotations ] a1 a2 ... an )`
 
             *Axiom*
@@ -2319,8 +2319,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Individual_Inequality)
-        "#}.to_string(),
-        "ClassAssertion" => indoc! {r#"
+        "}.to_string(),
+        "ClassAssertion" => indoc! {r"
             `ClassAssertion( [ annotations ] ce a )`
 
             *Axiom*
@@ -2335,8 +2335,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Class_Assertions)
-        "#}.to_string(),
-        "ObjectPropertyAssertion" => indoc! {r#"
+        "}.to_string(),
+        "ObjectPropertyAssertion" => indoc! {r"
             `ObjectPropertyAssertion( [ annotations ] ope source target )`
 
             *Axiom*
@@ -2351,8 +2351,8 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Positive_Object_Property_Assertions)
-        "#}.to_string(),
-        "NegativeObjectPropertyAssertion" => indoc! {r#"
+        "}.to_string(),
+        "NegativeObjectPropertyAssertion" => indoc! {r"
             `NegativeObjectPropertyAssertion( [ annotations ] ope source target )`
 
             *Axiom*
@@ -2367,7 +2367,7 @@ pub fn ofn_keyword_hover_info(kind: &str) -> String {
             ```
 
             [Specification](https://www.w3.org/TR/owl2-syntax/#Negative_Object_Property_Assertions)
-        "#}.to_string(),
+        "}.to_string(),
         "DataPropertyAssertion" => indoc! {r#"
             `DataPropertyAssertion( [ annotations ] dpe source value )`
 

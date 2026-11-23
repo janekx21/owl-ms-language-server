@@ -722,7 +722,7 @@ impl LanguageServer for Backend {
                 }
             } else {
                 let frame_info =
-                    Workspace::get_frame_info_recursive(workspace, &iri, &reachable_docs);
+                    Workspace::get_frame_info_recursive(workspace, iri, &reachable_docs);
                 if let Some(frame_info) = frame_info {
                     let locations = frame_info
                         .definitions
