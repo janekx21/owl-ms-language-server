@@ -12,6 +12,7 @@ use tower_lsp::lsp_types::{DidChangeTextDocumentParams, PositionEncodingKind, Ur
 use tree_sitter_c2rust::{Language, Parser, Query, QueryCursor, StreamingIterator};
 
 use crate::{
+    consts::ofn_keyword_hover_info,
     debugging::timeit,
     error::{Error, Result},
     iri::{Iri, TryToIri},
@@ -57,6 +58,7 @@ pub struct InternalOfnDocument {
     references: Vec<RangeBox<Iri>>,
     imports: Vec<Iri>,
     syntax_errors: Vec<Diagnostic>,
+    folds: Vec<LineRange>,
 }
 
 impl InternalOfnDocument {
@@ -86,6 +88,7 @@ impl InternalOfnDocument {
         let imports = gen_imports(&parsed_document);
         let syntax_errors = gen_syntax_errors(&parsed_document);
         let references = gen_references(&parsed_document, &prefixes);
+        let folds = gen_folds(&parsed_document);
 
         Self {
             id,
@@ -95,6 +98,7 @@ impl InternalOfnDocument {
             references,
             imports,
             syntax_errors,
+            folds,
         }
     }
 
@@ -129,6 +133,7 @@ impl InternalOfnDocument {
             imports: _,
             syntax_errors: _,
             references: _,
+            folds: _,
         } = self;
 
         let changes = changes_from_lsp(params, encoding, parsed_document.rope());
@@ -153,6 +158,7 @@ impl InternalOfnDocument {
         let imports = gen_imports(&parsed_document);
         let syntax_errors = gen_syntax_errors(&parsed_document);
         let references = gen_references(&parsed_document, &prefixes);
+        let folds = gen_folds(&parsed_document);
 
         let doc = Self {
             id,
@@ -162,10 +168,25 @@ impl InternalOfnDocument {
             references,
             imports,
             syntax_errors,
+            folds,
         };
 
         Ok(doc)
     }
+}
+
+fn gen_folds(parsed_document: &ParsedDocument) -> Vec<LineRange> {
+    parsed_document
+        .query(&OFN_ALL_QUERIES.folds)
+        .iter()
+        .map(|m| match &m.captures[..] {
+            [fold_capture] => LineRange::new(
+                fold_capture.node.range.start.line(),
+                fold_capture.node.range.end.line(),
+            ),
+            _ => unimplemented!(),
+        })
+        .collect_vec()
 }
 
 fn gen_references(
@@ -448,6 +469,7 @@ impl OntologyDocument for InternalOfnDocument {
     }
 
     fn iri_location(&self, iri: &Iri) -> Vec<Range> {
+        // TODO optimize using hashmap
         self.references
             .iter()
             .filter(|rb| *rb.value() == *iri)
@@ -470,7 +492,10 @@ impl OntologyDocument for InternalOfnDocument {
     }
 
     fn prefixes(&self) -> HashMap<String, String> {
-        HashMap::new()
+        self.prefixes
+            .iter()
+            .map(|(k, v)| (k.clone(), v.value().clone()))
+            .collect()
     }
 
     fn range(&self) -> Range {
@@ -533,8 +558,13 @@ impl OntologyDocument for InternalOfnDocument {
         vec![] // TODO
     }
 
-    fn all_iris_in_range(&self, _range: Range) -> Vec<RangeBox<Iri>> {
-        vec![] // TODO
+    fn all_iris_in_range(&self, range: Range) -> Vec<RangeBox<Iri>> {
+        // TODO optimize
+        self.references
+            .iter()
+            .filter(|rb| rb.range().overlaps(&range))
+            .map(|rb| RangeBox::new(rb.value().clone(), *rb.range()))
+            .collect()
     }
 
     fn formatted(&self, _options: &FormattingSettings) -> String {
@@ -544,13 +574,33 @@ impl OntologyDocument for InternalOfnDocument {
     fn hover(&self, pos: Position) -> Option<HoverResult> {
         // TODO optimize
         // TODO include ontology iri
-        self.definitions
+        let iri_hover = self
+            .definitions
             .iter()
             .find(|d| d.range().contains(pos))
             .map(|d| HoverResult::Iri {
                 iri: d.value().iri.clone(),
                 range: *d.range(),
-            })
+            });
+
+        if iri_hover.is_some() {
+            return iri_hover;
+        }
+
+        let node = self
+            .parsed_document
+            .tree()
+            .root_node()
+            .descendant_for_point_range(pos.into(), pos.into())?;
+
+        let range: Range = node.range().into();
+
+        let text = ofn_keyword_hover_info(node.kind());
+        if text.is_empty() {
+            None
+        } else {
+            Some(HoverResult::Keyword { text, range })
+        }
     }
 
     fn highlights(&self, range: Range) -> Highlights {
@@ -606,6 +656,6 @@ impl OntologyDocument for InternalOfnDocument {
     }
 
     fn folding_range(&self) -> Vec<LineRange> {
-        vec![]
+        self.folds.clone()
     }
 }

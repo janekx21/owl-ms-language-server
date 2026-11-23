@@ -1,5 +1,5 @@
 use crate::consts::{
-    child_keywords_for_kind, keyword_hover_info, DECIMAL_IRI, FLOAT_IRI, INTEGER_IRI, STRING_IRI,
+    child_keywords_for_kind, omn_keyword_hover_info, DECIMAL_IRI, FLOAT_IRI, INTEGER_IRI, STRING_IRI,
 };
 use crate::error::{Error, Result, ResultIterator};
 use crate::iri::{Iri, ToIriUnchecked, TryToIri};
@@ -205,7 +205,7 @@ impl OntologyDocument for InternalOmnDocument {
                 })
             }
             kind => {
-                let text = keyword_hover_info(kind);
+                let text = omn_keyword_hover_info(kind);
                 if text.is_empty() {
                     None
                 } else {

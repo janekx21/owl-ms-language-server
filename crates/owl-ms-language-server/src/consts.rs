@@ -250,7 +250,7 @@ fixed_infos! {
 }
 
 #[allow(clippy::too_many_lines)]
-pub fn keyword_hover_info(kind: &str) -> String {
+pub fn omn_keyword_hover_info(kind: &str) -> String {
     match kind{
             "keyword_prefix" => indoc! {"
                 `Prefix:`
@@ -1155,6 +1155,1254 @@ pub fn keyword_hover_info(kind: &str) -> String {
             "}.to_string(),
             _ => String::new(),
         }
+}
+
+/// Hover documentation for OWL 2 Functional-Style Syntax keywords.
+///
+/// `kind` is the kind of the anonymous keyword node in the `owl_fn` tree-sitter
+/// grammar, i.e. the literal string in the grammar, e.g. `"SubClassOf"`.
+#[allow(clippy::too_many_lines)]
+pub fn ofn_keyword_hover_info(kind: &str) -> String {
+    match kind {
+        // ------------------------------------------------------------------
+        // Ontology document
+        // ------------------------------------------------------------------
+        "Prefix" => indoc! {r#"
+            `Prefix( name=<iri> )`
+
+            *Top-level keyword*
+
+            ---
+
+            Declares a namespace prefix for use in abbreviated IRIs.
+
+            Prefix declarations always come before the `Ontology`. Abbreviated IRIs without a prefix part use the empty prefix `:`.
+
+            Example:
+            ```owl-fs
+            Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+            Prefix(:=<http://example.com/ontology/>)
+
+            Ontology(...)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#IRIs)
+        "#}.to_string(),
+        "Ontology" => indoc! {r#"
+            `Ontology( [ ontologyIRI [ versionIRI ] ] imports annotations axioms )`
+
+            *Top-level keyword*
+
+            ---
+
+            Defines an ontology with an optional ontology IRI and version IRI, followed by imports, ontology annotations and axioms.
+
+            Example:
+            ```owl-fs
+            Ontology(<http://example.com/ontology/physical/> <http://example.com/ontology/v1.2.3/physical.ofn>
+                Import(<http://example.com/ontology/base/>)
+                Annotation(rdfs:label "Physical ontology")
+
+                Declaration(Class(:Person))
+            )
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Ontologies)
+        "#}.to_string(),
+        "Import" => indoc! {r#"
+            `Import( ontologyIRI )`
+
+            *Ontology element*
+
+            ---
+
+            Imports another ontology into the current ontology, giving access to its entities, expressions and axioms. This is the basic facility for ontology modularization.
+
+            Example:
+            ```owl-fs
+            Ontology(<http://www.example.com/importing-ontology>
+                Import(<http://www.example.com/my/2.0>)
+            )
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Imports)
+        "#}.to_string(),
+
+        // ------------------------------------------------------------------
+        // Declarations
+        // ------------------------------------------------------------------
+        "Declaration" => indoc! {r#"
+            `Declaration( entity )`
+
+            *Axiom*
+
+            ---
+
+            Declares an entity (class, datatype, property or named individual) as part of the ontology's signature. The entity is given by a wrapped `Class`, `Datatype`, `ObjectProperty`, `DataProperty`, `AnnotationProperty` or `NamedIndividual`.
+
+            Example:
+            ```owl-fs
+            Declaration(Class(:Person))
+            Declaration(ObjectProperty(:hasParent))
+            Declaration(NamedIndividual(:john))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Axioms)
+        "#}.to_string(),
+        "Class" => indoc! {r#"
+            `Class( iri )`
+
+            *Entity*
+
+            ---
+
+            Refers to a class, usually inside a `Declaration`. Classes can be understood as sets of individuals.
+
+            Example:
+            ```owl-fs
+            Declaration(Class(:Person))
+            Declaration(Class(:Child))
+            SubClassOf(:Child :Person)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Classes)
+        "#}.to_string(),
+        "Datatype" => indoc! {r#"
+            `Datatype( iri )`
+
+            *Entity*
+
+            ---
+
+            Refers to a datatype, usually inside a `Declaration`. Custom datatypes are defined with `DatatypeDefinition`.
+
+            Example:
+            ```owl-fs
+            Declaration(Datatype(:NegInt))
+            DatatypeDefinition(:NegInt
+                DatatypeRestriction(xsd:integer xsd:maxExclusive "0"^^xsd:integer)
+            )
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Datatypes)
+        "#}.to_string(),
+        "ObjectProperty" => indoc! {r#"
+            `ObjectProperty( iri )`
+
+            *Entity*
+
+            ---
+
+            Refers to an object property, which connects individuals to individuals.
+
+            Example:
+            ```owl-fs
+            Declaration(ObjectProperty(:hasEnergy))
+            ObjectPropertyDomain(:hasEnergy :ArtificialObject)
+            ObjectPropertyRange(:hasEnergy :Energy)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Object_Properties)
+        "#}.to_string(),
+        "DataProperty" => indoc! {r#"
+            `DataProperty( iri )`
+
+            *Entity*
+
+            ---
+
+            Refers to a data property, which connects individuals to literal values.
+
+            Example:
+            ```owl-fs
+            Declaration(DataProperty(:hasAge))
+            DataPropertyDomain(:hasAge :Person)
+            DataPropertyRange(:hasAge xsd:integer)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Data_Properties)
+        "#}.to_string(),
+        "AnnotationProperty" => indoc! {r#"
+            `AnnotationProperty( iri )`
+
+            *Entity*
+
+            ---
+
+            Refers to an annotation property, used for annotations (metadata).
+
+            Example:
+            ```owl-fs
+            Declaration(AnnotationProperty(:definition))
+            AnnotationPropertyDomain(:definition owl:Thing)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Annotation_Properties)
+        "#}.to_string(),
+        "NamedIndividual" => indoc! {r#"
+            `NamedIndividual( iri )`
+
+            *Entity*
+
+            ---
+
+            Refers to a named individual, i.e. an individual identified by an IRI. Anonymous individuals are written as blank nodes (`_:genid1`) and are only visible within the current ontology.
+
+            Example:
+            ```owl-fs
+            Declaration(NamedIndividual(:john))
+            ClassAssertion(:Person :john)
+            ClassAssertion(:Person _:genid1)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Individuals)
+        "#}.to_string(),
+
+        // ------------------------------------------------------------------
+        // Annotations
+        // ------------------------------------------------------------------
+        "Annotation" => indoc! {r#"
+            `Annotation( [ annotations ] property value )`
+
+            *Annotation*
+
+            ---
+
+            Annotates an ontology, an axiom, or another annotation. It consists of an annotation property and an annotation value (an IRI, a literal or an anonymous individual). Annotations may themselves be annotated.
+
+            Built-in annotation properties include `rdfs:label`, `rdfs:comment`, `rdfs:seeAlso`, `rdfs:isDefinedBy`, `owl:deprecated`, `owl:versionInfo`, `owl:priorVersion`, `owl:backwardCompatibleWith` and `owl:incompatibleWith`.
+
+            Example:
+            ```owl-fs
+            Ontology(<http://example.com/o>
+                Annotation(rdfs:comment "An ontology annotation")
+            )
+
+            SubClassOf(
+                Annotation(rdfs:comment "An axiom annotation")
+                :Child :Person
+            )
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Annotations)
+        "#}.to_string(),
+        "AnnotationAssertion" => indoc! {r#"
+            `AnnotationAssertion( [ annotations ] property subject value )`
+
+            *Annotation axiom*
+
+            ---
+
+            Attaches an annotation to an IRI or an anonymous individual.
+
+            Example:
+            ```owl-fs
+            AnnotationAssertion(rdfs:label :OEO0042 "greenhouse gas")
+            AnnotationAssertion(rdfs:label :OEO0042 "Treibhausgas"@de)
+            AnnotationAssertion(
+                Annotation(rdfs:comment "this is an annotated annotation")
+                rdfs:label :OEO0042 "CO2"
+            )
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Annotation_Assertion)
+        "#}.to_string(),
+        "SubAnnotationPropertyOf" => indoc! {r#"
+            `SubAnnotationPropertyOf( sub super )`
+
+            *Annotation axiom*
+
+            ---
+
+            States that the first annotation property is a subproperty of the second.
+
+            Example:
+            ```owl-fs
+            SubAnnotationPropertyOf(:preferredLabel rdfs:label)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Annotation_Subproperties)
+        "#}.to_string(),
+        "AnnotationPropertyDomain" => indoc! {r#"
+            `AnnotationPropertyDomain( property iri )`
+
+            *Annotation axiom*
+
+            ---
+
+            States that the domain of an annotation property is the given IRI. Annotation property domains carry no logical semantics.
+
+            Example:
+            ```owl-fs
+            AnnotationPropertyDomain(:definition :Concept)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Annotation_Property_Domain)
+        "#}.to_string(),
+        "AnnotationPropertyRange" => indoc! {r#"
+            `AnnotationPropertyRange( property iri )`
+
+            *Annotation axiom*
+
+            ---
+
+            States that the range of an annotation property is the given IRI. Annotation property ranges carry no logical semantics.
+
+            Example:
+            ```owl-fs
+            AnnotationPropertyRange(:definition xsd:string)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Annotation_Property_Range)
+        "#}.to_string(),
+
+        // ------------------------------------------------------------------
+        // Property expressions
+        // ------------------------------------------------------------------
+        "ObjectInverseOf" => indoc! {r#"
+            `ObjectInverseOf( op )`
+
+            *Object property expression*
+
+            ---
+
+            The inverse object property expression connects an individual i with j if and only if j is connected to i by `op`.
+
+            Example:
+            ```owl-fs
+            ObjectSomeValuesFrom(ObjectInverseOf(:hasChild) :Person)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Inverse_Object_Properties)
+        "#}.to_string(),
+
+        // ------------------------------------------------------------------
+        // Data ranges
+        // ------------------------------------------------------------------
+        "DataIntersectionOf" => indoc! {r#"
+            `DataIntersectionOf( dr1 dr2 ... drn )`
+
+            *Data range*
+
+            ---
+
+            Contains exactly the literals that are in all of the listed data ranges. Requires at least two data ranges.
+
+            Example:
+            ```owl-fs
+            DataIntersectionOf(xsd:nonNegativeInteger xsd:nonPositiveInteger)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Intersection_of_Data_Ranges)
+        "#}.to_string(),
+        "DataUnionOf" => indoc! {r#"
+            `DataUnionOf( dr1 dr2 ... drn )`
+
+            *Data range*
+
+            ---
+
+            Contains exactly the literals that are in at least one of the listed data ranges. Requires at least two data ranges.
+
+            Example:
+            ```owl-fs
+            DataUnionOf(xsd:string xsd:integer)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Union_of_Data_Ranges)
+        "#}.to_string(),
+        "DataComplementOf" => indoc! {r#"
+            `DataComplementOf( dr )`
+
+            *Data range*
+
+            ---
+
+            Contains all literals of the data domain that are not in the given data range.
+
+            Example:
+            ```owl-fs
+            DataComplementOf(xsd:positiveInteger)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Complement_of_Data_Ranges)
+        "#}.to_string(),
+        "DataOneOf" => indoc! {r#"
+            `DataOneOf( lt1 ... ltn )`
+
+            *Data range*
+
+            ---
+
+            Contains exactly the listed literals.
+
+            Example:
+            ```owl-fs
+            DataOneOf("Peter" "1"^^xsd:integer)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Enumeration_of_Literals)
+        "#}.to_string(),
+        "DatatypeRestriction" => indoc! {r#"
+            `DatatypeRestriction( dt facet1 value1 ... facetn valuen )`
+
+            *Data range*
+
+            ---
+
+            Restricts a datatype by one or more pairs of a constraining facet and a restriction value. Facets are IRIs such as `xsd:minInclusive`, `xsd:maxExclusive`, `xsd:length`, `xsd:minLength`, `xsd:maxLength`, `xsd:pattern` and `rdf:langRange`.
+
+            Example:
+            ```owl-fs
+            DatatypeRestriction(xsd:integer
+                xsd:minInclusive "5"^^xsd:integer
+                xsd:maxExclusive "10"^^xsd:integer
+            )
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Datatype_Restrictions)
+        "#}.to_string(),
+
+        // ------------------------------------------------------------------
+        // Class expressions
+        // ------------------------------------------------------------------
+        "ObjectIntersectionOf" => indoc! {r#"
+            `ObjectIntersectionOf( ce1 ce2 ... cen )`
+
+            *Class expression*
+
+            ---
+
+            Contains the individuals that are instances of all of the listed class expressions. Requires at least two class expressions.
+
+            Example:
+            ```owl-fs
+            ObjectIntersectionOf(:Person :Female)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Intersection_of_Class_Expressions)
+        "#}.to_string(),
+        "ObjectUnionOf" => indoc! {r#"
+            `ObjectUnionOf( ce1 ce2 ... cen )`
+
+            *Class expression*
+
+            ---
+
+            Contains the individuals that are instances of at least one of the listed class expressions. Requires at least two class expressions.
+
+            Example:
+            ```owl-fs
+            ObjectUnionOf(:Man :Woman)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Union_of_Class_Expressions)
+        "#}.to_string(),
+        "ObjectComplementOf" => indoc! {r#"
+            `ObjectComplementOf( ce )`
+
+            *Class expression*
+
+            ---
+
+            Contains the individuals that are not instances of the given class expression.
+
+            Example:
+            ```owl-fs
+            ObjectComplementOf(:Man)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Complement_of_Class_Expressions)
+        "#}.to_string(),
+        "ObjectOneOf" => indoc! {r#"
+            `ObjectOneOf( a1 ... an )`
+
+            *Class expression*
+
+            ---
+
+            Contains exactly the listed individuals.
+
+            Example:
+            ```owl-fs
+            ObjectOneOf(:john :mary)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Enumeration_of_Individuals)
+        "#}.to_string(),
+        "ObjectSomeValuesFrom" => indoc! {r#"
+            `ObjectSomeValuesFrom( ope ce )`
+
+            *Class expression*
+
+            ---
+
+            The existential restriction contains the individuals that are connected by `ope` to at least one instance of `ce`.
+
+            Example:
+            ```owl-fs
+            SubClassOf(:Parent ObjectSomeValuesFrom(:hasChild :Person))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Existential_Quantification)
+        "#}.to_string(),
+        "ObjectAllValuesFrom" => indoc! {r#"
+            `ObjectAllValuesFrom( ope ce )`
+
+            *Class expression*
+
+            ---
+
+            The universal restriction contains the individuals that are connected by `ope` only to instances of `ce`.
+
+            Example:
+            ```owl-fs
+            SubClassOf(:VegetarianPizza
+                ObjectAllValuesFrom(:hasTopping
+                    ObjectUnionOf(:VegetableTopping :CheeseTopping)))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Universal_Quantification)
+        "#}.to_string(),
+        "ObjectHasValue" => indoc! {r#"
+            `ObjectHasValue( ope a )`
+
+            *Class expression*
+
+            ---
+
+            The has-value restriction contains the individuals that are connected by `ope` to the individual `a`.
+
+            Example:
+            ```owl-fs
+            SubClassOf(:Citizen ObjectHasValue(:livesIn :Germany))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Individual_Value_Restriction)
+        "#}.to_string(),
+        "ObjectHasSelf" => indoc! {r#"
+            `ObjectHasSelf( ope )`
+
+            *Class expression*
+
+            ---
+
+            The self-restriction contains the individuals that are connected by `ope` to themselves.
+
+            Example:
+            ```owl-fs
+            SubClassOf(:Narcissist ObjectHasSelf(:loves))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Self-Restriction)
+        "#}.to_string(),
+        "ObjectMinCardinality" => indoc! {r#"
+            `ObjectMinCardinality( n ope [ ce ] )`
+
+            *Class expression*
+
+            ---
+
+            Contains the individuals that are connected by `ope` to at least `n` different individuals (optionally restricted to instances of `ce`).
+
+            Example:
+            ```owl-fs
+            SubClassOf(:Parent ObjectMinCardinality(1 :hasChild :Person))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Minimum_Cardinality)
+        "#}.to_string(),
+        "ObjectMaxCardinality" => indoc! {r#"
+            `ObjectMaxCardinality( n ope [ ce ] )`
+
+            *Class expression*
+
+            ---
+
+            Contains the individuals that are connected by `ope` to at most `n` different individuals (optionally restricted to instances of `ce`).
+
+            Example:
+            ```owl-fs
+            SubClassOf(:Person ObjectMaxCardinality(2 :hasParent))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Maximum_Cardinality)
+        "#}.to_string(),
+        "ObjectExactCardinality" => indoc! {r#"
+            `ObjectExactCardinality( n ope [ ce ] )`
+
+            *Class expression*
+
+            ---
+
+            Contains the individuals that are connected by `ope` to exactly `n` different individuals (optionally restricted to instances of `ce`).
+
+            Example:
+            ```owl-fs
+            SubClassOf(:Person ObjectExactCardinality(2 :hasParent :Person))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Exact_Cardinality)
+        "#}.to_string(),
+        "DataSomeValuesFrom" => indoc! {r#"
+            `DataSomeValuesFrom( dpe1 ... dpen dr )`
+
+            *Class expression*
+
+            ---
+
+            The existential restriction contains the individuals that are connected by the data property to at least one literal in `dr`. Several data properties may be listed before the data range.
+
+            Example:
+            ```owl-fs
+            SubClassOf(:Adult
+                DataSomeValuesFrom(:hasAge
+                    DatatypeRestriction(xsd:integer xsd:minInclusive "18"^^xsd:integer)))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Existential_Quantification_2)
+        "#}.to_string(),
+        "DataAllValuesFrom" => indoc! {r#"
+            `DataAllValuesFrom( dpe1 ... dpen dr )`
+
+            *Class expression*
+
+            ---
+
+            The universal restriction contains the individuals that are connected by the data property only to literals in `dr`. Several data properties may be listed before the data range.
+
+            Example:
+            ```owl-fs
+            SubClassOf(:Adult DataAllValuesFrom(:hasAge xsd:integer))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Universal_Quantification_2)
+        "#}.to_string(),
+        "DataHasValue" => indoc! {r#"
+            `DataHasValue( dpe lt )`
+
+            *Class expression*
+
+            ---
+
+            The has-value restriction contains the individuals that are connected by the data property `dpe` to the literal `lt`.
+
+            Example:
+            ```owl-fs
+            SubClassOf(:Alices DataHasValue(:hasName "Alice"@en))
+            SubClassOf(:InitProcess DataHasValue(:hasPID "1"^^xsd:integer))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Literal_Value_Restriction)
+        "#}.to_string(),
+        "DataMinCardinality" => indoc! {r#"
+            `DataMinCardinality( n dpe [ dr ] )`
+
+            *Class expression*
+
+            ---
+
+            Contains the individuals that are connected by `dpe` to at least `n` different literals (optionally in `dr`).
+
+            Example:
+            ```owl-fs
+            SubClassOf(:Person DataMinCardinality(1 :hasName xsd:string))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Minimum_Cardinality_2)
+        "#}.to_string(),
+        "DataMaxCardinality" => indoc! {r#"
+            `DataMaxCardinality( n dpe [ dr ] )`
+
+            *Class expression*
+
+            ---
+
+            Contains the individuals that are connected by `dpe` to at most `n` different literals (optionally in `dr`).
+
+            Example:
+            ```owl-fs
+            SubClassOf(:Person DataMaxCardinality(1 :hasBirthDate xsd:dateTime))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Maximum_Cardinality_2)
+        "#}.to_string(),
+        "DataExactCardinality" => indoc! {r#"
+            `DataExactCardinality( n dpe [ dr ] )`
+
+            *Class expression*
+
+            ---
+
+            Contains the individuals that are connected by `dpe` to exactly `n` different literals (optionally in `dr`).
+
+            Example:
+            ```owl-fs
+            SubClassOf(:Person DataExactCardinality(1 :hasSSN xsd:string))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Exact_Cardinality_2)
+        "#}.to_string(),
+
+        // ------------------------------------------------------------------
+        // Class axioms
+        // ------------------------------------------------------------------
+        "SubClassOf" => indoc! {r#"
+            `SubClassOf( [ annotations ] sub super )`
+
+            *Axiom*
+
+            ---
+
+            States that every instance of the first class expression is also an instance of the second.
+
+            Example:
+            ```owl-fs
+            SubClassOf(:Child :Person)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Subclass_Axioms)
+        "#}.to_string(),
+        "EquivalentClasses" => indoc! {r#"
+            `EquivalentClasses( [ annotations ] ce1 ce2 ... cen )`
+
+            *Axiom*
+
+            ---
+
+            States that all listed class expressions have exactly the same instances. Requires at least two class expressions.
+
+            Example:
+            ```owl-fs
+            EquivalentClasses(:Child
+                ObjectIntersectionOf(:Person
+                    DataSomeValuesFrom(:hasAge
+                        DatatypeRestriction(xsd:integer xsd:maxExclusive "18"^^xsd:integer))))
+            EquivalentClasses(:Person :Human)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Equivalent_Classes)
+        "#}.to_string(),
+        "DisjointClasses" => indoc! {r#"
+            `DisjointClasses( [ annotations ] ce1 ce2 ... cen )`
+
+            *Axiom*
+
+            ---
+
+            States that the listed class expressions are pairwise disjoint, i.e. no individual is an instance of more than one of them. Requires at least two class expressions.
+
+            Example:
+            ```owl-fs
+            DisjointClasses(:Child :Adult)
+            DisjointClasses(:Person :Animal :Plant)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Classes)
+        "#}.to_string(),
+        "DisjointUnion" => indoc! {r#"
+            `DisjointUnion( [ annotations ] C ce1 ce2 ... cen )`
+
+            *Axiom*
+
+            ---
+
+            States that the class `C` is the union of the listed class expressions, and that these are pairwise disjoint. Requires at least two class expressions.
+
+            Example:
+            ```owl-fs
+            DisjointUnion(:Party :Person :PrivateCompany :PublicOrganization)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Union_of_Class_Expressions)
+        "#}.to_string(),
+
+        // ------------------------------------------------------------------
+        // Object property axioms
+        // ------------------------------------------------------------------
+        "SubObjectPropertyOf" => indoc! {r#"
+            `SubObjectPropertyOf( [ annotations ] sub super )`
+
+            *Axiom*
+
+            ---
+
+            States that the first object property expression (or property chain) is a subproperty of the second: if `x` is connected to `y` by the sub property, then `x` is also connected to `y` by the super property.
+
+            Example:
+            ```owl-fs
+            SubObjectPropertyOf(:hasDog :hasPet)
+            SubObjectPropertyOf(ObjectPropertyChain(:hasParent :hasParent) :hasGrandparent)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Object_Subproperties)
+        "#}.to_string(),
+        "ObjectPropertyChain" => indoc! {r#"
+            `ObjectPropertyChain( ope1 ope2 ... open )`
+
+            *Property expression chain*
+
+            ---
+
+            A sequence of object property expressions that can only be used as the first argument of `SubObjectPropertyOf`. If `x` is connected to `y` through the whole chain, then `x` is connected to `y` by the super property. Requires at least two object property expressions.
+
+            Example:
+            ```owl-fs
+            SubObjectPropertyOf(ObjectPropertyChain(:hasMother :hasSister) :hasAunt)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Object_Subproperties)
+        "#}.to_string(),
+        "EquivalentObjectProperties" => indoc! {r#"
+            `EquivalentObjectProperties( [ annotations ] ope1 ope2 ... open )`
+
+            *Axiom*
+
+            ---
+
+            States that all listed object property expressions connect exactly the same pairs of individuals. Requires at least two expressions.
+
+            Example:
+            ```owl-fs
+            EquivalentObjectProperties(:hasBrother :hasMaleSibling)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Equivalent_Object_Properties)
+        "#}.to_string(),
+        "DisjointObjectProperties" => indoc! {r#"
+            `DisjointObjectProperties( [ annotations ] ope1 ope2 ... open )`
+
+            *Axiom*
+
+            ---
+
+            States that the listed object property expressions are pairwise disjoint: no two individuals are connected by more than one of them. Requires at least two expressions.
+
+            Example:
+            ```owl-fs
+            DisjointObjectProperties(:hasFather :hasMother)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Object_Properties)
+        "#}.to_string(),
+        "InverseObjectProperties" => indoc! {r#"
+            `InverseObjectProperties( [ annotations ] ope1 ope2 )`
+
+            *Axiom*
+
+            ---
+
+            States that two object property expressions are inverses of each other.
+
+            Example:
+            ```owl-fs
+            InverseObjectProperties(:hasParent :isParentOf)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Inverse_Object_Properties_2)
+        "#}.to_string(),
+        "ObjectPropertyDomain" => indoc! {r#"
+            `ObjectPropertyDomain( [ annotations ] ope ce )`
+
+            *Axiom*
+
+            ---
+
+            States that every individual that has an outgoing connection via the object property expression is an instance of the given class expression.
+
+            Example:
+            ```owl-fs
+            ObjectPropertyDomain(:hasParent :Person)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Object_Property_Domain)
+        "#}.to_string(),
+        "ObjectPropertyRange" => indoc! {r#"
+            `ObjectPropertyRange( [ annotations ] ope ce )`
+
+            *Axiom*
+
+            ---
+
+            States that every individual that is the target of a connection via the object property expression is an instance of the given class expression.
+
+            Example:
+            ```owl-fs
+            ObjectPropertyRange(:hasParent :Person)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Object_Property_Range)
+        "#}.to_string(),
+        "FunctionalObjectProperty" => indoc! {r#"
+            `FunctionalObjectProperty( [ annotations ] ope )`
+
+            *Axiom*
+
+            ---
+
+            States that each individual can be connected by the object property expression to at most one distinct individual.
+
+            Example:
+            ```owl-fs
+            FunctionalObjectProperty(:hasFather)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Functional_Object_Properties)
+        "#}.to_string(),
+        "InverseFunctionalObjectProperty" => indoc! {r#"
+            `InverseFunctionalObjectProperty( [ annotations ] ope )`
+
+            *Axiom*
+
+            ---
+
+            States that for each individual `x` there is at most one individual `y` that is connected to `x` by the object property expression.
+
+            Example:
+            ```owl-fs
+            InverseFunctionalObjectProperty(:fatherOf)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Inverse-Functional_Object_Properties)
+        "#}.to_string(),
+        "ReflexiveObjectProperty" => indoc! {r#"
+            `ReflexiveObjectProperty( [ annotations ] ope )`
+
+            *Axiom*
+
+            ---
+
+            States that the object property expression connects each individual to itself.
+
+            Example:
+            ```owl-fs
+            ReflexiveObjectProperty(:knows)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Reflexive_Object_Properties)
+        "#}.to_string(),
+        "IrreflexiveObjectProperty" => indoc! {r#"
+            `IrreflexiveObjectProperty( [ annotations ] ope )`
+
+            *Axiom*
+
+            ---
+
+            States that the object property expression does not connect any individual to itself.
+
+            Example:
+            ```owl-fs
+            IrreflexiveObjectProperty(:marriedTo)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Irreflexive_Object_Properties)
+        "#}.to_string(),
+        "SymmetricObjectProperty" => indoc! {r#"
+            `SymmetricObjectProperty( [ annotations ] ope )`
+
+            *Axiom*
+
+            ---
+
+            States that if `x` is connected to `y` by the object property expression, then `y` is also connected to `x`.
+
+            Example:
+            ```owl-fs
+            SymmetricObjectProperty(:isSiblingOf)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Symmetric_Object_Properties)
+        "#}.to_string(),
+        "AsymmetricObjectProperty" => indoc! {r#"
+            `AsymmetricObjectProperty( [ annotations ] ope )`
+
+            *Axiom*
+
+            ---
+
+            States that if `x` is connected to `y` by the object property expression, then `y` cannot be connected to `x`.
+
+            Example:
+            ```owl-fs
+            AsymmetricObjectProperty(:isParentOf)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Asymmetric_Object_Properties)
+        "#}.to_string(),
+        "TransitiveObjectProperty" => indoc! {r#"
+            `TransitiveObjectProperty( [ annotations ] ope )`
+
+            *Axiom*
+
+            ---
+
+            States that if `x` is connected to `y` and `y` is connected to `z` by the object property expression, then `x` is also connected to `z`.
+
+            Example:
+            ```owl-fs
+            TransitiveObjectProperty(:isAncestorOf)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Transitive_Object_Properties)
+        "#}.to_string(),
+
+        // ------------------------------------------------------------------
+        // Data property axioms
+        // ------------------------------------------------------------------
+        "SubDataPropertyOf" => indoc! {r#"
+            `SubDataPropertyOf( [ annotations ] sub super )`
+
+            *Axiom*
+
+            ---
+
+            States that the first data property is a subproperty of the second: if `x` is connected to literal `l` by the sub property, then `x` is also connected to `l` by the super property.
+
+            Example:
+            ```owl-fs
+            SubDataPropertyOf(:hasLastName :hasName)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Data_Subproperties)
+        "#}.to_string(),
+        "EquivalentDataProperties" => indoc! {r#"
+            `EquivalentDataProperties( [ annotations ] dpe1 dpe2 ... dpen )`
+
+            *Axiom*
+
+            ---
+
+            States that all listed data properties connect exactly the same individuals to the same literals. Requires at least two properties.
+
+            Example:
+            ```owl-fs
+            EquivalentDataProperties(:hasSurname :hasFamilyName)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Equivalent_Data_Properties)
+        "#}.to_string(),
+        "DisjointDataProperties" => indoc! {r#"
+            `DisjointDataProperties( [ annotations ] dpe1 dpe2 ... dpen )`
+
+            *Axiom*
+
+            ---
+
+            States that the listed data properties are pairwise disjoint: no individual is connected to the same literal by more than one of them. Requires at least two properties.
+
+            Example:
+            ```owl-fs
+            DisjointDataProperties(:hasName :hasAddress)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Disjoint_Data_Properties)
+        "#}.to_string(),
+        "DataPropertyDomain" => indoc! {r#"
+            `DataPropertyDomain( [ annotations ] dpe ce )`
+
+            *Axiom*
+
+            ---
+
+            States that every individual that has an outgoing connection via the data property is an instance of the given class expression. Note that the domain of a data property is a class expression, not a data range.
+
+            Example:
+            ```owl-fs
+            DataPropertyDomain(:hasAge :Person)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Data_Property_Domain)
+        "#}.to_string(),
+        "DataPropertyRange" => indoc! {r#"
+            `DataPropertyRange( [ annotations ] dpe dr )`
+
+            *Axiom*
+
+            ---
+
+            States that all literals that are the target of the data property are in the given data range.
+
+            Example:
+            ```owl-fs
+            DataPropertyRange(:hasAge
+                DatatypeRestriction(xsd:integer xsd:minInclusive "0"^^xsd:integer))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Data_Property_Range)
+        "#}.to_string(),
+        "FunctionalDataProperty" => indoc! {r#"
+            `FunctionalDataProperty( [ annotations ] dpe )`
+
+            *Axiom*
+
+            ---
+
+            States that each individual can be connected by the data property to at most one distinct literal.
+
+            Example:
+            ```owl-fs
+            FunctionalDataProperty(:hasAge)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Functional_Data_Properties)
+        "#}.to_string(),
+
+        // ------------------------------------------------------------------
+        // Datatype definitions, keys
+        // ------------------------------------------------------------------
+        "DatatypeDefinition" => indoc! {r#"
+            `DatatypeDefinition( [ annotations ] dt dr )`
+
+            *Axiom*
+
+            ---
+
+            Defines the datatype `dt` as being equivalent to the data range `dr`.
+
+            Example:
+            ```owl-fs
+            DatatypeDefinition(:SSN
+                DatatypeRestriction(xsd:string xsd:pattern "[0-9]{3}-[0-9]{2}-[0-9]{4}"))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Datatype_Definitions)
+        "#}.to_string(),
+        "HasKey" => indoc! {r#"
+            `HasKey( [ annotations ] ce ( ope1 ... open ) ( dpe1 ... dpen ) )`
+
+            *Axiom*
+
+            ---
+
+            States that each named instance of the class expression is uniquely identified by the combination of values of the listed properties. The properties are given as two parenthesized lists: first object property expressions, then data properties.
+
+            Example:
+            ```owl-fs
+            HasKey(:Person () (:hasSSN))
+            HasKey(:Country (:hasCapital) (:hasIsoCode))
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Keys)
+        "#}.to_string(),
+
+        // ------------------------------------------------------------------
+        // Assertions
+        // ------------------------------------------------------------------
+        "SameIndividual" => indoc! {r#"
+            `SameIndividual( [ annotations ] a1 a2 ... an )`
+
+            *Axiom*
+
+            ---
+
+            States that all listed individuals are the same entity. Requires at least two individuals.
+
+            Example:
+            ```owl-fs
+            SameIndividual(:john :john_doe :j_doe)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Individual_Equality)
+        "#}.to_string(),
+        "DifferentIndividuals" => indoc! {r#"
+            `DifferentIndividuals( [ annotations ] a1 a2 ... an )`
+
+            *Axiom*
+
+            ---
+
+            States that the listed individuals are pairwise distinct. This axiom can be used to axiomatize the unique name assumption. Requires at least two individuals.
+
+            Example:
+            ```owl-fs
+            DifferentIndividuals(:john :jane :jack)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Individual_Inequality)
+        "#}.to_string(),
+        "ClassAssertion" => indoc! {r#"
+            `ClassAssertion( [ annotations ] ce a )`
+
+            *Axiom*
+
+            ---
+
+            States that the individual `a` is an instance of the class expression `ce`.
+
+            Example:
+            ```owl-fs
+            ClassAssertion(:Person :john)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Class_Assertions)
+        "#}.to_string(),
+        "ObjectPropertyAssertion" => indoc! {r#"
+            `ObjectPropertyAssertion( [ annotations ] ope source target )`
+
+            *Axiom*
+
+            ---
+
+            States that the source individual is connected to the target individual by the object property expression.
+
+            Example:
+            ```owl-fs
+            ObjectPropertyAssertion(:hasMother :john :mary)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Positive_Object_Property_Assertions)
+        "#}.to_string(),
+        "NegativeObjectPropertyAssertion" => indoc! {r#"
+            `NegativeObjectPropertyAssertion( [ annotations ] ope source target )`
+
+            *Axiom*
+
+            ---
+
+            States that the source individual is **not** connected to the target individual by the object property expression.
+
+            Example:
+            ```owl-fs
+            NegativeObjectPropertyAssertion(:hasSon :peter :chris)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Negative_Object_Property_Assertions)
+        "#}.to_string(),
+        "DataPropertyAssertion" => indoc! {r#"
+            `DataPropertyAssertion( [ annotations ] dpe source value )`
+
+            *Axiom*
+
+            ---
+
+            States that the source individual is connected to the literal `value` by the data property.
+
+            Example:
+            ```owl-fs
+            DataPropertyAssertion(:hasAge :john "25"^^xsd:integer)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Positive_Data_Property_Assertions)
+        "#}.to_string(),
+        "NegativeDataPropertyAssertion" => indoc! {r#"
+            `NegativeDataPropertyAssertion( [ annotations ] dpe source value )`
+
+            *Axiom*
+
+            ---
+
+            States that the source individual is **not** connected to the literal `value` by the data property.
+
+            Example:
+            ```owl-fs
+            NegativeDataPropertyAssertion(:hasAge :john "53"^^xsd:integer)
+            ```
+
+            [Specification](https://www.w3.org/TR/owl2-syntax/#Negative_Data_Property_Assertions)
+        "#}.to_string(),
+
+        _ => String::new(),
+    }
 }
 
 pub fn child_keywords_for_kind(kind: &str) -> &[(&'static str, &'static str)] {
